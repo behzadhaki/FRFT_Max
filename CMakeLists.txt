@@ -63,78 +63,52 @@ set(COMMON_INCLUDES
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
 # ------------------------------------------------------------------------------
-# Encoder Target
+# Model Path
 # ------------------------------------------------------------------------------
-set(FRFTIN frftin)
-add_library(${FRFTIN} MODULE ${SRC_DIR}/frftin.cpp)
-target_include_directories(${FRFTIN} PRIVATE ${COMMON_INCLUDES})
-target_link_libraries(${FRFTIN} "${TORCH_LIBRARIES}")
-set_target_properties(${FRFTIN} PROPERTIES
+set(MODEL_SOURCE "${CMAKE_SOURCE_DIR}/models/frft_continuous.ts")
+set(MODEL_FILENAME "frft_continuous.ts")
+
+# ------------------------------------------------------------------------------
+# FRFT Target
+# ------------------------------------------------------------------------------
+set(FRFT frft)
+add_library(${FRFT} MODULE ${SRC_DIR}/frft.cpp)
+target_include_directories(${FRFT} PRIVATE ${COMMON_INCLUDES})
+target_link_libraries(${FRFT} "${TORCH_LIBRARIES}")
+
+# Define the model filename for C++ code
+target_compile_definitions(${FRFT} PRIVATE
+        FRFT_MODEL_FILENAME="${MODEL_FILENAME}"
+)
+
+set_target_properties(${FRFT} PROPERTIES
         LINK_FLAGS "-undefined dynamic_lookup"
         BUNDLE TRUE
         BUNDLE_EXTENSION mxo
-        OUTPUT_NAME ${FRFTIN}
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${FRFTIN}.mxo/Contents/MacOS
+        OUTPUT_NAME ${FRFT}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${FRFT}.mxo/Contents/MacOS
         INSTALL_RPATH "@loader_path"
 )
 configure_file(
         ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
-        ${CMAKE_BINARY_DIR}/${FRFTIN}.mxo/Contents/Info.plist
+        ${CMAKE_BINARY_DIR}/${FRFT}.mxo/Contents/Info.plist
         @ONLY
 )
-bundle_torch_libs(${FRFTIN})
+bundle_torch_libs(${FRFT})
 
-# Rename Encoder to frftin~.mxo
-add_custom_command(TARGET ${FRFTIN}
+# Copy model file into .mxo/Contents/MacOS (same location as torch dylibs)
+add_custom_command(TARGET ${FRFT}
         POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${FRFTIN}.mxo"
-        "${CMAKE_BINARY_DIR}/${FRFTIN}~.mxo"
-        COMMAND ${CMAKE_COMMAND} -E remove_directory
-        "${CMAKE_BINARY_DIR}/${FRFTIN}.mxo"
-        COMMENT "Renaming ${FRFTIN}.mxo → ${FRFTIN}~.mxo"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${MODEL_SOURCE}"
+        "${CMAKE_BINARY_DIR}/${FRFT}.mxo/Contents/MacOS/${MODEL_FILENAME}"
+        COMMENT "📦 Copied model file into ${FRFT}.mxo/Contents/MacOS"
 )
 
 # ------------------------------------------------------------------------------
-# Decoder Target
+# Install .mxo Bundle (Optional)
 # ------------------------------------------------------------------------------
-set(FRFTOUT frftout)
-add_library(${FRFTOUT} MODULE ${SRC_DIR}/frftout.cpp)
-target_include_directories(${FRFTOUT} PRIVATE ${COMMON_INCLUDES})
-target_link_libraries(${FRFTOUT} "${TORCH_LIBRARIES}")
-set_target_properties(${FRFTOUT} PROPERTIES
-        LINK_FLAGS "-undefined dynamic_lookup"
-        BUNDLE TRUE
-        BUNDLE_EXTENSION mxo
-        OUTPUT_NAME ${FRFTOUT}
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${FRFTOUT}.mxo/Contents/MacOS
-        INSTALL_RPATH "@loader_path"
-)
-configure_file(
-        ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
-        ${CMAKE_BINARY_DIR}/${FRFTOUT}.mxo/Contents/Info.plist
-        @ONLY
-)
-bundle_torch_libs(${FRFTOUT})
-
-# Rename Decoder to frftout~.mxo
-add_custom_command(TARGET ${FRFTOUT}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${FRFTOUT}.mxo"
-        "${CMAKE_BINARY_DIR}/${FRFTOUT}~.mxo"
-        COMMAND ${CMAKE_COMMAND} -E remove_directory
-        "${CMAKE_BINARY_DIR}/${FRFTOUT}.mxo"
-        COMMENT "Renaming ${FRFTOUT}.mxo → ${FRFTOUT}~.mxo"
-)
-
-# ------------------------------------------------------------------------------
-# Install Renamed .mxo Bundles (Optional)
-# ------------------------------------------------------------------------------
-install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFTIN}~.mxo"
-        DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-)
-install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFTOUT}~.mxo"
+install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFT}.mxo"
         DESTINATION "${CMAKE_SOURCE_DIR}/externals"
 )
 
@@ -142,7 +116,7 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFTOUT}~.mxo"
 # Group Target
 # ------------------------------------------------------------------------------
 add_custom_target(FRFTAll
-        DEPENDS ${FRFTIN} ${FRFTOUT}
+        DEPENDS ${FRFT}
 )
 
 # ------------------------------------------------------------------------------
@@ -150,22 +124,11 @@ add_custom_target(FRFTAll
 # ------------------------------------------------------------------------------
 set(MAX_PACKAGE_PATH "$ENV{HOME}/Documents/Max 9/Packages/FRFT/externals")
 
-# Copy frftin~ to Max Packages
-add_custom_command(TARGET ${FRFTIN} POST_BUILD
+# Copy frft to Max Packages
+add_custom_command(TARGET ${FRFT} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${MAX_PACKAGE_PATH}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${FRFTIN}~.mxo"
-        "${MAX_PACKAGE_PATH}/${FRFTIN}~.mxo"
-        COMMENT "✅ Copied ${FRFTIN}~.mxo to Max Packages folder"
+        "${CMAKE_BINARY_DIR}/${FRFT}.mxo"
+        "${MAX_PACKAGE_PATH}/${FRFT}.mxo"
+        COMMENT "✅ Copied ${FRFT}.mxo to Max Packages folder"
 )
-
-# Copy frftout~ to Max Packages
-add_custom_command(TARGET ${FRFTOUT} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${MAX_PACKAGE_PATH}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${FRFTOUT}~.mxo"
-        "${MAX_PACKAGE_PATH}/${FRFTOUT}~.mxo"
-        COMMENT "✅ Copied ${FRFTOUT}~.mxo to Max Packages folder"
-)
-
-
