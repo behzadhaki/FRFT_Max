@@ -12,18 +12,29 @@ public:
 
     inlet<> real_in{this, "(signal) real part input", "signal"};
     inlet<> imag_in{this, "(signal) imaginary part input", "signal"};
-    inlet<> alpha_in{this, "(signal) alpha parameter", "signal"};
+    inlet<> alpha_msg_in{this, "(float) alpha parameter"};  // Message inlet for alpha
 
     outlet<> real_out{this, "(signal) real part output", "signal"};
     outlet<> imag_out{this, "(signal) imaginary part output", "signal"};
 
-    attribute<number> alpha{this, "alpha", 0.0,
-        description{"Default alpha parameter when not receiving signal"}
+    attribute<number> alpha{this, "alpha", 0.5,
+        description{"Alpha parameter for FRFT"}
     };
 
     frft() {
         cout << "FRFT external initialized. Use 'modelpath <path>' to load model." << endl;
     }
+
+    // Handle float messages on the alpha inlet
+    message<> float_input{this, "float", "Set alpha parameter",
+        MIN_FUNCTION {
+            if (args.size() > 0) {
+                alpha = args[0];
+                cout << "Alpha set to: " << double(alpha) << endl;
+            }
+            return {};
+        }
+    };
 
     message<> modelpath{this, "modelpath", "Load model from absolute path", MIN_FUNCTION {
         if (args.empty()) {
@@ -66,7 +77,6 @@ public:
     void operator()(audio_bundle input, audio_bundle output) {
         auto in_real = input.samples(0);
         auto in_imag = input.samples(1);
-        auto in_alpha = input.samples(2);
         auto out_real = output.samples(0);
         auto out_imag = output.samples(1);
 
@@ -114,11 +124,8 @@ public:
                 torch::kFloat32
             ).clone();
 
-            // Get alpha parameter (use first sample of alpha input, or attribute if not connected)
-            float alpha_param = static_cast<float>(in_alpha[0]);
-            if (alpha_param == 0.0) {
-                alpha_param = static_cast<float>(alpha);
-            }
+            // Use the alpha attribute (set via the message inlet)
+            float alpha_param = static_cast<float>(alpha);
 
             // Run inference
             std::vector<torch::jit::IValue> inputs;
