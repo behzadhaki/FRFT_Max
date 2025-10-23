@@ -13,4 +13,13 @@
 ### Post Build Verification
 
     chmod +x verification.sh
+    
+
+    # Verify all .mxo bundles in the directory
     ./verification.sh
+    
+    # Verify a specific bundle
+    ./verification.sh frft.mxo
+    
+    # Enable Gatekeeper check (for distribution on macOS)
+    CHECK_GATEKEEPER=1 ./verification.sh
