@@ -30,7 +30,6 @@ public:
         MIN_FUNCTION {
             if (args.size() > 0) {
                 alpha = args[0];
-                cout << "Alpha set to: " << double(alpha) << endl;
             }
             return {};
         }
