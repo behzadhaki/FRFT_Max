@@ -37,6 +37,8 @@ public:
         , needsFullRedraw(true)
         , lastRenderFrame(0)
         , lastUpdateTime(std::chrono::steady_clock::now())
+        , autoMin(0.0)
+        , autoMax(100.0)
     {
         // Initialize with default frame count
         SignalInspectorData.resize(200);
@@ -68,6 +70,11 @@ public:
         description{"Show only lower half of spectrum (DC to Nyquist)"}
     };
 
+    attribute<bool> autorange {
+        this, "autorange", true,
+        description{"Automatically adjust color range based on data min/max"}
+    };
+
     attribute<number> minValue { this, "minval", 0.0, description{"Minimum value (linear)"} };
     attribute<number> maxValue { this, "maxval", 100.0, description{"Maximum value (linear)"} };
 
@@ -88,6 +95,8 @@ public:
         int maxFrames = static_cast<int>(frames);
         SignalInspectorData.resize(maxFrames);
         needsFullRedraw = true;
+        autoMin = 0.0;
+        autoMax = 100.0;
         return {};
     }};
 
@@ -126,6 +135,10 @@ private:
     bool needsFullRedraw;
     int lastRenderFrame;
 
+    // Auto-range values
+    double autoMin;
+    double autoMax;
+
     // Timing for decimation
     std::chrono::steady_clock::time_point lastUpdateTime;
     std::chrono::milliseconds updateInterval{50}; // 20 Hz default
@@ -134,6 +147,12 @@ private:
     timer<> updateTimer { this, MIN_FUNCTION {
         commitFrame();
         currentFrame.store(writeFrame.load());
+
+        // Update auto-range if enabled
+        if (static_cast<bool>(autorange)) {
+            updateAutoRange();
+        }
+
         redraw();
 
         // Re-schedule based on current updateratehz
@@ -163,12 +182,52 @@ private:
         int maxFrames = static_cast<int>(frames);
         SignalInspectorData.resize(maxFrames);
         needsFullRedraw = true;
+        autoMin = 0.0;
+        autoMax = 100.0;
 
         // Start the timer
         double rate = static_cast<double>(updateratehz);
         updateTimer.delay(1000.0 / rate);
         return {};
     }};
+
+    void updateAutoRange() {
+        int current = writeFrame.load();
+        if (current == 0) return;
+
+        // Look at up to 1000 most recent frames
+        int framesToAnalyze = std::min(1000, current);
+        int startFrame = std::max(0, current - framesToAnalyze);
+
+        double minVal = std::numeric_limits<double>::max();
+        double maxVal = std::numeric_limits<double>::lowest();
+
+        for (int f = startFrame; f < current && f < static_cast<int>(SignalInspectorData.size()); ++f) {
+            const auto& frame = SignalInspectorData[f];
+            if (frame.empty()) continue;
+
+            for (const auto& val : frame) {
+                if (std::isfinite(val)) {
+                    minVal = std::min(minVal, val);
+                    maxVal = std::max(maxVal, val);
+                }
+            }
+        }
+
+        // Only update if we found valid values
+        if (minVal != std::numeric_limits<double>::max() &&
+            maxVal != std::numeric_limits<double>::lowest()) {
+
+            // Add a small margin to avoid division by zero and provide headroom
+            double range = maxVal - minVal;
+            if (range < 1e-6) {
+                range = 1.0;
+            }
+
+            autoMin = minVal - range * 0.05;
+            autoMax = maxVal + range * 0.05;
+        }
+    }
 
     void commitFrame() {
         if (accumulatedFrame.empty()) return;
@@ -228,9 +287,12 @@ private:
     }
 
     color interpolateColor(double value) {
+        // Use auto-range values if enabled, otherwise use manual values
+        double minVal = static_cast<bool>(autorange) ? autoMin : static_cast<double>(minValue);
+        double maxVal = static_cast<bool>(autorange) ? autoMax : static_cast<double>(maxValue);
+
         // Normalize value
-        double normVal = (value - static_cast<double>(minValue)) /
-                         (static_cast<double>(maxValue) - static_cast<double>(minValue));
+        double normVal = (value - minVal) / (maxVal - minVal);
         normVal = std::clamp(normVal, 0.0, 1.0);
 
         // Get actual color values from attributes
