@@ -1,4 +1,4 @@
-// SignalInspector.cpp - Efficient STFT visualizer with smart decimation
+// SignalInspector.cpp - Efficient STFT visualizer with threaded queue-based frame processing
 
 #ifdef _WIN32
 #include <windows.h>
@@ -11,13 +11,72 @@
 #include <cmath>
 #include <atomic>
 #include <chrono>
+#include <thread>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 
 using namespace c74::min;
 using namespace c74::min::ui;
 
+// -----------------------------------------------------------------------------
+// Thread-safe queue with proper shutdown support
+// -----------------------------------------------------------------------------
+template <typename T>
+class tsqueue {
+public:
+    void enqueue(T v) {
+        std::lock_guard<std::mutex> lock(m_);
+        if (shutdown_) return; // Don't accept new items during shutdown
+        q_.emplace_back(std::move(v));
+        cv_.notify_one();
+    }
+
+    bool try_dequeue(T& out) {
+        std::lock_guard<std::mutex> lock(m_);
+        if (q_.empty()) return false;
+        out = std::move(q_.front());
+        q_.pop_front();
+        return true;
+    }
+
+    bool wait_dequeue(T& out, std::chrono::milliseconds timeout = std::chrono::milliseconds(100)) {
+        std::unique_lock<std::mutex> lock(m_);
+        if (cv_.wait_for(lock, timeout, [this] { return !q_.empty() || shutdown_; })) {
+            if (shutdown_ && q_.empty()) return false;
+            out = std::move(q_.front());
+            q_.pop_front();
+            return true;
+        }
+        return false;
+    }
+
+    void wake_all() {
+        std::lock_guard<std::mutex> lock(m_);
+        shutdown_ = true;
+        cv_.notify_all();
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(m_);
+        q_.clear();
+    }
+
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(m_);
+        return q_.size();
+    }
+
+private:
+    mutable std::mutex m_;
+    std::deque<T> q_;
+    std::condition_variable cv_;
+    std::atomic<bool> shutdown_{false};
+};
+
 class SignalInspector : public object<SignalInspector>, public ui_operator<400, 300>, public vector_operator<> {
 public:
-    MIN_DESCRIPTION { "Efficient STFT SignalInspector visualizer with smart temporal decimation" };
+    MIN_DESCRIPTION { "Efficient STFT SignalInspector visualizer with threaded queue-based processing" };
     MIN_TAGS        { "ui, graphics, SignalInspector, visualization, msp, fft" };
     MIN_AUTHOR      { "Custom" };
 
@@ -36,7 +95,6 @@ public:
         , displayBins(0)
         , needsFullRedraw(true)
         , lastRenderFrame(0)
-        , lastUpdateTime(std::chrono::steady_clock::now())
         , autoMin(0.0)
         , autoMax(100.0)
         , autoPercentile5(0.0)
@@ -46,13 +104,19 @@ public:
         , isDraggingBottom(false)
         , lastBinRangeMin(0.0)
         , lastBinRangeMax(0.5)
+        , plotThreadRunning(false)
     {
         // Initialize with default frame count
         SignalInspectorData.resize(200);
+
+        // Start the plotting thread
+        startPlotThread();
     }
 
     ~SignalInspector() {
-        updateTimer.stop();
+        // Stop the plotting thread first
+        stopPlotThread();
+
         if (SignalInspectorSurface) {
             jgraphics_surface_destroy(SignalInspectorSurface);
             SignalInspectorSurface = nullptr;
@@ -121,13 +185,16 @@ public:
 
     // Clear the SignalInspector
     message<> clear { this, "clear", MIN_FUNCTION {
+        // Clear the queue
+        frameQueue.clear();
+
+        std::lock_guard<std::mutex> lock(dataMutex);
         writeFrame.store(0);
         currentFrame.store(0);
         lastRenderFrame = 0;
         numBins = 0;
         displayBins = 0;
         SignalInspectorData.clear();
-        accumulatedFrame.clear();
         int maxFrames = static_cast<int>(frames);
         SignalInspectorData.resize(maxFrames);
         needsFullRedraw = true;
@@ -136,19 +203,21 @@ public:
         return {};
     }};
 
-    // Vector operator perform method - accumulates STFT frames
+    // Vector operator perform method - pushes frames to queue
     void operator()(audio_bundle input, audio_bundle output) {
         // Get the input vector size
         auto in_vec = input.samples(0);
         int vecsize = static_cast<int>(input.frame_count());
 
-        // Store the most recent frame (overwriting previous accumulated frame)
-        // This ensures we always have the latest data when it's time to commit
-        accumulatedFrame.clear();
-        accumulatedFrame.reserve(vecsize);
+        // Create a frame vector and push to queue
+        std::vector<double> frame;
+        frame.reserve(vecsize);
         for (int i = 0; i < vecsize; ++i) {
-            accumulatedFrame.push_back(static_cast<double>(in_vec[i]));
+            frame.push_back(static_cast<double>(in_vec[i]));
         }
+
+        // Push to queue for processing by plot thread
+        frameQueue.enqueue(std::move(frame));
 
         // Update bin count if changed
         if (numBins != vecsize) {
@@ -161,13 +230,13 @@ public:
 private:
     // Data storage
     std::vector<std::vector<double>> SignalInspectorData;
-    std::vector<double> accumulatedFrame;  // Most recent STFT frame
+    std::mutex dataMutex;  // Protects SignalInspectorData
     c74::max::t_jsurface* SignalInspectorSurface;
     int surfaceWidth, surfaceHeight;
     std::atomic<int> currentFrame;  // For rendering
     std::atomic<int> writeFrame;    // For writing new data
     int numBins;        // Total bins from input
-    int displayBins;    // Bins to actually display (half if showhalfspectrum)
+    int displayBins;    // Bins to actually display
     bool needsFullRedraw;
     int lastRenderFrame;
 
@@ -186,252 +255,178 @@ private:
     static constexpr int sliderWidth = 20;
     static constexpr int sliderMargin = 5;
 
-    // Timing for decimation
-    std::chrono::steady_clock::time_point lastUpdateTime;
-    std::chrono::milliseconds updateInterval{50}; // 20 Hz default
+    // Queue for incoming frames
+    tsqueue<std::vector<double>> frameQueue;
 
-    // Timer for automatic updates
-    timer<> updateTimer { this, MIN_FUNCTION {
-        // Check if bin range attributes changed (from inspector or messages)
-        double currentMin = static_cast<double>(binrangemin);
-        double currentMax = static_cast<double>(binrangemax);
+    // Plotting thread
+    std::thread plotThread;
+    std::atomic<bool> plotThreadRunning;
 
-        if (currentMin != lastBinRangeMin || currentMax != lastBinRangeMax) {
-            updateDisplayBins();
-            lastBinRangeMin = currentMin;
-            lastBinRangeMax = currentMax;
+    // Start the plotting thread
+    void startPlotThread() {
+        plotThreadRunning = true;
+        plotThread = std::thread([this]() {
+            this->plotThreadLoop();
+        });
+    }
+
+    // Stop the plotting thread
+    void stopPlotThread() {
+        plotThreadRunning = false;
+        frameQueue.wake_all();
+        if (plotThread.joinable()) {
+            plotThread.join();
         }
+    }
 
-        commitFrame();
-        currentFrame.store(writeFrame.load());
+    // Main plotting thread loop
+    void plotThreadLoop() {
+        while (plotThreadRunning) {
+            // Calculate wait time based on frame rate
+            double rate = static_cast<double>(updateratehz);
+            std::chrono::milliseconds waitTime(static_cast<int>(1000.0 / rate));
 
-        // Update auto-range if enabled
-        if (static_cast<bool>(autorange)) {
-            updateAutoRange();
+            // Wait for the frame interval
+            std::this_thread::sleep_for(waitTime);
+
+            // Process all queued frames
+            bool processedAny = false;
+            std::vector<double> frame;
+
+            while (frameQueue.try_dequeue(frame)) {
+                commitFrame(frame);
+                processedAny = true;
+            }
+
+            // If we processed any frames, update the display
+            if (processedAny) {
+                currentFrame.store(writeFrame.load());
+
+                // Check if bin range attributes changed
+                double currentMin = static_cast<double>(binrangemin);
+                double currentMax = static_cast<double>(binrangemax);
+
+                if (currentMin != lastBinRangeMin || currentMax != lastBinRangeMax) {
+                    updateDisplayBins();
+                    lastBinRangeMin = currentMin;
+                    lastBinRangeMax = currentMax;
+                }
+
+                // Update auto-range if enabled
+                if (static_cast<bool>(autorange)) {
+                    updateAutoRange();
+                }
+
+                // Trigger redraw
+                redraw();
+            }
         }
+    }
 
-        redraw();
+    // Commit a frame to the SignalInspector data
+    void commitFrame(const std::vector<double>& frame) {
+        if (frame.empty()) return;
 
-        // Re-schedule based on current updateratehz
-        double rate = static_cast<double>(updateratehz);
-        updateTimer.delay(1000.0 / rate);
-
-        return {};
-    }};
-
-    // Message called after object construction to start the timer
-    message<> start { this, "start", MIN_FUNCTION {
-        double rate = static_cast<double>(updateratehz);
-        updateTimer.delay(1000.0 / rate);
-        return {};
-    }};
-
-    // Loadbang to start timer automatically and clear any stale data
-    message<> loadbang { this, "loadbang", MIN_FUNCTION {
-        // Clear any previous state
-        writeFrame.store(0);
-        currentFrame.store(0);
-        lastRenderFrame = 0;
-        numBins = 0;
-        displayBins = 0;
-        SignalInspectorData.clear();
-        accumulatedFrame.clear();
         int maxFrames = static_cast<int>(frames);
-        SignalInspectorData.resize(maxFrames);
-        needsFullRedraw = true;
-        autoMin = 0.0;
-        autoMax = 100.0;
+        int wf = writeFrame.load();
 
-        // Start the timer
-        double rate = static_cast<double>(updateratehz);
-        updateTimer.delay(1000.0 / rate);
-        return {};
-    }};
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+
+            // Ensure we have space in SignalInspectorData
+            if (SignalInspectorData.empty() || SignalInspectorData.size() != static_cast<size_t>(maxFrames)) {
+                SignalInspectorData.resize(maxFrames);
+            }
+
+            // Store the frame data
+            SignalInspectorData[wf] = frame;
+        }
+
+        // Increment write frame with wrapping (done outside mutex in atomic operation)
+        writeFrame.store((wf + 1) % maxFrames);
+    }
 
     void updateDisplayBins() {
         if (numBins == 0) return;
 
-        // Convert ratios to bin indices
         double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
         double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
 
-        // Ensure min <= max
-        if (minRatio > maxRatio) {
-            std::swap(minRatio, maxRatio);
-        }
+        int startBin = static_cast<int>(minRatio * numBins);
+        int endBin = static_cast<int>(maxRatio * numBins);
 
-        int minBin = static_cast<int>(minRatio * (numBins - 1));
-        int maxBin = static_cast<int>(maxRatio * (numBins - 1));
+        startBin = std::clamp(startBin, 0, numBins - 1);
+        endBin = std::clamp(endBin, startBin + 1, numBins);
 
-        // Ensure at least 1 bin
-        if (minBin == maxBin) {
-            if (maxBin < numBins - 1) {
-                maxBin++;
-            } else {
-                minBin--;
-            }
-        }
-
-        displayBins = maxBin - minBin + 1;
+        displayBins = endBin - startBin;
         needsFullRedraw = true;
     }
 
     void updateAutoRange() {
-        int current = writeFrame.load();
-        if (current == 0) return;
-
-        // Calculate the actual number of frames currently visible on screen
         int maxFrames = static_cast<int>(frames);
-        int visibleFrames = std::min(maxFrames, current);
+        if (displayBins == 0) return;
 
-        // Start from the most recent visible frames
-        int startFrame = std::max(0, current - visibleFrames);
-
-        // Collect all values for percentile calculation
         std::vector<double> allValues;
-        allValues.reserve(visibleFrames * displayBins);
+        allValues.reserve(maxFrames * displayBins);
 
-        double minVal = std::numeric_limits<double>::max();
-        double maxVal = std::numeric_limits<double>::lowest();
+        double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
+        double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
+        int startBin = static_cast<int>(minRatio * numBins);
+        int endBin = static_cast<int>(maxRatio * numBins);
 
-        // Only analyze the frames that are currently visible
-        for (int f = startFrame; f < current && f < static_cast<int>(SignalInspectorData.size()); ++f) {
-            const auto& frame = SignalInspectorData[f];
-            if (frame.empty()) continue;
+        bool convertDb = static_cast<bool>(usedb);
+        double dbFloor = static_cast<double>(dbfloor);
 
-            for (const auto& val : frame) {
-                if (std::isfinite(val)) {
-                    minVal = std::min(minVal, val);
-                    maxVal = std::max(maxVal, val);
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+            if (SignalInspectorData.empty()) return;
+
+            for (const auto& frame : SignalInspectorData) {
+                if (frame.empty()) continue;
+                for (int b = startBin; b < endBin && b < static_cast<int>(frame.size()); ++b) {
+                    double val = frame[b];
+                    if (convertDb) {
+                        val = (val > 0.0) ? 20.0 * std::log10(val) : dbFloor;
+                        val = std::max(val, dbFloor);
+                    }
                     allValues.push_back(val);
                 }
             }
         }
 
-        // Only update if we found valid values
-        if (minVal != std::numeric_limits<double>::max() &&
-            maxVal != std::numeric_limits<double>::lowest() &&
-            !allValues.empty()) {
+        if (allValues.empty()) return;
 
-            // Calculate absolute min/max with margin
-            double range = maxVal - minVal;
-            if (range < 1e-6) {
-                range = 1.0;
-            }
-            autoMin = minVal - range * 0.05;
-            autoMax = maxVal + range * 0.05;
+        auto minmax = std::minmax_element(allValues.begin(), allValues.end());
+        autoMin = *minmax.first;
+        autoMax = *minmax.second;
 
-            // Calculate percentiles
+        if (static_cast<bool>(usepercentile) && allValues.size() > 10) {
             std::sort(allValues.begin(), allValues.end());
-            size_t p5_idx = static_cast<size_t>(allValues.size() * 0.05);
-            size_t p95_idx = static_cast<size_t>(allValues.size() * 0.95);
-
-            autoPercentile5 = allValues[p5_idx];
-            autoPercentile95 = allValues[p95_idx];
-
-            // Add small margin to percentiles too
-            double percentileRange = autoPercentile95 - autoPercentile5;
-            if (percentileRange < 1e-6) {
-                percentileRange = 1.0;
-            }
-            autoPercentile5 -= percentileRange * 0.02;
-            autoPercentile95 += percentileRange * 0.02;
+            size_t idx5 = static_cast<size_t>(0.05 * allValues.size());
+            size_t idx95 = static_cast<size_t>(0.95 * allValues.size());
+            idx5 = std::min(idx5, allValues.size() - 1);
+            idx95 = std::min(idx95, allValues.size() - 1);
+            autoPercentile5 = allValues[idx5];
+            autoPercentile95 = allValues[idx95];
+        } else {
+            autoPercentile5 = autoMin;
+            autoPercentile95 = autoMax;
         }
     }
 
-    void commitFrame() {
-        if (accumulatedFrame.empty() || numBins == 0) return;
-
-        // Convert ratios to bin indices
-        double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
-        double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
-
-        if (minRatio > maxRatio) {
-            std::swap(minRatio, maxRatio);
-        }
-
-        int minBin = static_cast<int>(minRatio * (numBins - 1));
-        int maxBin = static_cast<int>(maxRatio * (numBins - 1));
-
-        if (minBin == maxBin) {
-            if (maxBin < numBins - 1) {
-                maxBin++;
-            } else if (minBin > 0) {
-                minBin--;
-            }
-        }
-
-        std::vector<double> frameToStore;
-        int binsToStore = maxBin - minBin + 1;
-        frameToStore.reserve(binsToStore);
-
-        for (int i = minBin; i <= maxBin && i < static_cast<int>(accumulatedFrame.size()); ++i) {
-            frameToStore.push_back(accumulatedFrame[i]);
-        }
-
-        // Add to SignalInspector buffer
-        addFrame(frameToStore);
+    color interpolateColor(double t, const color& c1, const color& c2) const {
+        t = std::clamp(t, 0.0, 1.0);
+        return color{
+            c1.red() + t * (c2.red() - c1.red()),
+            c1.green() + t * (c2.green() - c1.green()),
+            c1.blue() + t * (c2.blue() - c1.blue()),
+            c1.alpha() + t * (c2.alpha() - c1.alpha())
+        };
     }
 
-    void addFrame(const std::vector<double>& frame) {
-        if (frame.empty()) return;
-
-        int maxFrames = static_cast<int>(frames);
-        int current = writeFrame.load();
-
-        // Check if buffer is full
-        if (current >= maxFrames) {
-            shiftBuffer();
-            current = writeFrame.load();
-        }
-
-        // Store the new frame
-        if (current < static_cast<int>(SignalInspectorData.size())) {
-            SignalInspectorData[current] = frame;
-            writeFrame.store(current + 1);
-        }
-    }
-
-    void shiftBuffer() {
-        // Shift by half when full
-        int maxFrames = static_cast<int>(frames);
-        int halfFrames = maxFrames / 2;
-        int keepFrames = maxFrames - halfFrames;
-
-        // Move second half to first half
-        for (int i = 0; i < keepFrames; ++i) {
-            if (halfFrames + i < static_cast<int>(SignalInspectorData.size())) {
-                SignalInspectorData[i] = std::move(SignalInspectorData[halfFrames + i]);
-            }
-        }
-
-        // Clear the second half
-        for (int i = keepFrames; i < maxFrames && i < static_cast<int>(SignalInspectorData.size()); ++i) {
-            SignalInspectorData[i].clear();
-        }
-
-        writeFrame.store(keepFrames);
-        needsFullRedraw = true;
-    }
-
-    color interpolateColor(double value) {
-        // Step 1: Convert to dB if enabled
-        if (static_cast<bool>(usedb)) {
-            // Handle zero/negative values
-            if (value <= 0.0) {
-                value = static_cast<double>(dbfloor);
-            } else {
-                value = 20.0 * std::log10(value);
-                // Clip to floor
-                value = std::max(value, static_cast<double>(dbfloor));
-            }
-        }
-
-        // Step 2: Determine min/max range for normalization
+    color valueToColor(double value) const {
         double minVal, maxVal;
-
         if (static_cast<bool>(autorange)) {
-            // Use percentiles if enabled, otherwise absolute min/max
             if (static_cast<bool>(usepercentile)) {
                 minVal = autoPercentile5;
                 maxVal = autoPercentile95;
@@ -440,157 +435,145 @@ private:
                 maxVal = autoMax;
             }
         } else {
-            // Manual range
             minVal = static_cast<double>(minValue);
             maxVal = static_cast<double>(maxValue);
         }
 
-        // Step 3: Normalize to 0-1
-        double normVal = (value - minVal) / (maxVal - minVal);
-        normVal = std::clamp(normVal, 0.0, 1.0);
+        if (maxVal <= minVal) maxVal = minVal + 1.0;
 
-        // Step 4: Apply gamma correction
-        double gammaVal = static_cast<double>(gamma);
-        normVal = std::pow(normVal, gammaVal);
+        double normalized = (value - minVal) / (maxVal - minVal);
+        normalized = std::clamp(normalized, 0.0, 1.0);
 
-        // Step 5: Map to color gradient
-        // Get actual color values from attributes
-        color low = lowColor;
-        color mid = midColor;
-        color high = highColor;
+        double g = static_cast<double>(gamma);
+        normalized = std::pow(normalized, g);
 
-        // Three-color gradient: low -> mid -> high
-        double r, g, b;
-        if (normVal < 0.5) {
-            // Interpolate between low and mid
-            double t = normVal * 2.0;
-            r = low.red() * (1.0 - t) + mid.red() * t;
-            g = low.green() * (1.0 - t) + mid.green() * t;
-            b = low.blue() * (1.0 - t) + mid.blue() * t;
+        color low = static_cast<color>(lowColor);
+        color mid = static_cast<color>(midColor);
+        color high = static_cast<color>(highColor);
+
+        if (normalized < 0.5) {
+            return interpolateColor(normalized * 2.0, low, mid);
         } else {
-            // Interpolate between mid and high
-            double t = (normVal - 0.5) * 2.0;
-            r = mid.red() * (1.0 - t) + high.red() * t;
-            g = mid.green() * (1.0 - t) + high.green() * t;
-            b = mid.blue() * (1.0 - t) + high.blue() * t;
+            return interpolateColor((normalized - 0.5) * 2.0, mid, high);
         }
-
-        return color{r, g, b, 1.0};
     }
 
     void ensureSurface(int width, int height) {
-        if (SignalInspectorSurface && surfaceWidth == width && surfaceHeight == height) {
-            return;
+        if (!SignalInspectorSurface || surfaceWidth != width || surfaceHeight != height) {
+            if (SignalInspectorSurface) {
+                jgraphics_surface_destroy(SignalInspectorSurface);
+            }
+            SignalInspectorSurface = jgraphics_image_surface_create(c74::max::JGRAPHICS_FORMAT_ARGB32, width, height);
+            surfaceWidth = width;
+            surfaceHeight = height;
+            needsFullRedraw = true;
         }
-
-        if (SignalInspectorSurface) {
-            jgraphics_surface_destroy(SignalInspectorSurface);
-        }
-
-        SignalInspectorSurface = jgraphics_image_surface_create(
-            c74::max::JGRAPHICS_FORMAT_ARGB32,
-            width, height
-        );
-        surfaceWidth = width;
-        surfaceHeight = height;
-        needsFullRedraw = true;
     }
 
     void renderSignalInspector(int width, int height) {
-        int current = currentFrame.load();
+        if (!SignalInspectorSurface || displayBins == 0) return;
 
-        if (!SignalInspectorSurface || current == 0 || displayBins == 0) {
-            return;
-        }
-
-        c74::max::t_jgraphics* g = jgraphics_create(SignalInspectorSurface);
+        auto g = jgraphics_create(SignalInspectorSurface);
         if (!g) return;
 
-        if (needsFullRedraw) {
-            // Clear entire surface
+        int maxFrames = static_cast<int>(frames);
+        int cf = currentFrame.load();
+
+        if (needsFullRedraw || cf != lastRenderFrame) {
             jgraphics_set_source_jrgba(g, color{0.0, 0.0, 0.0, 1.0});
             jgraphics_rectangle(g, 0, 0, width, height);
             jgraphics_fill(g);
-            lastRenderFrame = 0;
-        }
 
-        // Calculate pixel dimensions - account for slider on left
-        int spectrogramLeft = sliderWidth + sliderMargin * 2;
-        int spectrogramWidth = width - spectrogramLeft;
-
-        int maxFrames = static_cast<int>(frames);
-        double frameWidth = static_cast<double>(spectrogramWidth) / maxFrames;
-
-        // CRITICAL: Always use full height divided by displayBins
-        // This ensures the selected range fills the entire vertical space
-        double binHeight = static_cast<double>(height) / displayBins;
-
-        // Determine which frames to render (only new ones)
-        int startFrame = needsFullRedraw ? 0 : lastRenderFrame;
-        int endFrame = current;
-
-        // Render frames
-        for (int f = startFrame; f < endFrame && f < static_cast<int>(SignalInspectorData.size()); ++f) {
-            const auto& frame = SignalInspectorData[f];
-            if (frame.empty()) continue;
-
-            double x = spectrogramLeft + f * frameWidth;
-
-            // The frame data contains only the selected bins (displayBins count)
-            // We render each bin scaled to fill the full height
-            int binsInFrame = std::min(displayBins, static_cast<int>(frame.size()));
-            for (int b = 0; b < binsInFrame; ++b) {
-                // Y-axis: flip so low frequencies are at bottom
-                // Map bin index b to full height range
-                double y = height - (b + 1) * binHeight;
-
-                color pixelColor = interpolateColor(frame[b]);
-                jgraphics_set_source_jrgba(g, pixelColor);
-                jgraphics_rectangle(g, x, y, frameWidth + 0.5, binHeight + 0.5);
-                jgraphics_fill(g);
+            int SignalInspectorWidth = width - sliderWidth - 2 * sliderMargin;
+            if (SignalInspectorWidth <= 0) {
+                jgraphics_destroy(g);
+                return;
             }
+
+            double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
+            double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
+            int startBin = static_cast<int>(minRatio * numBins);
+            int endBin = static_cast<int>(maxRatio * numBins);
+
+            bool convertDb = static_cast<bool>(usedb);
+            double dbFloor = static_cast<double>(dbfloor);
+
+            double pixelWidth = static_cast<double>(SignalInspectorWidth) / maxFrames;
+            double pixelHeight = static_cast<double>(height) / displayBins;
+
+            // Lock only during data access
+            std::lock_guard<std::mutex> lock(dataMutex);
+
+            // Check again after acquiring lock
+            if (SignalInspectorData.empty()) {
+                jgraphics_destroy(g);
+                return;
+            }
+
+            for (int f = 0; f < maxFrames; ++f) {
+                int dataIndex = (cf + f) % maxFrames;
+
+                // Bounds check before access
+                if (dataIndex >= static_cast<int>(SignalInspectorData.size())) continue;
+
+                const auto& frame = SignalInspectorData[dataIndex];
+                if (frame.empty()) continue;
+
+                for (int b = 0; b < displayBins; ++b) {
+                    int binIndex = startBin + b;
+                    if (binIndex >= static_cast<int>(frame.size())) continue;
+
+                    double value = frame[binIndex];
+                    if (convertDb) {
+                        value = (value > 0.0) ? 20.0 * std::log10(value) : dbFloor;
+                        value = std::max(value, dbFloor);
+                    }
+
+                    color c = valueToColor(value);
+                    jgraphics_set_source_jrgba(g, c);
+
+                    double x = f * pixelWidth;
+                    double y = (displayBins - 1 - b) * pixelHeight;
+
+                    jgraphics_rectangle(g, x, y, std::ceil(pixelWidth) + 0.5, std::ceil(pixelHeight) + 0.5);
+                    jgraphics_fill(g);
+                }
+            }
+
+            needsFullRedraw = false;
+            lastRenderFrame = cf;
         }
 
-        lastRenderFrame = endFrame;
         jgraphics_destroy(g);
-        needsFullRedraw = false;
     }
 
     void drawSlider(c74::max::t_jgraphics* g, int width, int height) {
         if (numBins == 0) return;
 
-        // Get ratio values (0.0 to 1.0)
         double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
         double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
 
-        // Convert to screen coordinates (invert because low freq at bottom)
-        double sliderBottom = (1.0 - minRatio) * height;  // Low freq at bottom
-        double sliderTop = (1.0 - maxRatio) * height;     // High freq at top
+        double sliderBottom = (1.0 - minRatio) * height;
+        double sliderTop = (1.0 - maxRatio) * height;
         double sliderHeight = sliderBottom - sliderTop;
 
-        // Draw slider background (full spectrum range)
         jgraphics_set_source_jrgba(g, color{0.2, 0.2, 0.2, 1.0});
         jgraphics_rectangle(g, sliderMargin, 0, sliderWidth, height);
         jgraphics_fill(g);
 
-        // Draw selected range
         jgraphics_set_source_jrgba(g, color{0.4, 0.6, 0.8, 1.0});
         jgraphics_rectangle(g, sliderMargin, sliderTop, sliderWidth, sliderHeight);
         jgraphics_fill(g);
 
-        // Draw handles
         double handleHeight = 8.0;
 
-        // Top handle (high frequency)
         jgraphics_set_source_jrgba(g, color{0.8, 0.8, 0.8, 1.0});
         jgraphics_rectangle(g, sliderMargin, sliderTop - handleHeight/2, sliderWidth, handleHeight);
         jgraphics_fill(g);
 
-        // Bottom handle (low frequency)
         jgraphics_rectangle(g, sliderMargin, sliderBottom - handleHeight/2, sliderWidth, handleHeight);
         jgraphics_fill(g);
 
-        // Draw border around slider
         jgraphics_set_source_jrgba(g, color{0.5, 0.5, 0.5, 1.0});
         jgraphics_set_line_width(g, 1.0);
         jgraphics_rectangle(g, sliderMargin + 0.5, 0.5, sliderWidth, height - 1.0);
@@ -598,7 +581,6 @@ private:
     }
 
     void drawMinMaxValues(c74::max::t_jgraphics* g, int width, int height) {
-        // Get the actual min/max values being used for coloring
         double minVal, maxVal;
 
         if (static_cast<bool>(autorange)) {
@@ -614,19 +596,16 @@ private:
             maxVal = static_cast<double>(maxValue);
         }
 
-        // Format the values with dB indicator if enabled
         char minText[64];
         char maxText[64];
         const char* unit = static_cast<bool>(usedb) ? " dB" : "";
         snprintf(minText, sizeof(minText), "Min: %.2f%s", minVal, unit);
         snprintf(maxText, sizeof(maxText), "Max: %.2f%s", maxVal, unit);
 
-        // Set text properties
-        jgraphics_set_source_jrgba(g, color{1.0, 1.0, 1.0, 0.9});  // White with slight transparency
+        jgraphics_set_source_jrgba(g, color{1.0, 1.0, 1.0, 0.9});
         jgraphics_select_font_face(g, "Arial", c74::max::JGRAPHICS_FONT_SLANT_NORMAL, c74::max::JGRAPHICS_FONT_WEIGHT_BOLD);
         jgraphics_set_font_size(g, 11.0);
 
-        // Calculate text position (top right corner with padding)
         double padding = 8.0;
         double lineHeight = 14.0;
 
@@ -640,14 +619,12 @@ private:
         double minTextX = width - minTextWidth - padding;
         double minTextY = maxTextY + lineHeight;
 
-        // Draw text with slight shadow for readability
         jgraphics_set_source_jrgba(g, color{0.0, 0.0, 0.0, 0.5});
         jgraphics_move_to(g, maxTextX + 1, maxTextY + 1);
         jgraphics_show_text(g, maxText);
         jgraphics_move_to(g, minTextX + 1, minTextY + 1);
         jgraphics_show_text(g, minText);
 
-        // Draw actual text
         jgraphics_set_source_jrgba(g, color{1.0, 1.0, 1.0, 0.9});
         jgraphics_move_to(g, maxTextX, maxTextY);
         jgraphics_show_text(g, maxText);
@@ -655,7 +632,6 @@ private:
         jgraphics_show_text(g, minText);
     }
 
-    // Paint message
     message<> paint { this, "paint", MIN_FUNCTION {
         ui::target t { args };
         auto g = (c74::max::t_jgraphics*)t;
@@ -663,26 +639,18 @@ private:
         const int w = static_cast<int>(t.width());
         const int h = static_cast<int>(t.height());
 
-        // Ensure surface exists
         ensureSurface(w, h);
-
-        // Render SignalInspector to surface
         renderSignalInspector(w, h);
 
-        // Draw surface to screen
         if (SignalInspectorSurface) {
             c74::max::t_rect srcRect = {0, 0, static_cast<double>(w), static_cast<double>(h)};
             c74::max::t_rect destRect = {0, 0, static_cast<double>(w), static_cast<double>(h)};
             jgraphics_image_surface_draw(g, SignalInspectorSurface, srcRect, destRect);
         }
 
-        // Draw the frequency range slider on top
         drawSlider(g, w, h);
-
-        // Draw min/max values in top right corner
         drawMinMaxValues(g, w, h);
 
-        // Draw border
         jgraphics_set_source_jrgba(g, color{0.5, 0.5, 0.5, 1.0});
         jgraphics_set_line_width(g, 1.0);
         jgraphics_rectangle(g, 0.5, 0.5, w - 1.0, h - 1.0);
@@ -691,7 +659,6 @@ private:
         return {};
     }};
 
-    // Mouse interaction for slider
     message<> mousedown { this, "mousedown", MIN_FUNCTION {
         ui::target t { args };
         const int w = static_cast<int>(t.width());
@@ -700,18 +667,15 @@ private:
         double x = args[0];
         double y = args[1];
 
-        // Check if click is in slider area
         if (x >= sliderMargin && x <= (sliderMargin + sliderWidth) && numBins > 0) {
             double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
             double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
 
-            // Convert ratio to y positions (inverted - low freq at bottom)
-            double sliderBottom = (1.0 - minRatio) * h;  // Low freq at bottom
-            double sliderTop = (1.0 - maxRatio) * h;     // High freq at top
+            double sliderBottom = (1.0 - minRatio) * h;
+            double sliderTop = (1.0 - maxRatio) * h;
 
-            double handleHeight = 12.0;  // Increased for easier clicking
+            double handleHeight = 12.0;
 
-            // Check which handle or area was clicked (with priority to handles)
             if (y >= (sliderTop - handleHeight) && y <= (sliderTop + handleHeight)) {
                 isDraggingTop = true;
                 isDraggingSlider = true;
@@ -719,7 +683,6 @@ private:
                 isDraggingBottom = true;
                 isDraggingSlider = true;
             } else if (y > sliderTop && y < sliderBottom) {
-                // Clicked in middle - drag both
                 isDraggingTop = true;
                 isDraggingBottom = true;
                 isDraggingSlider = true;
@@ -736,24 +699,20 @@ private:
         const int h = static_cast<int>(t.height());
         double y = args[1];
 
-        // Clamp y to bounds
         y = std::clamp(y, 0.0, static_cast<double>(h));
 
-        // Convert y position to ratio (inverted because low freq at bottom)
-        double ratio = 1.0 - (y / h);  // 0 at bottom (DC), 1 at top (Nyquist)
+        double ratio = 1.0 - (y / h);
         ratio = std::clamp(ratio, 0.0, 1.0);
 
         double currentMin = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
         double currentMax = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
 
         if (isDraggingTop && isDraggingBottom) {
-            // Dragging middle - move both maintaining range
             double range = currentMax - currentMin;
             double centerRatio = ratio;
             double newMin = centerRatio - range / 2.0;
             double newMax = newMin + range;
 
-            // Keep in bounds
             if (newMin < 0.0) {
                 newMin = 0.0;
                 newMax = range;
@@ -763,22 +722,18 @@ private:
                 newMin = newMax - range;
             }
 
-            // Use atoms vector for set() method
             binrangemin.set({newMin});
             binrangemax.set({newMax});
         } else if (isDraggingTop) {
-            // Dragging top handle (high frequency)
-            double newMax = std::max(ratio, currentMin + 0.01);  // Ensure minimum range
+            double newMax = std::max(ratio, currentMin + 0.01);
             newMax = std::clamp(newMax, 0.0, 1.0);
             binrangemax.set({newMax});
         } else if (isDraggingBottom) {
-            // Dragging bottom handle (low frequency)
-            double newMin = std::min(ratio, currentMax - 0.01);  // Ensure minimum range
+            double newMin = std::min(ratio, currentMax - 0.01);
             newMin = std::clamp(newMin, 0.0, 1.0);
             binrangemin.set({newMin});
         }
 
-        // Force immediate update
         updateDisplayBins();
         redraw();
 
