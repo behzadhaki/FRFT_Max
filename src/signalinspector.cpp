@@ -91,10 +91,12 @@ public:
         , surfaceHeight(0)
         , currentFrame(0)
         , writeFrame(0)
+        , writePosition(0)
         , numBins(0)
         , displayBins(0)
         , needsFullRedraw(true)
         , lastRenderFrame(0)
+        , lastRenderPosition(-1)
         , autoMin(0.0)
         , autoMax(100.0)
         , autoPercentile5(0.0)
@@ -175,6 +177,11 @@ public:
         description{"Maximum bin ratio to display (0.0 = DC, 1.0 = Nyquist)"}
     };
 
+    attribute<bool> scrolling {
+        this, "scrolling", false,
+        description{"Scrolling mode: true = circular buffer (scroll), false = left-to-right with shift"}
+    };
+
     attribute<number> minValue { this, "minval", 0.0, description{"Minimum value (linear)"} };
     attribute<number> maxValue { this, "maxval", 100.0, description{"Maximum value (linear)"} };
 
@@ -191,7 +198,9 @@ public:
         std::lock_guard<std::mutex> lock(dataMutex);
         writeFrame.store(0);
         currentFrame.store(0);
+        writePosition.store(0);
         lastRenderFrame = 0;
+        lastRenderPosition = -1;
         numBins = 0;
         displayBins = 0;
         SignalInspectorData.clear();
@@ -235,10 +244,12 @@ private:
     int surfaceWidth, surfaceHeight;
     std::atomic<int> currentFrame;  // For rendering
     std::atomic<int> writeFrame;    // For writing new data
+    std::atomic<int> writePosition; // Current write position for non-scrolling mode (0 to maxFrames-1)
     int numBins;        // Total bins from input
     int displayBins;    // Bins to actually display
     bool needsFullRedraw;
     int lastRenderFrame;
+    int lastRenderPosition; // Track last rendered position in non-scrolling mode
 
     // Auto-range values
     double autoMin;
@@ -328,7 +339,7 @@ private:
         if (frame.empty()) return;
 
         int maxFrames = static_cast<int>(frames);
-        int wf = writeFrame.load();
+        bool isScrolling = static_cast<bool>(scrolling);
 
         {
             std::lock_guard<std::mutex> lock(dataMutex);
@@ -338,12 +349,35 @@ private:
                 SignalInspectorData.resize(maxFrames);
             }
 
-            // Store the frame data
-            SignalInspectorData[wf] = frame;
-        }
+            if (isScrolling) {
+                // Scrolling mode: circular buffer
+                int wf = writeFrame.load();
+                SignalInspectorData[wf] = frame;
+                writeFrame.store((wf + 1) % maxFrames);
+            } else {
+                // Non-scrolling mode: linear left-to-right
+                int wp = writePosition.load();
 
-        // Increment write frame with wrapping (done outside mutex in atomic operation)
-        writeFrame.store((wf + 1) % maxFrames);
+                // Check if we need to shift
+                if (wp >= maxFrames) {
+                    // Shift everything left by half
+                    int shiftAmount = maxFrames / 2;
+                    for (int i = 0; i < maxFrames - shiftAmount; ++i) {
+                        SignalInspectorData[i] = SignalInspectorData[i + shiftAmount];
+                    }
+                    // Clear the right half
+                    for (int i = maxFrames - shiftAmount; i < maxFrames; ++i) {
+                        SignalInspectorData[i].clear();
+                    }
+                    wp = maxFrames - shiftAmount;
+                    needsFullRedraw = true; // Need full redraw after shift
+                }
+
+                // Store frame at current position
+                SignalInspectorData[wp] = frame;
+                writePosition.store(wp + 1);
+            }
+        }
     }
 
     void updateDisplayBins() {
@@ -477,71 +511,151 @@ private:
         if (!g) return;
 
         int maxFrames = static_cast<int>(frames);
-        int cf = currentFrame.load();
+        int SignalInspectorWidth = width - sliderWidth - 2 * sliderMargin;
+        if (SignalInspectorWidth <= 0) {
+            jgraphics_destroy(g);
+            return;
+        }
 
-        if (needsFullRedraw || cf != lastRenderFrame) {
-            jgraphics_set_source_jrgba(g, color{0.0, 0.0, 0.0, 1.0});
-            jgraphics_rectangle(g, 0, 0, width, height);
-            jgraphics_fill(g);
+        double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
+        double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
+        int startBin = static_cast<int>(minRatio * numBins);
+        int endBin = static_cast<int>(maxRatio * numBins);
 
-            int SignalInspectorWidth = width - sliderWidth - 2 * sliderMargin;
-            if (SignalInspectorWidth <= 0) {
-                jgraphics_destroy(g);
-                return;
-            }
+        bool convertDb = static_cast<bool>(usedb);
+        double dbFloor = static_cast<double>(dbfloor);
+        bool isScrolling = static_cast<bool>(scrolling);
 
-            double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
-            double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
-            int startBin = static_cast<int>(minRatio * numBins);
-            int endBin = static_cast<int>(maxRatio * numBins);
+        double pixelWidth = static_cast<double>(SignalInspectorWidth) / maxFrames;
+        double pixelHeight = static_cast<double>(height) / displayBins;
 
-            bool convertDb = static_cast<bool>(usedb);
-            double dbFloor = static_cast<double>(dbfloor);
+        // Lock only during data access
+        std::lock_guard<std::mutex> lock(dataMutex);
 
-            double pixelWidth = static_cast<double>(SignalInspectorWidth) / maxFrames;
-            double pixelHeight = static_cast<double>(height) / displayBins;
+        // Check again after acquiring lock
+        if (SignalInspectorData.empty()) {
+            jgraphics_destroy(g);
+            return;
+        }
 
-            // Lock only during data access
-            std::lock_guard<std::mutex> lock(dataMutex);
+        if (isScrolling) {
+            // SCROLLING MODE: Render entire circular buffer
+            int cf = currentFrame.load();
 
-            // Check again after acquiring lock
-            if (SignalInspectorData.empty()) {
-                jgraphics_destroy(g);
-                return;
-            }
+            if (needsFullRedraw || cf != lastRenderFrame) {
+                // Clear background
+                jgraphics_set_source_jrgba(g, color{0.0, 0.0, 0.0, 1.0});
+                jgraphics_rectangle(g, 0, 0, width, height);
+                jgraphics_fill(g);
 
-            for (int f = 0; f < maxFrames; ++f) {
-                int dataIndex = (cf + f) % maxFrames;
+                // Render all frames
+                for (int f = 0; f < maxFrames; ++f) {
+                    int dataIndex = (cf + f) % maxFrames;
 
-                // Bounds check before access
-                if (dataIndex >= static_cast<int>(SignalInspectorData.size())) continue;
+                    if (dataIndex >= static_cast<int>(SignalInspectorData.size())) continue;
 
-                const auto& frame = SignalInspectorData[dataIndex];
-                if (frame.empty()) continue;
+                    const auto& frame = SignalInspectorData[dataIndex];
+                    if (frame.empty()) continue;
 
-                for (int b = 0; b < displayBins; ++b) {
-                    int binIndex = startBin + b;
-                    if (binIndex >= static_cast<int>(frame.size())) continue;
+                    for (int b = 0; b < displayBins; ++b) {
+                        int binIndex = startBin + b;
+                        if (binIndex >= static_cast<int>(frame.size())) continue;
 
-                    double value = frame[binIndex];
-                    if (convertDb) {
-                        value = (value > 0.0) ? 20.0 * std::log10(value) : dbFloor;
-                        value = std::max(value, dbFloor);
+                        double value = frame[binIndex];
+                        if (convertDb) {
+                            value = (value > 0.0) ? 20.0 * std::log10(value) : dbFloor;
+                            value = std::max(value, dbFloor);
+                        }
+
+                        color c = valueToColor(value);
+                        jgraphics_set_source_jrgba(g, c);
+
+                        double x = f * pixelWidth;
+                        double y = (displayBins - 1 - b) * pixelHeight;
+
+                        jgraphics_rectangle(g, x, y, std::ceil(pixelWidth) + 0.5, std::ceil(pixelHeight) + 0.5);
+                        jgraphics_fill(g);
                     }
-
-                    color c = valueToColor(value);
-                    jgraphics_set_source_jrgba(g, c);
-
-                    double x = f * pixelWidth;
-                    double y = (displayBins - 1 - b) * pixelHeight;
-
-                    jgraphics_rectangle(g, x, y, std::ceil(pixelWidth) + 0.5, std::ceil(pixelHeight) + 0.5);
-                    jgraphics_fill(g);
                 }
-            }
 
-            needsFullRedraw = false;
-            lastRenderFrame = cf;
+                needsFullRedraw = false;
+                lastRenderFrame = cf;
+            }
+        } else {
+            // NON-SCROLLING MODE: Incremental left-to-right rendering
+            int wp = writePosition.load();
+
+            // Full redraw if needed (after shift or first time)
+            if (needsFullRedraw) {
+                // Clear background
+                jgraphics_set_source_jrgba(g, color{0.0, 0.0, 0.0, 1.0});
+                jgraphics_rectangle(g, 0, 0, width, height);
+                jgraphics_fill(g);
+
+                // Render all frames up to current write position
+                for (int f = 0; f < wp && f < maxFrames; ++f) {
+                    if (f >= static_cast<int>(SignalInspectorData.size())) break;
+
+                    const auto& frame = SignalInspectorData[f];
+                    if (frame.empty()) continue;
+
+                    for (int b = 0; b < displayBins; ++b) {
+                        int binIndex = startBin + b;
+                        if (binIndex >= static_cast<int>(frame.size())) continue;
+
+                        double value = frame[binIndex];
+                        if (convertDb) {
+                            value = (value > 0.0) ? 20.0 * std::log10(value) : dbFloor;
+                            value = std::max(value, dbFloor);
+                        }
+
+                        color c = valueToColor(value);
+                        jgraphics_set_source_jrgba(g, c);
+
+                        double x = f * pixelWidth;
+                        double y = (displayBins - 1 - b) * pixelHeight;
+
+                        jgraphics_rectangle(g, x, y, std::ceil(pixelWidth) + 0.5, std::ceil(pixelHeight) + 0.5);
+                        jgraphics_fill(g);
+                    }
+                }
+
+                needsFullRedraw = false;
+                lastRenderPosition = wp - 1;
+            } else {
+                // INCREMENTAL: Only render new frames since last render
+                int startPos = lastRenderPosition + 1;
+                int endPos = wp;
+
+                for (int f = startPos; f < endPos && f < maxFrames; ++f) {
+                    if (f >= static_cast<int>(SignalInspectorData.size())) break;
+
+                    const auto& frame = SignalInspectorData[f];
+                    if (frame.empty()) continue;
+
+                    for (int b = 0; b < displayBins; ++b) {
+                        int binIndex = startBin + b;
+                        if (binIndex >= static_cast<int>(frame.size())) continue;
+
+                        double value = frame[binIndex];
+                        if (convertDb) {
+                            value = (value > 0.0) ? 20.0 * std::log10(value) : dbFloor;
+                            value = std::max(value, dbFloor);
+                        }
+
+                        color c = valueToColor(value);
+                        jgraphics_set_source_jrgba(g, c);
+
+                        double x = f * pixelWidth;
+                        double y = (displayBins - 1 - b) * pixelHeight;
+
+                        jgraphics_rectangle(g, x, y, std::ceil(pixelWidth) + 0.5, std::ceil(pixelHeight) + 0.5);
+                        jgraphics_fill(g);
+                    }
+                }
+
+                lastRenderPosition = endPos - 1;
+            }
         }
 
         jgraphics_destroy(g);
