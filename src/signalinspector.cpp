@@ -190,6 +190,16 @@ public:
     attribute<color> midColor { this, "midcolor", color{1.0, 0.5, 0.0, 1.0} };
     attribute<color> highColor { this, "highcolor", color{1.0, 1.0, 0.0, 1.0} };
 
+    // Slider color attributes
+    attribute<color> sliderBgColor { this, "sliderbgcolor", color{0.2, 0.2, 0.2, 1.0},
+        description{"Slider background color"} };
+    attribute<color> sliderSelColor { this, "sliderselcolor", color{0.4, 0.6, 0.8, 1.0},
+        description{"Slider selection color"} };
+    attribute<color> sliderHandleColor { this, "sliderhandlecolor", color{0.8, 0.8, 0.8, 1.0},
+        description{"Slider handle color"} };
+    attribute<color> sliderBorderColor { this, "sliderbordercolor", color{0.5, 0.5, 0.5, 1.0},
+        description{"Slider border color"} };
+
     // Clear the SignalInspector
     message<> clear { this, "clear", MIN_FUNCTION {
         // Clear the queue
@@ -511,6 +521,7 @@ private:
         if (!g) return;
 
         int maxFrames = static_cast<int>(frames);
+        // Slider is on the right, so spectrogram width is reduced from the right
         int SignalInspectorWidth = width - sliderWidth - 2 * sliderMargin;
         if (SignalInspectorWidth <= 0) {
             jgraphics_destroy(g);
@@ -671,26 +682,33 @@ private:
         double sliderTop = (1.0 - maxRatio) * height;
         double sliderHeight = sliderBottom - sliderTop;
 
-        jgraphics_set_source_jrgba(g, color{0.2, 0.2, 0.2, 1.0});
-        jgraphics_rectangle(g, sliderMargin, 0, sliderWidth, height);
+        // Position slider on the right side
+        double sliderX = width - sliderWidth - sliderMargin;
+
+        // Background
+        jgraphics_set_source_jrgba(g, static_cast<color>(sliderBgColor));
+        jgraphics_rectangle(g, sliderX, 0, sliderWidth, height);
         jgraphics_fill(g);
 
-        jgraphics_set_source_jrgba(g, color{0.4, 0.6, 0.8, 1.0});
-        jgraphics_rectangle(g, sliderMargin, sliderTop, sliderWidth, sliderHeight);
+        // Selection
+        jgraphics_set_source_jrgba(g, static_cast<color>(sliderSelColor));
+        jgraphics_rectangle(g, sliderX, sliderTop, sliderWidth, sliderHeight);
         jgraphics_fill(g);
 
         double handleHeight = 8.0;
 
-        jgraphics_set_source_jrgba(g, color{0.8, 0.8, 0.8, 1.0});
-        jgraphics_rectangle(g, sliderMargin, sliderTop - handleHeight/2, sliderWidth, handleHeight);
+        // Handles
+        jgraphics_set_source_jrgba(g, static_cast<color>(sliderHandleColor));
+        jgraphics_rectangle(g, sliderX, sliderTop - handleHeight/2, sliderWidth, handleHeight);
         jgraphics_fill(g);
 
-        jgraphics_rectangle(g, sliderMargin, sliderBottom - handleHeight/2, sliderWidth, handleHeight);
+        jgraphics_rectangle(g, sliderX, sliderBottom - handleHeight/2, sliderWidth, handleHeight);
         jgraphics_fill(g);
 
-        jgraphics_set_source_jrgba(g, color{0.5, 0.5, 0.5, 1.0});
+        // Border
+        jgraphics_set_source_jrgba(g, static_cast<color>(sliderBorderColor));
         jgraphics_set_line_width(g, 1.0);
-        jgraphics_rectangle(g, sliderMargin + 0.5, 0.5, sliderWidth, height - 1.0);
+        jgraphics_rectangle(g, sliderX + 0.5, 0.5, sliderWidth, height - 1.0);
         jgraphics_stroke(g);
     }
 
@@ -774,14 +792,19 @@ private:
     }};
 
     message<> mousedown { this, "mousedown", MIN_FUNCTION {
-        ui::target t { args };
-        const int w = static_cast<int>(t.width());
-        const int h = static_cast<int>(t.height());
+        // Use event class to extract coordinates properly
+        event e { args };
+        auto t = e.target();
 
-        double x = args[0];
-        double y = args[1];
+        const double w = t.width();
+        const double h = t.height();
+        const double x = e.x();
+        const double y = e.y();
 
-        if (x >= sliderMargin && x <= (sliderMargin + sliderWidth) && numBins > 0) {
+        // Slider is on the right side
+        double sliderX = w - sliderWidth - sliderMargin;
+
+        if (x >= sliderX && x <= (sliderX + sliderWidth) && numBins > 0) {
             double minRatio = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
             double maxRatio = std::clamp(static_cast<double>(binrangemax), 0.0, 1.0);
 
@@ -806,16 +829,44 @@ private:
         return {};
     }};
 
+    message<> mousedoubleclick { this, "mousedoubleclick", MIN_FUNCTION {
+        // Use event class to extract coordinates properly
+        event e { args };
+        auto t = e.target();
+
+        const double w = t.width();
+        const double x = e.x();
+
+        // Slider is on the right side
+        double sliderX = w - sliderWidth - sliderMargin;
+
+        // Check if double-click is on the slider
+        if (x >= sliderX && x <= (sliderX + sliderWidth) && numBins > 0) {
+            // Reset to default values
+            binrangemin.set({0.0});
+            binrangemax.set({0.5});
+
+            updateDisplayBins();
+            needsFullRedraw = true;
+            redraw();
+        }
+
+        return {};
+    }};
+
     message<> mousedrag { this, "mousedrag", MIN_FUNCTION {
         if (!isDraggingSlider || numBins == 0) return {};
 
-        ui::target t { args };
-        const int h = static_cast<int>(t.height());
-        double y = args[1];
+        // Use event class to extract coordinates properly
+        event e { args };
+        auto t = e.target();
 
-        y = std::clamp(y, 0.0, static_cast<double>(h));
+        const double h = t.height();
+        const double y = e.y();
 
-        double ratio = 1.0 - (y / h);
+        double clampedY = std::clamp(y, 0.0, h);
+
+        double ratio = 1.0 - (clampedY / h);
         ratio = std::clamp(ratio, 0.0, 1.0);
 
         double currentMin = std::clamp(static_cast<double>(binrangemin), 0.0, 1.0);
