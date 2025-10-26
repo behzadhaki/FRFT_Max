@@ -47,4 +47,16 @@ function(bundle_torch_libs TARGET_NAME)
             "${MAX_PACKAGE_PATH}/${TARGET_NAME}.mxo"
             COMMENT "✅ Copied ${TARGET_NAME}.mxo to Max Packages folder"
     )
+
+    # Copy models to Resources folder (only once per build, not per target)
+    set(MAX_PACKAGE_RESOURCES_PATH "$ENV{HOME}/Documents/Max 9/Packages/FRFT/Resources")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/models")
+        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${MAX_PACKAGE_RESOURCES_PATH}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/models"
+                "${MAX_PACKAGE_RESOURCES_PATH}"
+                COMMENT "📦 Copied models to ${MAX_PACKAGE_RESOURCES_PATH}"
+        )
+    endif()
 endfunction()

@@ -1,10 +1,24 @@
 #include "c74_min.h"
 #include <torch/script.h>
 #include <vector>
+#include "shared_external_helpers.h"
 
 using namespace c74::min;
 
 class frft : public object<frft>, public vector_operator<> {
+private:
+    torch::jit::script::Module model;
+    bool model_loaded = false;
+
+    // Pre-allocated tensors for reuse
+    torch::Tensor real_tensor;
+    torch::Tensor imag_tensor;
+
+    // Pre-allocated IValue vector
+    std::vector<torch::jit::IValue> inputs;
+
+    int current_buffer_size = 0;
+
 public:
     MIN_DESCRIPTION{"Fractional Fourier Transform using PyTorch model"};
     MIN_TAGS{"spectral, transform, torch"};
@@ -17,31 +31,16 @@ public:
     outlet<> real_out{this, "(signal) real part output", "signal"};
     outlet<> imag_out{this, "(signal) imag part output", "signal"};
 
+    BundleResourceLoader resourceLoder;
+
     attribute<number> alpha{this, "alpha", 0.5,
         description{"Alpha parameter for FRFT"}
     };
 
     frft() {
         cout << "FRFT external initialized. Use 'modelpath <path>' to load model." << endl;
-    }
-
-    message<> float_input{this, "float", "Set alpha parameter",
-        MIN_FUNCTION {
-            if (args.size() > 0) {
-                alpha = args[0];
-            }
-            return {};
-        }
-    };
-
-    message<> modelpath{this, "modelpath", "Load model from absolute path", MIN_FUNCTION {
-        if (args.empty()) {
-            cerr << "modelpath requires a path argument" << endl;
-            return {};
-        }
-
         try {
-            std::string model_path = std::string(args[0]);
+            std::string model_path = resourceLoder.get_resource_path("frft_continuous.ts");
             cout << "Loading model from: " << model_path << endl;
 
             model = torch::jit::load(model_path);
@@ -56,9 +55,42 @@ public:
             cerr << "❌ Failed to load FRFT model: " << e.what() << endl;
             model_loaded = false;
         }
+    }
 
-        return {};
-    }};
+    message<> float_input{this, "float", "Set alpha parameter",
+        MIN_FUNCTION {
+            if (args.size() > 0) {
+                alpha = args[0];
+            }
+            return {};
+        }
+    };
+
+    // message<> modelpath{this, "modelpath", "Load model from absolute path", MIN_FUNCTION {
+    //     if (args.empty()) {
+    //         cerr << "modelpath requires a path argument" << endl;
+    //         return {};
+    //     }
+    //
+    //     try {
+    //         std::string model_path = std::string(args[0]);
+    //         cout << "Loading model from: " << model_path << endl;
+    //
+    //         model = torch::jit::load(model_path);
+    //         model.eval();
+    //
+    //         cout << "✅ FRFT model loaded successfully" << endl;
+    //         model_loaded = true;
+    //
+    //         current_buffer_size = 0;
+    //     }
+    //     catch (const std::exception& e) {
+    //         cerr << "❌ Failed to load FRFT model: " << e.what() << endl;
+    //         model_loaded = false;
+    //     }
+    //
+    //     return {};
+    // }};
 
     message<> status{this, "status", "Print model status", MIN_FUNCTION {
         if (model_loaded) {
@@ -71,17 +103,6 @@ public:
     }};
 
 private:
-    torch::jit::script::Module model;
-    bool model_loaded = false;
-
-    // Pre-allocated tensors for reuse
-    torch::Tensor real_tensor;
-    torch::Tensor imag_tensor;
-
-    // Pre-allocated IValue vector
-    std::vector<torch::jit::IValue> inputs;
-
-    int current_buffer_size = 0;
 
     void ensure_tensor_size(int vs) {
         if (current_buffer_size != vs) {

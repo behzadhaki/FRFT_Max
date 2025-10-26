@@ -96,15 +96,6 @@ configure_file(
 )
 bundle_torch_libs(${FRFT})
 
-# Copy model file into .mxo/Contents/MacOS (same location as torch dylibs)
-add_custom_command(TARGET ${FRFT}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${MODEL_SOURCE}"
-        "${CMAKE_BINARY_DIR}/${FRFT}.mxo/Contents/MacOS/${MODEL_FILENAME}"
-        COMMENT "📦 Copied model file into ${FRFT}.mxo/Contents/MacOS"
-)
-
 # ------------------------------------------------------------------------------
 # Install .mxo Bundle (Optional)
 # ------------------------------------------------------------------------------
@@ -135,15 +126,6 @@ configure_file(
 )
 bundle_torch_libs(${SignalInspector})
 
-# Copy model file into .mxo/Contents/MacOS (same location as torch dylibs)
-add_custom_command(TARGET ${SignalInspector}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${MODEL_SOURCE}"
-        "${CMAKE_BINARY_DIR}/${SignalInspector}.mxo/Contents/MacOS/${MODEL_FILENAME}"
-        COMMENT "📦 Copied model file into ${SignalInspector}.mxo/Contents/MacOS"
-)
-
 # ------------------------------------------------------------------------------
 # Install .mxo Bundle (Optional)
 # ------------------------------------------------------------------------------
@@ -156,27 +138,4 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/${SignalInspector}.mxo"
 # ------------------------------------------------------------------------------
 add_custom_target(FRFTAll
         DEPENDS ${FRFT} ${SignalInspector}
-)
-
-# ------------------------------------------------------------------------------
-# Copy to Max Package Path (Optional)
-# ------------------------------------------------------------------------------
-set(MAX_PACKAGE_PATH "$ENV{HOME}/Documents/Max 9/Packages/FRFT/externals")
-
-# Copy frft to Max Packages
-add_custom_command(TARGET ${FRFT} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${MAX_PACKAGE_PATH}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${FRFT}.mxo"
-        "${MAX_PACKAGE_PATH}/${FRFT}.mxo"
-        COMMENT "✅ Copied ${FRFT}.mxo to Max Packages folder"
-)
-
-# Copy spectrogram to Max Packages
-add_custom_command(TARGET ${SignalInspector} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${MAX_PACKAGE_PATH}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_BINARY_DIR}/${SignalInspector}.mxo"
-        "${MAX_PACKAGE_PATH}/${SignalInspector}.mxo"
-        COMMENT "✅ Copied ${SignalInspector}.mxo to Max Packages folder"
 )
