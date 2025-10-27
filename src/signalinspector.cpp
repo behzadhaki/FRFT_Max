@@ -151,7 +151,7 @@ public:
     attribute<number> gamma {
         this, "gamma", 0.5,
         range{0.1, 2.0},
-        description{"Gamma correction for contrast (< 1 brightens mids, > 1 darkens mids)"}
+        description{"Gamma correction for contrast (below 1 brightens, above 1 darkens)"}
     };
 
     attribute<bool> usedb {
