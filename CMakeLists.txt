@@ -15,10 +15,11 @@ set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)
 include(cmake/CPM.cmake)
 
 # ------------------------------------------------------------------------------
-# Find FFTW3 - Use full library paths
+# Find FFTW3 - FORCE STATIC LINKING
 # ------------------------------------------------------------------------------
-message(STATUS "🔍 Looking for FFTW3...")
+message(STATUS "🔍 Looking for FFTW3 (static)...")
 
+# Look for static library first
 find_path(FFTW3_INCLUDE_DIRS NAMES fftw3.h
         HINTS
         /opt/homebrew/include
@@ -27,7 +28,8 @@ find_path(FFTW3_INCLUDE_DIRS NAMES fftw3.h
         /usr/local/opt/fftw/include
 )
 
-find_library(FFTW3_LIBRARIES NAMES fftw3 libfftw3
+# Force finding the .a static library
+find_library(FFTW3_STATIC_LIB NAMES libfftw3.a
         HINTS
         /opt/homebrew/lib
         /opt/homebrew/opt/fftw/lib
@@ -35,25 +37,22 @@ find_library(FFTW3_LIBRARIES NAMES fftw3 libfftw3
         /usr/local/opt/fftw/lib
 )
 
-if(FFTW3_INCLUDE_DIRS AND FFTW3_LIBRARIES)
+if(FFTW3_INCLUDE_DIRS AND FFTW3_STATIC_LIB)
+    set(FFTW3_LIBRARIES ${FFTW3_STATIC_LIB})
     set(FFTW3_FOUND TRUE)
-    message(STATUS "✅ Found FFTW3")
+    message(STATUS "✅ Found FFTW3 static library")
     message(STATUS "   Include: ${FFTW3_INCLUDE_DIRS}")
     message(STATUS "   Library: ${FFTW3_LIBRARIES}")
 else()
-    message(FATAL_ERROR "❌ FFTW3 not found! Install with: brew install fftw")
-endif()
+    message(FATAL_ERROR "❌ FFTW3 static library not found!
 
-# Determine if we're linking statically or dynamically
-get_filename_component(FFTW3_LIB_EXT ${FFTW3_LIBRARIES} EXT)
-if(FFTW3_LIB_EXT STREQUAL ".a")
-    set(FFTW3_STATIC TRUE)
-    message(STATUS "   Using static FFTW3 (no bundling needed)")
-elseif(FFTW3_LIB_EXT STREQUAL ".dylib")
-    set(FFTW3_STATIC FALSE)
-    message(STATUS "   Using dynamic FFTW3 (will bundle into .mxo)")
-else()
-    message(WARNING "   Unknown FFTW3 library type: ${FFTW3_LIB_EXT}")
+Install FFTW with Homebrew (includes static library):
+    brew install fftw
+
+The static library should be at:
+    /opt/homebrew/opt/fftw/lib/libfftw3.a
+
+If you only have .dylib, reinstall FFTW.")
 endif()
 
 # ------------------------------------------------------------------------------
@@ -105,58 +104,24 @@ target_include_directories(frft_engine PUBLIC
         ${SRC_DIR}
         ${FFTW3_INCLUDE_DIRS}
 )
+
+# Link with static FFTW library
 target_link_libraries(frft_engine PUBLIC ${FFTW3_LIBRARIES} m)
 
+message(STATUS "🔗 FRFT Engine linked with static FFTW: ${FFTW3_LIBRARIES}")
+
 # ------------------------------------------------------------------------------
-# Helper function to bundle FFTW dylib into .mxo (similar to BundleTorchLibs)
+# Helper function to copy .mxo to Max Packages folder
 # ------------------------------------------------------------------------------
-function(bundle_fftw_lib TARGET_NAME)
-    if(NOT FFTW3_STATIC)
-        # Get just the filename of the dylib
-        get_filename_component(FFTW3_DYLIB_NAME ${FFTW3_LIBRARIES} NAME)
+function(deploy_to_max TARGET_NAME)
+    # Code sign the bundle
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+            COMMAND codesign --force --deep --sign - --timestamp=none
+            "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
+            COMMENT "🔐 Code signed ${TARGET_NAME}.mxo bundle"
+    )
 
-        # Copy FFTW dylib into the bundle
-        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${FFTW3_LIBRARIES}"
-                "${CMAKE_BINARY_DIR}/${TARGET_NAME}.mxo/Contents/MacOS"
-                COMMENT "📦 Bundled FFTW3 library into ${TARGET_NAME}.mxo"
-        )
-
-        # Make the copied dylib writable (Homebrew libs are read-only)
-        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                COMMAND chmod u+w "${CMAKE_BINARY_DIR}/${TARGET_NAME}.mxo/Contents/MacOS/${FFTW3_DYLIB_NAME}"
-                COMMENT "🔓 Made bundled FFTW3 writable"
-        )
-
-        # Update install_name to use @loader_path
-        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                COMMAND install_name_tool -change
-                "${FFTW3_LIBRARIES}"
-                "@loader_path/${FFTW3_DYLIB_NAME}"
-                "$<TARGET_FILE:${TARGET_NAME}>"
-                COMMENT "🔧 Updated ${TARGET_NAME} to use bundled FFTW3"
-        )
-
-        # Update the id of the copied dylib
-        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                COMMAND install_name_tool -id
-                "@loader_path/${FFTW3_DYLIB_NAME}"
-                "${CMAKE_BINARY_DIR}/${TARGET_NAME}.mxo/Contents/MacOS/${FFTW3_DYLIB_NAME}"
-                COMMENT "🔧 Updated bundled FFTW3 library id"
-        )
-
-        # Code sign the bundle
-        add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-                COMMAND codesign --force --deep --sign - --timestamp=none
-                "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
-                COMMENT "🔐 Code signed ${TARGET_NAME}.mxo bundle"
-        )
-
-        message(STATUS "📦 ${TARGET_NAME} will bundle: ${FFTW3_DYLIB_NAME}")
-    endif()
-
-    # Copy to Max Packages folder (just like BundleTorchLibs.cmake)
+    # Copy to Max Packages folder
     set(MAX_PACKAGE_PATH_DEFAULT "$ENV{HOME}/Documents/Max 9/Packages/FRFT/externals")
     set(MAX_PACKAGE_PATH ${MAX_PACKAGE_PATH_DEFAULT} CACHE PATH "Path to Max externals folder")
 
@@ -167,6 +132,8 @@ function(bundle_fftw_lib TARGET_NAME)
             "${MAX_PACKAGE_PATH}/${TARGET_NAME}.mxo"
             COMMENT "✅ Copied ${TARGET_NAME}.mxo to Max Packages folder"
     )
+
+    message(STATUS "📦 ${TARGET_NAME} will deploy to: ${MAX_PACKAGE_PATH}")
 endfunction()
 
 # ------------------------------------------------------------------------------
@@ -193,11 +160,11 @@ configure_file(
         @ONLY
 )
 
-# Bundle FFTW library if needed
-bundle_fftw_lib(${FRFT})
+# Deploy to Max (no bundling needed with static linking!)
+deploy_to_max(${FRFT})
 
 # ------------------------------------------------------------------------------
-# Install .mxo Bundle (also available via 'make install')
+# Install .mxo Bundle
 # ------------------------------------------------------------------------------
 install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFT}.mxo"
         DESTINATION "${CMAKE_SOURCE_DIR}/externals"
@@ -228,8 +195,8 @@ if(EXISTS ${SRC_DIR}/signalinspector.cpp)
             @ONLY
     )
 
-    # Bundle FFTW library if needed
-    bundle_fftw_lib(${SignalInspector})
+    # Deploy to Max
+    deploy_to_max(${SignalInspector})
 
     install(DIRECTORY "${CMAKE_BINARY_DIR}/${SignalInspector}.mxo"
             DESTINATION "${CMAKE_SOURCE_DIR}/externals"
@@ -264,15 +231,12 @@ message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Architecture: ${CMAKE_OSX_ARCHITECTURES}")
 message(STATUS "  FFTW3 Include: ${FFTW3_INCLUDE_DIRS}")
-message(STATUS "  FFTW3 Library: ${FFTW3_LIBRARIES}")
-if(FFTW3_STATIC)
-    message(STATUS "  FFTW3 Linking: Static (no bundling needed)")
-else()
-    message(STATUS "  FFTW3 Linking: Dynamic (will bundle into .mxo)")
-endif()
+message(STATUS "  FFTW3 Library: ${FFTW3_LIBRARIES} (STATIC)")
+message(STATUS "  Linking: Static (no dylib bundling needed)")
+message(STATUS "  Bundle size: ~2MB (everything embedded)")
 message(STATUS "  Min API: ${MIN_API_ROOT}")
 message(STATUS "  Max SDK: ${MAX_SDK_ROOT}")
 message(STATUS "  Source Dir: ${SRC_DIR}")
-message(STATUS "  Externals Dir: ${CMAKE_SOURCE_DIR}/externals")
+message(STATUS "  Max Deploy: ~/Documents/Max 9/Packages/FRFT/externals")
 message(STATUS "═══════════════════════════════════════════════════")
 message(STATUS "")

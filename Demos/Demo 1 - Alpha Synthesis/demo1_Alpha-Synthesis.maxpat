@@ -31,7 +31,6 @@
 					"numinlets" : 1,
 					"numoutlets" : 0,
 					"patching_rect" : [ 103.092777729034424, 385.566988706588745, 228.0, 28.0 ],
-					"presentation_linecount" : 2,
 					"text" : "Output Mixer / Visualizer",
 					"textjustification" : 1
 				}
@@ -564,12 +563,13 @@
 , 							{
 								"box" : 								{
 									"id" : "obj-50",
+									"linecount" : 2,
 									"maxclass" : "message",
 									"numinlets" : 2,
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 440.0, 405.0, 50.0, 22.0 ],
-									"text" : "0."
+									"text" : "0.222777"
 								}
 
 							}
@@ -1104,7 +1104,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
 					"patching_rect" : [ 321.649466514587402, 271.134005427360535, 201.0, 22.0 ],
-					"text" : "pfft~ alpha-synth-patcher 4096 2 0 1"
+					"text" : "pfft~ alpha-synth-patcher 1024 2 0 1"
 				}
 
 			}

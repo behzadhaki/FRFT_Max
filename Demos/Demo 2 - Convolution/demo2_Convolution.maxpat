@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 12.0, -981.0, 1333.0, 959.0 ],
+		"rect" : [ 260.0, -978.0, 1314.0, 959.0 ],
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
 				"box" : 				{
@@ -384,13 +384,12 @@
 , 							{
 								"box" : 								{
 									"id" : "obj-50",
-									"linecount" : 2,
 									"maxclass" : "message",
 									"numinlets" : 2,
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 440.0, 405.0, 50.0, 22.0 ],
-									"text" : "0.371795"
+									"text" : "0."
 								}
 
 							}
@@ -1481,13 +1480,12 @@
 , 							{
 								"box" : 								{
 									"id" : "obj-50",
-									"linecount" : 2,
 									"maxclass" : "message",
 									"numinlets" : 2,
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
-									"patching_rect" : [ 440.0, 405.0, 50.0, 22.0 ],
-									"text" : "0.038462"
+									"patching_rect" : [ 440.0, 405.0, 59.0, 22.0 ],
+									"text" : "0."
 								}
 
 							}
@@ -2024,7 +2022,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
 					"patching_rect" : [ 400.0, 74.0, 200.0, 22.0 ],
-					"text" : "pfft~ convolution-patcher 4096 2 0 1"
+					"text" : "pfft~ convolution-patcher 1024 4 0 1"
 				}
 
 			}
