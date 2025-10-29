@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ -2.0, -993.0, 1007.0, 959.0 ],
+		"rect" : [ 41.0, 115.0, 821.0, 1013.0 ],
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
 				"box" : 				{
@@ -176,7 +176,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 388.659772038459778, 544.329866409301758, 412.0, 70.0 ]
+					"patching_rect" : [ 389.0, 549.515433073043823, 402.0, 65.0 ]
 				}
 
 			}
@@ -464,7 +464,7 @@
 							"parameter_initial" : [ 1 ],
 							"parameter_initial_enable" : 1,
 							"parameter_longname" : "alpha",
-							"parameter_mmax" : 0.1,
+							"parameter_mmax" : 2.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "alpha",
 							"parameter_type" : 0,
@@ -563,13 +563,12 @@
 , 							{
 								"box" : 								{
 									"id" : "obj-50",
-									"linecount" : 2,
 									"maxclass" : "message",
 									"numinlets" : 2,
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 440.0, 405.0, 50.0, 22.0 ],
-									"text" : "0.222777"
+									"text" : "0."
 								}
 
 							}
@@ -1104,7 +1103,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
 					"patching_rect" : [ 321.649466514587402, 271.134005427360535, 201.0, 22.0 ],
-					"text" : "pfft~ alpha-synth-patcher 1024 2 0 1"
+					"text" : "pfft~ alpha-synth-patcher 8192 4 0 1"
 				}
 
 			}

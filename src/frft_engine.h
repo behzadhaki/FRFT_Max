@@ -46,7 +46,9 @@ private:
     
     // Utility
     int next_power_of_2(int n);
-    
+    std::vector<Complex> fftshift(const std::vector<Complex>& input);
+    std::vector<Complex> ifftshift(const std::vector<Complex>& input);
+
     // FFTW plan cache for efficiency
     struct PlanCache {
         fftw_plan forward_plan = nullptr;
