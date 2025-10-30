@@ -181,11 +181,14 @@ public:
             // Get alpha parameter
             double alpha_param = static_cast<double>(alpha);
 
+            // Determine if we're in half-spectrum mode
+            bool is_half_spectrum = (pfft_mode == 0);
+
             // Compute FRFT
             bool success = engine.compute(
                 in_real, in_imag,
                 out_real, out_imag,
-                vs, alpha_param
+                vs, alpha_param, is_half_spectrum
             );
 
             if (!success) {

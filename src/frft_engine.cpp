@@ -53,18 +53,45 @@ void FRFTEngine::prepare(int size) {
 
 bool FRFTEngine::compute(const double* real_in, const double* imag_in,
                          double* real_out, double* imag_out,
-                         int size, double a_param) {
+                         int size, double a_param, bool is_half_spectrum) {
     // Validate inputs
     if (size % 2 != 0) {
         return false;  // Signal size must be even
     }
-    
+
     // Construct complex signal
     std::vector<Complex> fc(size);
-    for (int i = 0; i < size; ++i) {
-        fc[i] = Complex(real_in[i], imag_in[i]);
+
+    if (is_half_spectrum) {
+        // Half-spectrum mode: reconstruct full spectrum from half
+        // Input has only bins [0, N/2] (DC to Nyquist)
+        // We need to create the conjugate symmetric negative frequencies
+
+        int half_size = size / 2;
+
+        // DC bin
+        fc[0] = Complex(real_in[0], imag_in[0]);
+
+        // Positive frequencies [1, N/2-1]
+        for (int i = 1; i < half_size; ++i) {
+            fc[i] = Complex(real_in[i], imag_in[i]);
+        }
+
+        // Nyquist bin
+        fc[half_size] = Complex(real_in[half_size], imag_in[half_size]);
+
+        // Negative frequencies as conjugate of positive [N/2+1, N-1]
+        // fc[N-k] = conj(fc[k]) for k=1 to N/2-1
+        for (int i = 1; i < half_size; ++i) {
+            fc[size - i] = std::conj(fc[i]);
+        }
+    } else {
+        // Full-spectrum mode: direct copy
+        for (int i = 0; i < size; ++i) {
+            fc[i] = Complex(real_in[i], imag_in[i]);
+        }
     }
-    
+
     // Apply fftshift to convert from FFT ordering [0, pos, neg] to centered [-N/2, ..., N/2]
     fc = fftshift(fc);
 
@@ -78,13 +105,13 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
 
     std::vector<Complex> result;
 
-    // Special integer cases
+    // Special integer cases - these are computationally cheap
     if (std::abs(a) < 1e-10) {
         result = fc;
     } else if (std::abs(a - 2.0) < 1e-10 || std::abs(a + 2.0) < 1e-10) {
         result = dflip(fc);
     } else {
-        // General case
+        // General case - this is where the heavy computation happens
         std::vector<Complex> biz = bizinter(fc);
 
         // Create zeros vector of size N
@@ -124,10 +151,25 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
     // Apply ifftshift to convert back from centered to FFT ordering
     result = ifftshift(result);
 
-    // Extract real and imaginary parts
-    for (size_t i = 0; i < result.size() && i < static_cast<size_t>(size); ++i) {
-        real_out[i] = result[i].real();
-        imag_out[i] = result[i].imag();
+    // Extract output based on mode
+    if (is_half_spectrum) {
+        // Half-spectrum mode: output only positive frequencies [0, N/2]
+        int half_size = size / 2 + 1;
+        for (int i = 0; i < half_size; ++i) {
+            real_out[i] = result[i].real();
+            imag_out[i] = result[i].imag();
+        }
+        // Zero out unused bins for safety
+        for (int i = half_size; i < size; ++i) {
+            real_out[i] = 0.0;
+            imag_out[i] = 0.0;
+        }
+    } else {
+        // Full-spectrum mode: output all frequencies
+        for (int i = 0; i < size; ++i) {
+            real_out[i] = result[i].real();
+            imag_out[i] = result[i].imag();
+        }
     }
 
     return true;
