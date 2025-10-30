@@ -3,19 +3,35 @@
 
 using namespace c74::min;
 
+// Define t_pfftpub structure for pfft~ access
+// Based on Max SDK's r_pfft.h
+extern "C" {
+    typedef struct _pfftpub {
+        c74::max::t_pxobject x_obj;
+        long x_fftsize;
+        long x_overlap;
+        long x_framesize;
+        long x_hopsize;
+        // We don't need the rest of the fields
+    } t_pfftpub;
+}
+
 class frft : public object<frft>, public vector_operator<> {
 private:
     FRFTEngine engine;
     bool initialized = false;
+    bool in_pfft = false;
     int current_buffer_size = 0;
+    long fft_size = 0;
+    long overlap_factor = 0;
 
     // Pre-allocated buffers for real-time processing
     std::vector<double> real_buffer;
     std::vector<double> imag_buffer;
 
 public:
-    MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation"};
-    MIN_TAGS{"spectral, transform, frft"};
+    MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation (pfft~ only)"};
+    MIN_TAGS{"spectral, transform, frft, pfft"};
     MIN_AUTHOR{"YourName"};
 
     inlet<> real_in{this, "(signal) real part input", "signal"};
@@ -31,6 +47,32 @@ public:
     };
 
     frft() {
+        // Initialize common symbols (required for Max SDK integration)
+        c74::max::common_symbols_init();
+
+        // Check if running inside pfft~ using Max SDK method
+        using namespace c74::max;
+        t_pfftpub* pfft = (t_pfftpub*)gensym("__pfft~__")->s_thing;
+
+        if (!pfft) {
+            cerr << "❌ ERROR: frft~ must be used inside pfft~" << endl;
+            cerr << "   This object will not function outside of pfft~" << endl;
+            in_pfft = false;
+            initialized = false;
+            return;
+        }
+
+        // Successfully detected pfft~ - get settings
+        in_pfft = true;
+        fft_size = pfft->x_fftsize;
+        overlap_factor = pfft->x_overlap;
+
+        // Print success message with pfft~ settings
+        cout << "✅ frft~ loaded successfully in pfft~" << endl;
+        cout << "   FFT Size: " << fft_size << endl;
+        cout << "   Overlap Factor: " << overlap_factor << endl;
+        cout << "   Frame Size: " << (fft_size / overlap_factor) << endl;
+
         initialized = true;
     }
 
@@ -44,8 +86,15 @@ public:
     };
 
     message<> status{this, "status", "Print engine status", MIN_FUNCTION {
-        if (initialized) {
+        if (!in_pfft) {
+            cout << "❌ ERROR: Not running in pfft~" << endl;
+            cout << "   frft~ requires pfft~ to operate" << endl;
+        } else if (initialized) {
             cout << "✅ FRFT engine is initialized and ready" << endl;
+            cout << "   Running in pfft~: YES" << endl;
+            cout << "   FFT Size: " << fft_size << endl;
+            cout << "   Overlap Factor: " << overlap_factor << endl;
+            cout << "   Frame Size: " << (fft_size / overlap_factor) << endl;
             cout << "   Current buffer size: " << current_buffer_size << endl;
             cout << "   Current alpha: " << double(alpha) << endl;
         } else {
@@ -75,6 +124,14 @@ public:
         auto out_imag = output.samples(1);
 
         int vs = input.frame_count();
+
+        // Check if we're in pfft~ before processing
+        if (!in_pfft) {
+            // Zero output if not in pfft~
+            std::fill(out_real, out_real + vs, 0.0);
+            std::fill(out_imag, out_imag + vs, 0.0);
+            return;
+        }
 
         if (!initialized) {
             // Pass through if not initialized

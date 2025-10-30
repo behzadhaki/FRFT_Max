@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(FRFT VERSION 1.0.0 LANGUAGES CXX)
+project(FRFT VERSION 1.0.0 LANGUAGES C CXX)
 
 # ------------------------------------------------------------------------------
 # Build Settings
@@ -78,6 +78,9 @@ if(NOT EXISTS ${MAX_SDK_ROOT})
 endif()
 message(STATUS "✅ Using Max SDK from: ${MAX_SDK_ROOT}")
 
+# Set Max SDK includes path for common symbols
+set(MAX_SDK_INCLUDES "${MAX_SDK_ROOT}/source/max-sdk-base/c74support/max-includes")
+
 # ------------------------------------------------------------------------------
 # Common Includes
 # ------------------------------------------------------------------------------
@@ -85,6 +88,7 @@ set(COMMON_INCLUDES
         ${MIN_API_ROOT}/include
         ${MAX_SDK_ROOT}/source/max-sdk-base/c74support
         ${MAX_SDK_ROOT}/source/max-sdk-base/c74support/max-includes
+        ${MAX_SDK_ROOT}/source/max-sdk-base/c74support/msp-includes
         ${FFTW3_INCLUDE_DIRS}
 )
 
@@ -140,7 +144,14 @@ endfunction()
 # FRFT Target (Max External)
 # ------------------------------------------------------------------------------
 set(FRFT frft)
-add_library(${FRFT} MODULE ${SRC_DIR}/frft.cpp)
+
+# Define source files including Max SDK common symbols
+set(FRFT_SOURCE_FILES
+        ${SRC_DIR}/frft.cpp
+        ${MAX_SDK_INCLUDES}/common/commonsyms.c
+)
+
+add_library(${FRFT} MODULE ${FRFT_SOURCE_FILES})
 target_include_directories(${FRFT} PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(${FRFT} frft_engine)
 
