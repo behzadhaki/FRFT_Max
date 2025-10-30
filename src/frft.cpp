@@ -4,14 +4,19 @@
 using namespace c74::min;
 
 // Define t_pfftpub structure for pfft~ access
-// Based on Max SDK's r_pfft.h
+// Based on Max SDK's r_pfft.h - field order matters!
+// Memory layout determined from actual pfft~ object
 extern "C" {
     typedef struct _pfftpub {
-        c74::max::t_pxobject x_obj;
-        long x_fftsize;
-        long x_overlap;
-        long x_framesize;
-        long x_hopsize;
+        c74::max::t_pxobject x_obj;  // indices 0-7 (t_pxobject is large)
+        void* x_dspchain;             // index 8
+        void* x_args;                 // index 9
+        long x_extras;                // index 10
+        long x_fftsize;               // index 11 - FFT size (e.g., 1024)
+        long x_hopsize;               // index 12 - Hop size (e.g., 256)
+        long x_phase;                 // index 13
+        long x_unknown;               // index 14
+        long x_mode;                  // index 15 - Mode: 0=half-frame, 1=full-frame
         // We don't need the rest of the fields
     } t_pfftpub;
 }
@@ -23,6 +28,9 @@ private:
     bool in_pfft = false;
     int current_buffer_size = 0;
     long fft_size = 0;
+    long half_frame_size = 0;
+    long hop_size = 0;
+    long pfft_mode = 0;
     long overlap_factor = 0;
 
     // Pre-allocated buffers for real-time processing
@@ -62,16 +70,26 @@ public:
             return;
         }
 
-        // Successfully detected pfft~ - get settings
+        // Successfully detected pfft~ - extract and store all settings
         in_pfft = true;
         fft_size = pfft->x_fftsize;
-        overlap_factor = pfft->x_overlap;
+        hop_size = pfft->x_hopsize;
+        pfft_mode = pfft->x_mode;
 
-        // Print success message with pfft~ settings
-        cout << "✅ frft~ loaded successfully in pfft~" << endl;
+        // Calculate half-frame size based on mode
+        // mode 0 = half-frame (fft_size/2), mode 1 = full-frame (fft_size)
+        half_frame_size = (pfft_mode == 0) ? (fft_size / 2) : fft_size;
+
+        // Calculate overlap factor: overlap = fft_size / hop_size
+        overlap_factor = (hop_size > 0) ? (fft_size / hop_size) : 1;
+
+        // Print pfft~ settings
+        cout << "✅ frft~ loaded in pfft~" << endl;
         cout << "   FFT Size: " << fft_size << endl;
+        cout << "   Spectrum Mode: " << (pfft_mode == 0 ? "Half Spectrum" : "Full Spectrum") << endl;
+        cout << "   Frame Size: " << half_frame_size << endl;
+        cout << "   Hop Size: " << hop_size << endl;
         cout << "   Overlap Factor: " << overlap_factor << endl;
-        cout << "   Frame Size: " << (fft_size / overlap_factor) << endl;
 
         initialized = true;
     }
@@ -90,11 +108,14 @@ public:
             cout << "❌ ERROR: Not running in pfft~" << endl;
             cout << "   frft~ requires pfft~ to operate" << endl;
         } else if (initialized) {
-            cout << "✅ FRFT engine is initialized and ready" << endl;
-            cout << "   Running in pfft~: YES" << endl;
+            cout << "✅ frft~ running in pfft~" << endl;
+            cout << "\nPFFT~ Settings:" << endl;
             cout << "   FFT Size: " << fft_size << endl;
+            cout << "   Spectrum Mode: " << (pfft_mode == 0 ? "Half Spectrum" : "Full Spectrum") << endl;
+            cout << "   Frame Size: " << half_frame_size << endl;
+            cout << "   Hop Size: " << hop_size << endl;
             cout << "   Overlap Factor: " << overlap_factor << endl;
-            cout << "   Frame Size: " << (fft_size / overlap_factor) << endl;
+            cout << "\nFRFT Engine:" << endl;
             cout << "   Current buffer size: " << current_buffer_size << endl;
             cout << "   Current alpha: " << double(alpha) << endl;
         } else {
