@@ -31,8 +31,6 @@ public:
     };
 
     frft() {
-        cout << "✅ FRFT external initialized (native C++ implementation)" << endl;
-        cout << "   Uses FFTW for fast Fourier transforms" << endl;
         initialized = true;
     }
 
@@ -66,7 +64,6 @@ private:
             engine.prepare(vs);
 
             current_buffer_size = vs;
-            cout << "Prepared buffers and FFTW plans for size: " << vs << endl;
         }
     }
 
