@@ -10,9 +10,33 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 41.0, 115.0, 821.0, 1013.0 ],
+		"rect" : [ 34.0, 106.0, 1732.0, 1029.0 ],
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
+				"box" : 				{
+					"id" : "obj-8",
+					"maxclass" : "button",
+					"numinlets" : 1,
+					"numoutlets" : 1,
+					"outlettype" : [ "bang" ],
+					"parameter_enable" : 0,
+					"patching_rect" : [ 23.0, 343.0, 24.0, 24.0 ]
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-3",
+					"maxclass" : "newobj",
+					"numinlets" : 1,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 24.460000000000001, 409.509999999999991, 87.0, 22.0 ],
+					"text" : "loadmess -100"
+				}
+
+			}
+, 			{
 				"box" : 				{
 					"id" : "obj-36",
 					"maxclass" : "comment",
@@ -176,7 +200,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 389.0, 549.515433073043823, 402.0, 65.0 ]
+					"patching_rect" : [ 388.659772038459778, 616.515433073043823, 402.0, 65.0 ]
 				}
 
 			}
@@ -223,6 +247,7 @@
 , 			{
 				"box" : 				{
 					"bgcolor" : [ 0.125490196078431, 0.125490196078431, 0.125490196078431, 0.0 ],
+					"fgcolor" : [ 0.619607843137255, 0.745098039215686, 0.952941176470588, 0.23 ],
 					"id" : "obj-12",
 					"maxclass" : "spectroscope~",
 					"numinlets" : 2,
@@ -563,12 +588,13 @@
 , 							{
 								"box" : 								{
 									"id" : "obj-50",
+									"linecount" : 2,
 									"maxclass" : "message",
 									"numinlets" : 2,
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 440.0, 405.0, 50.0, 22.0 ],
-									"text" : "0."
+									"text" : "0.290312"
 								}
 
 							}
@@ -1102,8 +1128,8 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "signal" ],
-					"patching_rect" : [ 321.649466514587402, 271.134005427360535, 201.0, 22.0 ],
-					"text" : "pfft~ alpha-synth-patcher 8192 4 0 1"
+					"patching_rect" : [ 323.0, 271.0, 208.0, 22.0 ],
+					"text" : "pfft~ alpha-synth-patcher 1024 16 0 1"
 				}
 
 			}
@@ -1154,6 +1180,22 @@
 				"patchline" : 				{
 					"destination" : [ "obj-12", 0 ],
 					"source" : [ "obj-29", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-5", 0 ],
+					"order" : 1,
+					"source" : [ "obj-3", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-50", 0 ],
+					"order" : 0,
+					"source" : [ "obj-3", 0 ]
 				}
 
 			}
@@ -1314,6 +1356,13 @@
 				"patchline" : 				{
 					"destination" : [ "obj-43", 0 ],
 					"source" : [ "obj-7", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-3", 0 ],
+					"source" : [ "obj-8", 0 ]
 				}
 
 			}

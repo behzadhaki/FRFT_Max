@@ -20,11 +20,10 @@ public:
     // real_in, imag_in: input signal (must be even length)
     // real_out, imag_out: output signal (same length as input)
     // a_param: fractional order parameter
-    // is_half_spectrum: true if pfft~ is in half-spectrum mode (mode 0)
     // Returns: true on success, false on error
     bool compute(const double* real_in, const double* imag_in,
                  double* real_out, double* imag_out,
-                 int size, double a_param, bool is_half_spectrum = false);
+                 int size, double a_param);
 
     // Pre-allocate buffers for a given size (optional, for efficiency)
     void prepare(int size);
