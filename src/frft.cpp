@@ -1,3 +1,8 @@
+// Windows-specific: Include windows.h before Max headers to avoid type conflicts
+#ifdef WIN32
+#include <windows.h>
+#endif
+
 #include "c74_min.h"
 #include "frft_engine.h"
 
@@ -26,8 +31,8 @@ public:
     outlet<> imag_out{this, "(signal) imag part output", "signal"};
 
     attribute<number> alpha{this, "alpha", 0.5,
-        description{"Alpha parameter for FRFT (fractional order)"},
-        range{-10.0, 10.0}
+                            description{"Alpha parameter for FRFT (fractional order)"},
+                            range{-10.0, 10.0}
     };
 
     frft() {
@@ -35,12 +40,12 @@ public:
     }
 
     message<> float_input{this, "float", "Set alpha parameter",
-        MIN_FUNCTION {
-            if (args.size() > 0) {
-                alpha = args[0];
-            }
-            return {};
-        }
+                          MIN_FUNCTION {
+                              if (args.size() > 0) {
+                                  alpha = args[0];
+                              }
+                              return {};
+                          }
     };
 
     message<> status{this, "status", "Print engine status", MIN_FUNCTION {
@@ -105,9 +110,9 @@ public:
 
             // Compute FRFT
             bool success = engine.compute(
-                in_real, in_imag,
-                out_real, out_imag,
-                vs, alpha_param
+                    in_real, in_imag,
+                    out_real, out_imag,
+                    vs, alpha_param
             );
 
             if (!success) {

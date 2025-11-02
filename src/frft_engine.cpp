@@ -27,19 +27,19 @@ FRFTEngine::PlanCache* FRFTEngine::get_or_create_plan(size_t size) {
             return &cache;
         }
     }
-    
+
     // Create new plan
     PlanCache new_cache;
     new_cache.size = size;
     new_cache.in_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
     new_cache.out_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
-    
+
     // Create plans with FFTW_MEASURE for better performance
-    new_cache.forward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer, 
+    new_cache.forward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
                                               FFTW_FORWARD, FFTW_MEASURE);
-    new_cache.backward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer, 
+    new_cache.backward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
                                                FFTW_BACKWARD, FFTW_MEASURE);
-    
+
     plan_cache_.push_back(new_cache);
     return &plan_cache_.back();
 }
@@ -58,13 +58,13 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
     if (size % 2 != 0) {
         return false;  // Signal size must be even
     }
-    
+
     // Construct complex signal
     std::vector<Complex> fc(size);
     for (int i = 0; i < size; ++i) {
         fc[i] = Complex(real_in[i], imag_in[i]);
     }
-    
+
     // Apply fftshift to convert from FFT ordering [0, pos, neg] to centered [-N/2, ..., N/2]
     fc = fftshift(fc);
 

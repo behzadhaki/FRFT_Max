@@ -1,5 +1,10 @@
 #pragma once
 
+// Define M_PI for Windows (MSVC doesn't define it by default)
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #include <vector>
 #include <complex>
 #include <cmath>
@@ -37,13 +42,13 @@ private:
     std::vector<Complex> upsample2(const std::vector<Complex>& x);
     std::vector<Complex> corefrmod2(const std::vector<Complex>& signal, double a);
     std::vector<Complex> vecmul(const std::vector<Complex>& tensor, const std::vector<Complex>& vector);
-    
+
     // FFT helpers
     std::vector<Complex> fft(const std::vector<Complex>& input);
     std::vector<Complex> ifft(const std::vector<Complex>& input);
     std::vector<Complex> fft_n(const std::vector<Complex>& input, size_t n);
     std::vector<Complex> ifft_n(const std::vector<Complex>& input, size_t n);
-    
+
     // Utility
     int next_power_of_2(int n);
     std::vector<Complex> fftshift(const std::vector<Complex>& input);
@@ -57,7 +62,7 @@ private:
         fftw_complex* out_buffer = nullptr;
         size_t size = 0;
     };
-    
+
     std::vector<PlanCache> plan_cache_;
     PlanCache* get_or_create_plan(size_t size);
     void cleanup_plans();
