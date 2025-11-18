@@ -59,22 +59,14 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
         return false;  // Signal size must be even
     }
 
-    // Reallocate buffers only if size changed
-    if (cached_size_ != static_cast<size_t>(size)) {
-        cached_size_ = size;
-        fc_.resize(size);
-        result_.resize(size);
-        zeros_.resize(size);
-    }
-
-    // Construct complex signal (reusing fc_ buffer)
+    // Construct complex signal
+    std::vector<Complex> fc(size);
     for (int i = 0; i < size; ++i) {
-        fc_[i] = Complex(real_in[i], imag_in[i]);
+        fc[i] = Complex(real_in[i], imag_in[i]);
     }
 
     // Apply fftshift to convert from FFT ordering [0, pos, neg] to centered [-N/2, ..., N/2]
-    fftshift(fc_);
-    fc_.swap(fftshift_output_);  // Swap instead of copy
+    fc = fftshift(fc);
 
     // 4-modulation and shifting to [-2, 2] interval
     double a = std::fmod(a_param, 4.0);
@@ -84,64 +76,58 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
         a += 4.0;
     }
 
+    std::vector<Complex> result;
+
     // Special integer cases
     if (std::abs(a) < 1e-10) {
-        result_ = fc_;
+        result = fc;
     } else if (std::abs(a - 2.0) < 1e-10 || std::abs(a + 2.0) < 1e-10) {
-        result_ = dflip(fc_);
+        result = dflip(fc);
     } else {
         // General case
-        biz_ = bizinter(fc_);
+        std::vector<Complex> biz = bizinter(fc);
 
-        // Fill zeros vector (already allocated)
-        std::fill(zeros_.begin(), zeros_.end(), Complex(0.0, 0.0));
+        // Create zeros vector of size N
+        std::vector<Complex> zeros(size, Complex(0.0, 0.0));
 
-        // Concatenate: zeros + biz + zeros (reusing fc_expanded_)
-        size_t expanded_size = size + biz_.size() + size;
-        if (fc_expanded_.size() != expanded_size) {
-            fc_expanded_.resize(expanded_size);
-        }
+        // Concatenate: zeros + biz + zeros
+        std::vector<Complex> fc_expanded;
+        fc_expanded.reserve(size + biz.size() + size);
+        fc_expanded.insert(fc_expanded.end(), zeros.begin(), zeros.end());
+        fc_expanded.insert(fc_expanded.end(), biz.begin(), biz.end());
+        fc_expanded.insert(fc_expanded.end(), zeros.begin(), zeros.end());
 
-        std::copy(zeros_.begin(), zeros_.end(), fc_expanded_.begin());
-        std::copy(biz_.begin(), biz_.end(), fc_expanded_.begin() + size);
-        std::copy(zeros_.begin(), zeros_.end(), fc_expanded_.begin() + size + biz_.size());
+        std::vector<Complex> res = fc_expanded;
 
-        // Use fc_expanded_ directly - avoid copy to res_
         // Conditional transformations based on a value
         if ((0 < a && a < 0.5) || (1.5 < a && a < 2.0)) {
-            res_ = corefrmod2(fc_expanded_, 1.0);
+            res = corefrmod2(fc_expanded, 1.0);
             a -= 1.0;
-        } else {
-            res_ = fc_expanded_;
         }
 
         if ((-0.5 < a && a < 0) || (-2.0 < a && a < -1.5)) {
-            res_ = corefrmod2(res_, -1.0);
+            res = corefrmod2(fc_expanded, -1.0);
             a += 1.0;
         }
 
-        res_ = corefrmod2(res_, a);
+        res = corefrmod2(res, a);
 
-        // Extract elements from index N to 3*N (reusing res_extracted_)
-        if (res_extracted_.size() != static_cast<size_t>(2 * size)) {
-            res_extracted_.resize(2 * size);
-        }
-        std::copy(res_.begin() + size, res_.begin() + 3 * size, res_extracted_.begin());
+        // Extract elements from index N to 3*N
+        std::vector<Complex> res_extracted(res.begin() + size, res.begin() + 3 * size);
 
         // Decimate
-        res_extracted_ = bizdec(res_extracted_);
+        res_extracted = bizdec(res_extracted);
 
-        result_ = res_extracted_;
+        result = res_extracted;
     }
 
     // Apply ifftshift to convert back from centered to FFT ordering
-    ifftshift(result_);
-    result_.swap(ifftshift_output_);  // Swap instead of copy
+    result = ifftshift(result);
 
     // Extract real and imaginary parts
-    for (size_t i = 0; i < result_.size() && i < static_cast<size_t>(size); ++i) {
-        real_out[i] = result_[i].real();
-        imag_out[i] = result_[i].imag();
+    for (size_t i = 0; i < result.size() && i < static_cast<size_t>(size); ++i) {
+        real_out[i] = result[i].real();
+        imag_out[i] = result[i].imag();
     }
 
     return true;
@@ -150,61 +136,45 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
 std::vector<Complex> FRFTEngine::dflip(const std::vector<Complex>& tensor) {
     if (tensor.empty()) return tensor;
 
-    // Reallocate only if size changed
-    if (dflip_result_.size() != tensor.size()) {
-        dflip_result_.resize(tensor.size());
-    }
-
-    dflip_result_[0] = tensor[0];
+    std::vector<Complex> result(tensor.size());
+    result[0] = tensor[0];
 
     for (size_t i = 1; i < tensor.size(); ++i) {
-        dflip_result_[i] = tensor[tensor.size() - i];
+        result[i] = tensor[tensor.size() - i];
     }
 
-    return dflip_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::bizdec(const std::vector<Complex>& x) {
-    size_t result_size = x.size() / 2 + 1;
+    std::vector<Complex> result;
+    result.reserve(x.size() / 2 + 1);
 
-    // Reallocate only if size changed
-    if (bizdec_result_.size() != result_size) {
-        bizdec_result_.resize(result_size);
-    }
-
-    size_t idx = 0;
     for (size_t i = 0; i < x.size(); i += 2) {
-        bizdec_result_[idx++] = x[i];
+        result.push_back(x[i]);
     }
 
-    return bizdec_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::bizinter(const std::vector<Complex>& x) {
-    // Reallocate only if size changed
-    if (real_part_.size() != x.size()) {
-        real_part_.resize(x.size());
-        imag_part_.resize(x.size());
-        bizinter_result_.resize(0); // Will be resized by bizinter_real
-    }
+    std::vector<double> real_part(x.size());
+    std::vector<double> imag_part(x.size());
 
     for (size_t i = 0; i < x.size(); ++i) {
-        real_part_[i] = x[i].real();
-        imag_part_[i] = x[i].imag();
+        real_part[i] = x[i].real();
+        imag_part[i] = x[i].imag();
     }
 
-    real_result_ = bizinter_real(real_part_);
-    imag_result_ = bizinter_real(imag_part_);
+    std::vector<Complex> real_result = bizinter_real(real_part);
+    std::vector<Complex> imag_result = bizinter_real(imag_part);
 
-    if (bizinter_result_.size() != real_result_.size()) {
-        bizinter_result_.resize(real_result_.size());
+    std::vector<Complex> result(real_result.size());
+    for (size_t i = 0; i < result.size(); ++i) {
+        result[i] = Complex(real_result[i].real(), imag_result[i].real());
     }
 
-    for (size_t i = 0; i < bizinter_result_.size(); ++i) {
-        bizinter_result_[i] = Complex(real_result_[i].real(), imag_result_[i].real());
-    }
-
-    return bizinter_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::bizinter_real(const std::vector<double>& x) {
@@ -212,46 +182,37 @@ std::vector<Complex> FRFTEngine::bizinter_real(const std::vector<double>& x) {
     size_t N1 = N / 2 + (N % 2);
     size_t N2 = 2 * N - (N / 2);
 
-    // Reallocate only if size changed
-    if (x_complex_.size() != N) {
-        x_complex_.resize(N);
-    }
-
+    std::vector<Complex> x_complex(N);
     for (size_t i = 0; i < N; ++i) {
-        x_complex_[i] = Complex(x[i], 0.0);
+        x_complex[i] = Complex(x[i], 0.0);
     }
 
-    upsampled_ = upsample2(x_complex_);
-    xf_ = fft(upsampled_);
+    std::vector<Complex> upsampled = upsample2(x_complex);
+    std::vector<Complex> xf = fft(upsampled);
 
-    for (size_t i = N1; i < N2 && i < xf_.size(); ++i) {
-        xf_[i] = Complex(0.0, 0.0);
+    for (size_t i = N1; i < N2 && i < xf.size(); ++i) {
+        xf[i] = Complex(0.0, 0.0);
     }
 
-    bizinter_real_result_ = ifft(xf_);
+    std::vector<Complex> result = ifft(xf);
 
     // Scale by 2 to compensate for upsampling, preserving full complex precision
-    for (size_t i = 0; i < bizinter_real_result_.size(); ++i) {
-        bizinter_real_result_[i] *= 2.0;
+    for (size_t i = 0; i < result.size(); ++i) {
+        result[i] *= 2.0;
     }
 
-    return bizinter_real_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::upsample2(const std::vector<Complex>& x) {
-    size_t output_size = x.size() * 2;
-
-    // Reallocate only if size changed
-    if (upsample2_result_.size() != output_size) {
-        upsample2_result_.resize(output_size);
-    }
+    std::vector<Complex> result(x.size() * 2);
 
     for (size_t i = 0; i < x.size(); ++i) {
-        upsample2_result_[2 * i] = x[i];
-        upsample2_result_[2 * i + 1] = Complex(0.0, 0.0);
+        result[2 * i] = x[i];
+        result[2 * i + 1] = Complex(0.0, 0.0);
     }
 
-    return upsample2_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::corefrmod2(const std::vector<Complex>& signal, double a) {
@@ -268,66 +229,53 @@ std::vector<Complex> FRFTEngine::corefrmod2(const std::vector<Complex>& signal, 
     double Aphi_denum = std::sqrt(std::abs(std::sin(phi)));
     Complex Aphi = Aphi_num / Aphi_denum;
 
-    // Reallocate only if size changed
-    if (chirp_.size() != N) {
-        chirp_.resize(N);
-        multip_.resize(N);
-        corefrmod2_result_.resize(N);
-    }
+    std::vector<Complex> chirp(N);
+    std::vector<Complex> multip(N);
 
     for (int i = 0; i < static_cast<int>(N); ++i) {
         double x = static_cast<double>(Nstart + i) / deltax;
-        chirp_[i] = std::exp(alpha * x * x);
-        multip_[i] = signal[i] * chirp_[i];
+        chirp[i] = std::exp(alpha * x * x);
+        multip[i] = signal[i] * chirp[i];
     }
 
     size_t t_size = 2 * N - 1;
-    if (hlptc_.size() != t_size) {
-        hlptc_.resize(t_size);
-    }
+    std::vector<Complex> hlptc(t_size);
 
     for (int i = 0; i < static_cast<int>(t_size); ++i) {
         double t = static_cast<double>(-static_cast<int>(N) + 1 + i) / deltax;
-        hlptc_[i] = std::exp(beta * t * t);
+        hlptc[i] = std::exp(beta * t * t);
     }
 
     int next_pow2 = next_power_of_2(t_size + N - 1);
 
-    multip_fft_ = fft_n(multip_, next_pow2);
-    hlptc_fft_ = fft_n(hlptc_, next_pow2);
-    conv_fft_ = vecmul(multip_fft_, hlptc_fft_);
-    Hc_ = ifft_n(conv_fft_, next_pow2);
+    std::vector<Complex> multip_fft = fft_n(multip, next_pow2);
+    std::vector<Complex> hlptc_fft = fft_n(hlptc, next_pow2);
+    std::vector<Complex> conv_fft = vecmul(multip_fft, hlptc_fft);
+    std::vector<Complex> Hc = ifft_n(conv_fft, next_pow2);
 
-    // Reallocate only if size changed
-    if (Hc_extracted_.size() != N) {
-        Hc_extracted_.resize(N);
-    }
-    std::copy(Hc_.begin() + N - 1, Hc_.begin() + 2 * N - 1, Hc_extracted_.begin());
+    std::vector<Complex> Hc_extracted(Hc.begin() + N - 1, Hc.begin() + 2 * N - 1);
 
+    std::vector<Complex> result(N);
     for (size_t i = 0; i < N; ++i) {
-        corefrmod2_result_[i] = Hc_extracted_[i] * Aphi * chirp_[i] / deltax;
+        result[i] = Hc_extracted[i] * Aphi * chirp[i] / deltax;
     }
 
     if (N % 2 == 1) {
-        std::rotate(corefrmod2_result_.begin(), corefrmod2_result_.begin() + 1, corefrmod2_result_.end());
+        std::rotate(result.begin(), result.begin() + 1, result.end());
     }
 
-    return corefrmod2_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::vecmul(const std::vector<Complex>& tensor, const std::vector<Complex>& vector) {
     size_t size = std::min(tensor.size(), vector.size());
-
-    // Reallocate only if size changed
-    if (vecmul_result_.size() != size) {
-        vecmul_result_.resize(size);
-    }
+    std::vector<Complex> result(size);
 
     for (size_t i = 0; i < size; ++i) {
-        vecmul_result_[i] = tensor[i] * vector[i];
+        result[i] = tensor[i] * vector[i];
     }
 
-    return vecmul_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::fft(const std::vector<Complex>& input) {
@@ -341,16 +289,12 @@ std::vector<Complex> FRFTEngine::fft(const std::vector<Complex>& input) {
 
     fftw_execute(cache->forward_plan);
 
-    // Reallocate only if size changed
-    if (fft_result_.size() != N) {
-        fft_result_.resize(N);
-    }
-
+    std::vector<Complex> result(N);
     for (size_t i = 0; i < N; ++i) {
-        fft_result_[i] = Complex(cache->out_buffer[i][0], cache->out_buffer[i][1]);
+        result[i] = Complex(cache->out_buffer[i][0], cache->out_buffer[i][1]);
     }
 
-    return fft_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::ifft(const std::vector<Complex>& input) {
@@ -364,50 +308,34 @@ std::vector<Complex> FRFTEngine::ifft(const std::vector<Complex>& input) {
 
     fftw_execute(cache->backward_plan);
 
-    // Reallocate only if size changed
-    if (ifft_result_.size() != N) {
-        ifft_result_.resize(N);
-    }
-
+    std::vector<Complex> result(N);
     for (size_t i = 0; i < N; ++i) {
-        ifft_result_[i] = Complex(cache->out_buffer[i][0] / N, cache->out_buffer[i][1] / N);
+        result[i] = Complex(cache->out_buffer[i][0] / N, cache->out_buffer[i][1] / N);
     }
 
-    return ifft_result_;
+    return result;
 }
 
 std::vector<Complex> FRFTEngine::fft_n(const std::vector<Complex>& input, size_t n) {
-    // Reallocate only if size changed
-    if (fft_n_padded_.size() != n) {
-        fft_n_padded_.resize(n);
-    }
-
-    // Clear padding area with zeros
-    std::fill(fft_n_padded_.begin(), fft_n_padded_.end(), Complex(0.0, 0.0));
+    std::vector<Complex> padded(n, Complex(0.0, 0.0));
 
     size_t copy_size = std::min(input.size(), n);
     for (size_t i = 0; i < copy_size; ++i) {
-        fft_n_padded_[i] = input[i];
+        padded[i] = input[i];
     }
 
-    return fft(fft_n_padded_);
+    return fft(padded);
 }
 
 std::vector<Complex> FRFTEngine::ifft_n(const std::vector<Complex>& input, size_t n) {
-    // Reallocate only if size changed
-    if (ifft_n_padded_.size() != n) {
-        ifft_n_padded_.resize(n);
-    }
-
-    // Clear padding area with zeros
-    std::fill(ifft_n_padded_.begin(), ifft_n_padded_.end(), Complex(0.0, 0.0));
+    std::vector<Complex> padded(n, Complex(0.0, 0.0));
 
     size_t copy_size = std::min(input.size(), n);
     for (size_t i = 0; i < copy_size; ++i) {
-        ifft_n_padded_[i] = input[i];
+        padded[i] = input[i];
     }
 
-    return ifft(ifft_n_padded_);
+    return ifft(padded);
 }
 
 int FRFTEngine::next_power_of_2(int n) {
@@ -418,35 +346,27 @@ int FRFTEngine::next_power_of_2(int n) {
 std::vector<Complex> FRFTEngine::fftshift(const std::vector<Complex>& input) {
     size_t N = input.size();
     size_t half = N / 2;
-
-    // Reallocate only if size changed
-    if (fftshift_output_.size() != N) {
-        fftshift_output_.resize(N);
-    }
+    std::vector<Complex> output(N);
 
     // Move second half to first half, first half to second half
     // [0 1 2 3 4 5] -> [3 4 5 0 1 2]  (for N=6, half=3)
     for (size_t i = 0; i < N; ++i) {
-        fftshift_output_[i] = input[(i + half) % N];
+        output[i] = input[(i + half) % N];
     }
 
-    return fftshift_output_;
+    return output;
 }
 
 std::vector<Complex> FRFTEngine::ifftshift(const std::vector<Complex>& input) {
     size_t N = input.size();
     size_t half = (N + 1) / 2;  // Ceiling division for odd N
-
-    // Reallocate only if size changed
-    if (ifftshift_output_.size() != N) {
-        ifftshift_output_.resize(N);
-    }
+    std::vector<Complex> output(N);
 
     // Inverse of fftshift
     // [3 4 5 0 1 2] -> [0 1 2 3 4 5]  (for N=6)
     for (size_t i = 0; i < N; ++i) {
-        ifftshift_output_[i] = input[(i + half) % N];
+        output[i] = input[(i + half) % N];
     }
 
-    return ifftshift_output_;
+    return output;
 }
