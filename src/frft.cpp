@@ -8,13 +8,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
-#endif
-
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#include <x86intrin.h>
 #endif
 
 using namespace c74::min;
@@ -44,6 +41,10 @@ public:
     attribute<number> alpha{this, "alpha", 0.5,
                             description{"Alpha parameter for FRFT (fractional order)"},
                             range{-10.0, 10.0}
+    };
+
+    attribute<symbol> csv_path{this, "csv_path", "",
+                               description{"Path to save benchmark CSV results"}
     };
 
     frft() {
@@ -81,7 +82,7 @@ public:
         int warmup = 100;
 
         if (args.size() == 0) {
-            sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 96000};
+            sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
         } else {
             for (size_t i = 0; i < args.size() - 1; i++) {
                 sizes.push_back(static_cast<int>(args[i]));
@@ -96,9 +97,13 @@ public:
 
         cout << "\nFRFT Benchmark (alpha=" << alpha_val << ", " << iterations << " iterations, "
              << warmup << " warmup)" << endl;
-        cout << "============================================================================" << endl;
-        cout << "Size  | Avg (μs) | Min (μs) | Max (μs) | StdDev | Cycles    | RTF   | MS/s" << endl;
-        cout << "------|----------|----------|----------|--------|-----------|-------|-------" << endl;
+        cout << "====================================================================================" << endl;
+        cout << "Size  | Buffer (ms) | Avg (ms) | Min (ms) | Max (ms) | StdDev | RTF   " << endl;
+        cout << "------|-------------|----------|----------|----------|--------|-------" << endl;
+
+        // Store results for CSV export
+        std::vector<std::vector<std::string>> csv_data;
+        csv_data.push_back({"Size", "Buffer_ms", "Avg_ms", "Min_ms", "Max_ms", "StdDev", "RTF"});
 
         for (int size : sizes) {
             if (size % 2 != 0) {
@@ -124,9 +129,7 @@ public:
             }
 
             std::vector<double> times;
-            std::vector<uint64_t> cycles_vec;
             times.reserve(iterations);
-            cycles_vec.reserve(iterations);
 
             for (int iter = 0; iter < iterations; iter++) {
 #ifdef WIN32
@@ -139,31 +142,22 @@ public:
                 auto start = std::chrono::high_resolution_clock::now();
 #endif
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-                uint64_t cycles_start = __rdtsc();
-#endif
-
                 engine.compute(in_real.data(), in_imag.data(),
                              out_real.data(), out_imag.data(), size, alpha_val);
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-                uint64_t cycles_end = __rdtsc();
-                cycles_vec.push_back(cycles_end - cycles_start);
-#endif
-
 #ifdef WIN32
                 QueryPerformanceCounter(&end);
-                double elapsed = static_cast<double>(end.QuadPart - start.QuadPart) / freq.QuadPart * 1e6;
+                double elapsed = static_cast<double>(end.QuadPart - start.QuadPart) / freq.QuadPart * 1e3;
                 times.push_back(elapsed);
 #elif defined(__APPLE__)
                 uint64_t end = mach_absolute_time();
                 mach_timebase_info_data_t timebase;
                 mach_timebase_info(&timebase);
-                double elapsed = (end - start) * timebase.numer / timebase.denom / 1e3;
+                double elapsed = (end - start) * timebase.numer / timebase.denom / 1e6;
                 times.push_back(elapsed);
 #else
                 auto end = std::chrono::high_resolution_clock::now();
-                double elapsed = std::chrono::duration<double, std::micro>(end - start).count();
+                double elapsed = std::chrono::duration<double, std::milli>(end - start).count();
                 times.push_back(elapsed);
 #endif
             }
@@ -182,26 +176,27 @@ public:
             }
             double stddev = sqrt(var_sum / iterations);
 
-            uint64_t avg_cycles = 0;
-            if (!cycles_vec.empty()) {
-                uint64_t cycle_sum = 0;
-                for (uint64_t c : cycles_vec) {
-                    cycle_sum += c;
-                }
-                avg_cycles = cycle_sum / cycles_vec.size();
-            }
+            // Buffer duration in milliseconds (how long this audio buffer would play)
+            double buffer_duration_ms = (size / sample_rate) * 1000.0;
 
-            double audio_duration = size / sample_rate * 1e6;
-            double rtf = mean / audio_duration;
-            double throughput = (size * 1e6 / mean) / 1e6;
+            // RTF = processing_time / audio_duration
+            // If RTF < 1.0, we can process in real-time
+            double rtf = mean / buffer_duration_ms;
 
-            printf("%-5d | %8.2f | %8.2f | %8.2f | %6.2f | %9llu | %.4f | %.2f\n",
-                   size, mean, min_time, max_time, stddev,
-                   (unsigned long long)avg_cycles, rtf, throughput);
+            printf("%-5d | %11.3f | %8.3f | %8.3f | %8.3f | %6.3f | %.4f\n",
+                   size, buffer_duration_ms, mean, min_time, max_time, stddev, rtf);
+
+            // Store data for CSV
+            std::vector<std::string> row;
+            row.push_back(std::to_string(size));
+            row.push_back(std::to_string(buffer_duration_ms));
+            row.push_back(std::to_string(mean));
+            row.push_back(std::to_string(min_time));
+            row.push_back(std::to_string(max_time));
+            row.push_back(std::to_string(stddev));
+            row.push_back(std::to_string(rtf));
+            csv_data.push_back(row);
         }
-
-        cout << "============================================================================" << endl;
-        cout << "RTF < 1.0 = real-time capable | MS/s = Megasamples/second" << endl << endl;
 
         return {};
     }};
