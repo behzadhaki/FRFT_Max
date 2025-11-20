@@ -29,7 +29,7 @@ private:
 public:
     MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation"};
     MIN_TAGS{"spectral, transform, frft"};
-    MIN_AUTHOR{"YourName"};
+    MIN_AUTHOR{"Behzad Haki; Esteban Guitiérrez"};
 
     inlet<> real_in{this, "(signal) real part input", "signal"};
     inlet<> imag_in{this, "(signal) imaginary part input", "signal"};
@@ -183,19 +183,13 @@ public:
             // If RTF < 1.0, we can process in real-time
             double rtf = mean / buffer_duration_ms;
 
-            printf("%-5d | %11.3f | %8.3f | %8.3f | %8.3f | %6.3f | %.4f\n",
-                   size, buffer_duration_ms, mean, min_time, max_time, stddev, rtf);
-
-            // Store data for CSV
-            std::vector<std::string> row;
-            row.push_back(std::to_string(size));
-            row.push_back(std::to_string(buffer_duration_ms));
-            row.push_back(std::to_string(mean));
-            row.push_back(std::to_string(min_time));
-            row.push_back(std::to_string(max_time));
-            row.push_back(std::to_string(stddev));
-            row.push_back(std::to_string(rtf));
-            csv_data.push_back(row);
+            cout << size << "    | "
+                 << buffer_duration_ms << " | "
+                 << mean << " | "
+                 << min_time << " | "
+                 << max_time << " | "
+                 << stddev << " | "
+                 << rtf << endl;
         }
 
         return {};
