@@ -9,6 +9,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <atomic>
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
@@ -16,16 +21,98 @@
 
 using namespace c74::min;
 
+// -----------------------------------------------------------------------------
+// Thread-safe queue with proper shutdown support
+// -----------------------------------------------------------------------------
+template <typename T>
+class tsqueue {
+public:
+    void enqueue(T v) {
+        std::lock_guard<std::mutex> lock(m_);
+        if (shutdown_) return; // Don't accept new items during shutdown
+        q_.emplace_back(std::move(v));
+        cv_.notify_one();
+    }
+
+    bool try_dequeue(T& out) {
+        std::lock_guard<std::mutex> lock(m_);
+        if (q_.empty()) return false;
+        out = std::move(q_.front());
+        q_.pop_front();
+        return true;
+    }
+
+    bool wait_dequeue(T& out, std::chrono::milliseconds timeout = std::chrono::milliseconds(100)) {
+        std::unique_lock<std::mutex> lock(m_);
+        if (cv_.wait_for(lock, timeout, [this] { return !q_.empty() || shutdown_; })) {
+            if (shutdown_ && q_.empty()) return false;
+            out = std::move(q_.front());
+            q_.pop_front();
+            return true;
+        }
+        return false;
+    }
+
+    void wake_all() {
+        std::lock_guard<std::mutex> lock(m_);
+        shutdown_ = true;
+        cv_.notify_all();
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(m_);
+        q_.clear();
+    }
+
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(m_);
+        return q_.size();
+    }
+
+private:
+    mutable std::mutex m_;
+    std::deque<T> q_;
+    std::condition_variable cv_;
+    std::atomic<bool> shutdown_{false};
+};
+
+// -----------------------------------------------------------------------------
+// Frame buffer for passing audio between threads
+// -----------------------------------------------------------------------------
+struct AudioFrame {
+    std::vector<double> real;
+    std::vector<double> imag;
+    int size;
+    double alpha;
+
+    AudioFrame() : size(0), alpha(0.0) {}
+
+    AudioFrame(int s, double a) : size(s), alpha(a) {
+        real.resize(s);
+        imag.resize(s);
+    }
+};
+
 class frft : public object<frft>, public vector_operator<> {
 private:
     FRFTEngine engine;
     bool initialized = false;
     int current_buffer_size = 0;
-    int last_vector_size = -1;  // NEW: instance variable instead of static
+    int last_vector_size = -1;
 
     // Pre-allocated buffers for real-time processing
     std::vector<double> real_buffer;
     std::vector<double> imag_buffer;
+
+    // Threading support
+    std::unique_ptr<std::thread> worker_thread_;
+    tsqueue<AudioFrame> input_queue_;
+    tsqueue<AudioFrame> output_queue_;
+    std::atomic<bool> thread_running_{false};
+
+    // Stats for monitoring
+    std::atomic<size_t> frames_processed_{0};
+    std::atomic<size_t> frames_dropped_{0};
 
 public:
     MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation"};
@@ -44,6 +131,10 @@ public:
                             range{-10.0, 10.0}
     };
 
+    attribute<bool> threading{this, "threading", false,
+                              description{"Enable background processing (adds 1 frame latency but prevents glitches)"}
+    };
+
     attribute<symbol> csv_path{this, "csv_path", "",
                                description{"Path to save benchmark CSV results"}
     };
@@ -58,7 +149,14 @@ public:
         for (int size : sizes) {
             engine.prepare(size);
         }
-        engine.set_debug(false);  // Initially false, can be toggled via attribute
+        engine.set_debug(false);
+
+        // Start worker thread
+        start_worker_thread();
+    }
+
+    ~frft() {
+        stop_worker_thread();
     }
 
     message<> float_input{this, "float", "Set alpha parameter",
@@ -75,7 +173,14 @@ public:
             cout << "✅ FRFT engine is initialized and ready" << endl;
             cout << "   Current buffer size: " << current_buffer_size << endl;
             cout << "   Current alpha: " << double(alpha) << endl;
+            cout << "   Threading mode: " << (threading ? "ON (async)" : "OFF (sync)") << endl;
             cout << "   Debug mode: " << (debug ? "ON" : "OFF") << endl;
+            if (threading) {
+                cout << "   Frames processed: " << frames_processed_.load() << endl;
+                cout << "   Frames dropped: " << frames_dropped_.load() << endl;
+                cout << "   Input queue size: " << input_queue_.size() << endl;
+                cout << "   Output queue size: " << output_queue_.size() << endl;
+            }
         } else {
             cout << "❌ Engine not initialized" << endl;
         }
@@ -207,6 +312,73 @@ public:
     }};
 
 private:
+    void start_worker_thread() {
+        if (thread_running_) return;
+
+        thread_running_ = true;
+        worker_thread_ = std::make_unique<std::thread>([this]() {
+            worker_thread_func();
+        });
+
+        if (debug) {
+            cout << "🧵 Worker thread started" << endl;
+        }
+    }
+
+    void stop_worker_thread() {
+        if (!thread_running_) return;
+
+        if (debug) {
+            cout << "🧵 Stopping worker thread..." << endl;
+        }
+
+        thread_running_ = false;
+        input_queue_.wake_all();
+        output_queue_.wake_all();
+
+        if (worker_thread_ && worker_thread_->joinable()) {
+            worker_thread_->join();
+        }
+
+        input_queue_.clear();
+        output_queue_.clear();
+
+        if (debug) {
+            cout << "🧵 Worker thread stopped" << endl;
+        }
+    }
+
+    void worker_thread_func() {
+        while (thread_running_) {
+            AudioFrame input_frame;
+
+            // Wait for input frame with timeout to check thread_running_
+            if (!input_queue_.wait_dequeue(input_frame, std::chrono::milliseconds(100))) {
+                continue;
+            }
+
+            // Create output frame
+            AudioFrame output_frame(input_frame.size, input_frame.alpha);
+
+            // Process
+            bool success = engine.compute(
+                input_frame.real.data(), input_frame.imag.data(),
+                output_frame.real.data(), output_frame.imag.data(),
+                input_frame.size, input_frame.alpha
+            );
+
+            if (success) {
+                output_queue_.enqueue(std::move(output_frame));
+                frames_processed_++;
+            } else {
+                frames_dropped_++;
+                if (debug) {
+                    cerr << "❌ Worker thread: FRFT computation failed" << endl;
+                }
+            }
+        }
+    }
+
     void ensure_buffer_size(int vs) {
         if (current_buffer_size != vs) {
             real_buffer.resize(vs);
@@ -252,6 +424,44 @@ public:
             return;
         }
 
+        // THREADED MODE: Async processing with 1-frame latency
+        if (threading) {
+            // Create input frame and enqueue it
+            AudioFrame input_frame(vs, static_cast<double>(alpha));
+            std::copy(in_real, in_real + vs, input_frame.real.begin());
+            std::copy(in_imag, in_imag + vs, input_frame.imag.begin());
+            input_queue_.enqueue(std::move(input_frame));
+
+            // Try to get processed frame from output queue
+            AudioFrame output_frame;
+            if (output_queue_.try_dequeue(output_frame)) {
+                // We have a processed frame - output it
+                if (output_frame.size == vs) {
+                    std::copy(output_frame.real.begin(), output_frame.real.end(), out_real);
+                    std::copy(output_frame.imag.begin(), output_frame.imag.end(), out_imag);
+                } else {
+                    // Size mismatch - output silence
+                    std::fill(out_real, out_real + vs, 0.0);
+                    std::fill(out_imag, out_imag + vs, 0.0);
+                    if (debug) {
+                        static bool size_mismatch_printed = false;
+                        if (!size_mismatch_printed) {
+                            cerr << "⚠️ Frame size mismatch in threaded mode" << endl;
+                            size_mismatch_printed = true;
+                        }
+                    }
+                }
+            } else {
+                // No processed frame available yet (startup or queue underrun)
+                // Output silence and increment dropped counter
+                std::fill(out_real, out_real + vs, 0.0);
+                std::fill(out_imag, out_imag + vs, 0.0);
+                frames_dropped_++;
+            }
+            return;
+        }
+
+        // SYNCHRONOUS MODE: Original behavior
         try {
             // Ensure buffers are allocated
             ensure_buffer_size(vs);
