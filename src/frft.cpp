@@ -131,7 +131,7 @@ public:
                             range{-10.0, 10.0}
     };
 
-    attribute<bool> threading{this, "threading", false,
+    attribute<bool> threading{this, "threading", true,
                               description{"Enable background processing (adds 1 frame latency but prevents glitches)"}
     };
 
