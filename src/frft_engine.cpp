@@ -1,6 +1,7 @@
 #include "frft_engine.h"
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 
 FRFTEngine::FRFTEngine() {
     // Constructor
@@ -28,17 +29,26 @@ FRFTEngine::PlanCache* FRFTEngine::get_or_create_plan(size_t size) {
         }
     }
 
-    // Create new plan
+    if (debug_enabled_) {
+        std::cerr << "⚠️ Creating FFTW plan for size " << size << " with FFTW_MEASURE..." << std::endl;
+    }
+    auto start = std::chrono::high_resolution_clock::now();
+
     PlanCache new_cache;
     new_cache.size = size;
     new_cache.in_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
     new_cache.out_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
 
-    // Create plans with FFTW_MEASURE for better performance
     new_cache.forward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
                                               FFTW_FORWARD, FFTW_MEASURE);
     new_cache.backward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
                                                FFTW_BACKWARD, FFTW_MEASURE);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(end - start).count();
+    if (debug_enabled_) {
+        std::cerr << "✅ Plan created in " << ms << " ms" << std::endl;
+    }
 
     plan_cache_.push_back(new_cache);
     return &plan_cache_.back();
@@ -53,7 +63,7 @@ void FRFTEngine::prepare(int size) {
     current_prepared_size_ = size;
 
     // Pre-allocate working buffers for typical operations
-    int max_size = size * 4;  // Worst case for expanded signals
+    int max_size = size;  // Worst case for expanded signals
     ensure_size(work_buffer1_, max_size);
     ensure_size(work_buffer2_, max_size);
     ensure_size(work_buffer3_, max_size);
@@ -73,12 +83,18 @@ void FRFTEngine::prepare(int size) {
 
 void FRFTEngine::ensure_size(std::vector<Complex>& buffer, size_t size) {
     if (buffer.size() < size) {
+        if (debug_enabled_) {
+            std::cerr << "⚠️ REALLOCATING Complex buffer from " << buffer.size() << " to " << size << std::endl;
+        }
         buffer.resize(size);
     }
 }
 
 void FRFTEngine::ensure_size(std::vector<double>& buffer, size_t size) {
     if (buffer.size() < size) {
+        if (debug_enabled_) {
+            std::cerr << "⚠️ REALLOCATING double buffer from " << buffer.size() << " to " << size << std::endl;
+        }
         buffer.resize(size);
     }
 }
@@ -92,7 +108,7 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
     }
 
     // Ensure working buffers are large enough
-    size_t max_size = size * 4;
+    size_t max_size = size;
     ensure_size(work_buffer1_, max_size);
     ensure_size(work_buffer2_, max_size);
     ensure_size(work_buffer3_, max_size);

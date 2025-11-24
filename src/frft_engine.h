@@ -33,6 +33,10 @@ public:
     // Pre-allocate buffers for a given size (optional, for efficiency)
     void prepare(int size);
 
+    // Enable/disable debug output
+    void set_debug(bool enable) { debug_enabled_ = enable; }
+    bool is_debug_enabled() const { return debug_enabled_; }
+
 private:
     // Core algorithm functions
     void dflip(const std::vector<Complex>& input, size_t n, std::vector<Complex>& output);
@@ -88,6 +92,7 @@ private:
     std::vector<Complex> conv_buffer_;
 
     int current_prepared_size_ = 0;
+    bool debug_enabled_ = false;
 
     // Helper to ensure buffer size without excessive reallocation
     void ensure_size(std::vector<Complex>& buffer, size_t size);

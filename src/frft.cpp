@@ -21,6 +21,7 @@ private:
     FRFTEngine engine;
     bool initialized = false;
     int current_buffer_size = 0;
+    int last_vector_size = -1;  // NEW: instance variable instead of static
 
     // Pre-allocated buffers for real-time processing
     std::vector<double> real_buffer;
@@ -47,8 +48,17 @@ public:
                                description{"Path to save benchmark CSV results"}
     };
 
+    attribute<bool> debug{this, "debug", false,
+                          description{"Enable debug console output"}
+    };
+
     frft() {
         initialized = true;
+        auto sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
+        for (int size : sizes) {
+            engine.prepare(size);
+        }
+        engine.set_debug(false);  // Initially false, can be toggled via attribute
     }
 
     message<> float_input{this, "float", "Set alpha parameter",
@@ -65,6 +75,7 @@ public:
             cout << "✅ FRFT engine is initialized and ready" << endl;
             cout << "   Current buffer size: " << current_buffer_size << endl;
             cout << "   Current alpha: " << double(alpha) << endl;
+            cout << "   Debug mode: " << (debug ? "ON" : "OFF") << endl;
         } else {
             cout << "❌ Engine not initialized" << endl;
         }
@@ -82,7 +93,7 @@ public:
         int warmup = 100;
 
         if (args.size() == 0) {
-            sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
+            sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
         } else {
             for (size_t i = 0; i < args.size() - 1; i++) {
                 sizes.push_back(static_cast<int>(args[i]));
@@ -217,17 +228,21 @@ public:
 
         int vs = input.frame_count();
 
-        if (!initialized) {
-            // Pass through if not initialized
-            std::copy(in_real, in_real + vs, out_real);
-            std::copy(in_imag, in_imag + vs, out_imag);
-            return;
+        // Update engine debug state
+        engine.set_debug(debug);
+
+        // Track size changes per instance
+        if (vs != last_vector_size) {
+            if (debug) {
+                cerr << "🔄 Vector size changed: " << last_vector_size << " -> " << vs << endl;
+            }
+            last_vector_size = vs;
         }
 
         // Check if buffer size is even
         if (vs % 2 != 0) {
             static bool error_printed = false;
-            if (!error_printed) {
+            if (!error_printed && debug) {
                 cerr << "❌ Vector size must be even, got: " << vs << endl;
                 cerr << "   Passing signal through unchanged." << endl;
                 error_printed = true;
@@ -253,7 +268,7 @@ public:
 
             if (!success) {
                 static bool compute_error_printed = false;
-                if (!compute_error_printed) {
+                if (!compute_error_printed && debug) {
                     cerr << "❌ FRFT computation failed" << endl;
                     compute_error_printed = true;
                 }
@@ -264,7 +279,7 @@ public:
         }
         catch (const std::exception& e) {
             static bool exception_printed = false;
-            if (!exception_printed) {
+            if (!exception_printed && debug) {
                 cerr << "❌ FRFT exception: " << e.what() << endl;
                 exception_printed = true;
             }
