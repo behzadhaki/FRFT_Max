@@ -161,7 +161,7 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
         // General case
         // biz = bizinter(fc)
         bizinter(work_buffer1_, size, work_buffer2_);  // work_buffer1 -> work_buffer2
-        size_t biz_size = size * 2 - 1;
+        size_t biz_size = size * 2;  // Fixed: bizinter returns 2*N, not 2*N-1
 
         // Create fc_expanded: zeros + biz + zeros
         // work_buffer3 will hold fc_expanded
@@ -202,6 +202,10 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
 
         // Decimate into work_buffer1
         bizdec(work_buffer5_, size * 2, work_buffer1_);  // work_buffer5 -> work_buffer1
+
+        // CRITICAL: Double the first entry (matches Python implementation)
+        // This is required for proper round-trip reconstruction
+        work_buffer1_[0] *= 2.0;
     }
 
     // Apply ifftshift to convert back from centered to FFT ordering
@@ -249,8 +253,8 @@ void FRFTEngine::bizinter(const std::vector<Complex>& input, size_t n, std::vect
         imag_work_[i] = input[i].imag();
     }
 
-    // Process real and imaginary separately
-    size_t result_size = 2 * n - 1;
+    // Process real and imaginary separately - outputs are 2*n elements each
+    size_t result_size = 2 * n;
     ensure_size(work_buffer6_, result_size);
     ensure_size(work_buffer7_, result_size);
 
@@ -289,9 +293,8 @@ void FRFTEngine::bizinter_real(const std::vector<double>& input, size_t n, std::
     // IFFT back into output
     ifft(conv_buffer_, n * 2, output);
 
-    // Scale by 2 to compensate for upsampling
-    size_t result_size = 2 * n - 1;
-    for (size_t i = 0; i < result_size; ++i) {
+    // Scale by 2 to compensate for upsampling - CRITICAL: scale ALL 2*n elements
+    for (size_t i = 0; i < 2 * n; ++i) {
         output[i] *= 2.0;
     }
 }
