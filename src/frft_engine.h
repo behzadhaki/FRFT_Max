@@ -10,9 +10,13 @@
 #include <cmath>
 #include <stdexcept>
 #include <fftw3.h>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <thread>
 
 // Pure C++ FRFT implementation using FFTW
-// No PyTorch dependencies - optimized for real-time audio processing
+// Thread-safe with per-thread engine instances
 
 using Complex = std::complex<double>;
 
@@ -97,4 +101,32 @@ private:
     // Helper to ensure buffer size without excessive reallocation
     void ensure_size(std::vector<Complex>& buffer, size_t size);
     void ensure_size(std::vector<double>& buffer, size_t size);
+};
+
+// Thread-safe manager for per-thread FRFTEngine instances
+class FRFTEngineManager {
+public:
+    static FRFTEngineManager& instance() {
+        static FRFTEngineManager inst;
+        return inst;
+    }
+
+    // Get the FRFTEngine for the current thread (lock-free after first call per thread)
+    FRFTEngine* get_thread_engine();
+
+    // Get debug state (lock-free read)
+    bool get_debug_enabled() const { return debug_enabled_.load(std::memory_order_relaxed); }
+
+    // Set debug mode (affects only new engines)
+    void set_debug_enabled(bool enable) { debug_enabled_.store(enable, std::memory_order_relaxed); }
+
+private:
+    FRFTEngineManager() = default;
+    ~FRFTEngineManager() = default;
+    FRFTEngineManager(const FRFTEngineManager&) = delete;
+    FRFTEngineManager& operator=(const FRFTEngineManager&) = delete;
+
+    std::mutex mutex_;
+    std::unordered_map<std::thread::id, std::unique_ptr<FRFTEngine>> engines_;
+    std::atomic<bool> debug_enabled_{false};
 };

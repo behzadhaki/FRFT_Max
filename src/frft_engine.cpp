@@ -3,6 +3,14 @@
 #include <cstring>
 #include <iostream>
 
+// Global mutex to protect FFTW plan creation
+// FFTW has global internal state that is not thread-safe, even with FFTW_ESTIMATE
+std::mutex g_fftw_plan_mutex;
+
+// ============================================================================
+// FRFTEngine Implementation (per-thread instance)
+// ============================================================================
+
 FRFTEngine::FRFTEngine() {
     // Constructor
 }
@@ -22,15 +30,20 @@ void FRFTEngine::cleanup_plans() {
 }
 
 FRFTEngine::PlanCache* FRFTEngine::get_or_create_plan(size_t size) {
-    // Check if we already have a plan for this size
+    // Check if we already have a plan for this size (no lock needed for read)
     for (auto& cache : plan_cache_) {
         if (cache.size == size) {
             return &cache;
         }
     }
 
+    // Need to create a new plan - lock the global FFTW mutex
+    // CRITICAL: FFTW has global internal state that is not thread-safe
+    std::lock_guard<std::mutex> fftw_lock(g_fftw_plan_mutex);
+
     if (debug_enabled_) {
-        std::cerr << "⚠️ Creating FFTW plan for size " << size << " with FFTW_MEASURE..." << std::endl;
+        std::cerr << "[Thread " << std::this_thread::get_id() << "] Creating FFTW plan for size "
+                  << size << " with FFTW_ESTIMATE..." << std::endl;
     }
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -39,15 +52,18 @@ FRFTEngine::PlanCache* FRFTEngine::get_or_create_plan(size_t size) {
     new_cache.in_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
     new_cache.out_buffer = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * size);
 
+    // Use FFTW_ESTIMATE - faster and safer than FFTW_MEASURE
+    // But still requires global mutex due to FFTW's internal state
     new_cache.forward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
-                                              FFTW_FORWARD, FFTW_MEASURE);
+                                              FFTW_FORWARD, FFTW_ESTIMATE);
     new_cache.backward_plan = fftw_plan_dft_1d(size, new_cache.in_buffer, new_cache.out_buffer,
-                                               FFTW_BACKWARD, FFTW_MEASURE);
+                                               FFTW_BACKWARD, FFTW_ESTIMATE);
 
     auto end = std::chrono::high_resolution_clock::now();
     double ms = std::chrono::duration<double, std::milli>(end - start).count();
     if (debug_enabled_) {
-        std::cerr << "✅ Plan created in " << ms << " ms" << std::endl;
+        std::cerr << "[Thread " << std::this_thread::get_id() << "] Plan created in "
+                  << ms << " ms" << std::endl;
     }
 
     plan_cache_.push_back(new_cache);
@@ -84,7 +100,9 @@ void FRFTEngine::prepare(int size) {
 void FRFTEngine::ensure_size(std::vector<Complex>& buffer, size_t size) {
     if (buffer.size() < size) {
         if (debug_enabled_) {
-            std::cerr << "⚠️ REALLOCATING Complex buffer from " << buffer.size() << " to " << size << std::endl;
+            std::cerr << "[Thread " << std::this_thread::get_id()
+                      << "] Reallocating Complex buffer from " << buffer.size()
+                      << " to " << size << std::endl;
         }
         buffer.resize(size);
     }
@@ -93,7 +111,9 @@ void FRFTEngine::ensure_size(std::vector<Complex>& buffer, size_t size) {
 void FRFTEngine::ensure_size(std::vector<double>& buffer, size_t size) {
     if (buffer.size() < size) {
         if (debug_enabled_) {
-            std::cerr << "⚠️ REALLOCATING double buffer from " << buffer.size() << " to " << size << std::endl;
+            std::cerr << "[Thread " << std::this_thread::get_id()
+                      << "] Reallocating double buffer from " << buffer.size()
+                      << " to " << size << std::endl;
         }
         buffer.resize(size);
     }
@@ -441,5 +461,47 @@ void FRFTEngine::ifftshift(const std::vector<Complex>& input, size_t n, std::vec
     // [3 4 5 0 1 2] -> [0 1 2 3 4 5]  (for n=6)
     for (size_t i = 0; i < n; ++i) {
         output[i] = input[(i + half) % n];
+    }
+}
+
+// ============================================================================
+// FRFTEngineManager Implementation (thread-safe singleton)
+// ============================================================================
+
+FRFTEngine* FRFTEngineManager::get_thread_engine() {
+    // Use thread_local storage for lock-free access after first initialization
+    thread_local FRFTEngine* cached_engine = nullptr;
+
+    if (cached_engine != nullptr) {
+        return cached_engine;  // Fast path: no lock needed
+    }
+
+    // Slow path: first access from this thread, need to create engine
+    std::thread::id tid = std::this_thread::get_id();
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // Check if engine was created by another call (rare race)
+        auto it = engines_.find(tid);
+        if (it != engines_.end()) {
+            cached_engine = it->second.get();
+            return cached_engine;
+        }
+
+        // Create new engine for this thread
+        auto engine = std::make_unique<FRFTEngine>();
+        bool debug_flag = debug_enabled_.load(std::memory_order_relaxed);
+        engine->set_debug(debug_flag);
+
+        FRFTEngine* engine_ptr = engine.get();
+        engines_[tid] = std::move(engine);
+
+        if (debug_flag) {
+            std::cerr << "✅ Created FRFTEngine for thread " << tid << std::endl;
+        }
+
+        cached_engine = engine_ptr;
+        return engine_ptr;
     }
 }

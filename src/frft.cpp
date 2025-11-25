@@ -95,7 +95,7 @@ struct AudioFrame {
 
 class frft : public object<frft>, public vector_operator<> {
 private:
-    FRFTEngine engine;
+    // Remove single engine instance - now using thread-local via manager
     bool initialized = false;
     int current_buffer_size = 0;
     int last_vector_size = -1;
@@ -115,7 +115,7 @@ private:
     std::atomic<size_t> frames_dropped_{0};
 
 public:
-    MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation"};
+    MIN_DESCRIPTION{"Fractional Fourier Transform using native C++ implementation (thread-safe)"};
     MIN_TAGS{"spectral, transform, frft"};
     MIN_AUTHOR{"Behzad Haki; Esteban Guitiérrez"};
 
@@ -145,11 +145,9 @@ public:
 
     frft() {
         initialized = true;
-        auto sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
-        for (int size : sizes) {
-            engine.prepare(size);
-        }
-        engine.set_debug(false);
+
+        // Set initial debug state
+        FRFTEngineManager::instance().set_debug_enabled(false);
 
         // Start worker thread
         start_worker_thread();
@@ -170,7 +168,7 @@ public:
 
     message<> status{this, "status", "Print engine status", MIN_FUNCTION {
         if (initialized) {
-            cout << "✅ FRFT engine is initialized and ready" << endl;
+            cout << "✅ FRFT engine is initialized and ready (thread-safe mode)" << endl;
             cout << "   Current buffer size: " << current_buffer_size << endl;
             cout << "   Current alpha: " << double(alpha) << endl;
             cout << "   Threading mode: " << (threading ? "ON (async)" : "OFF (sync)") << endl;
@@ -211,7 +209,7 @@ public:
         const double alpha_val = 0.5;
         const double sample_rate = 48000.0;
 
-        cout << "\nFRFT Benchmark (alpha=" << alpha_val << ", " << iterations << " iterations, "
+        cout << "\nFRFT Benchmark (thread-safe, alpha=" << alpha_val << ", " << iterations << " iterations, "
              << warmup << " warmup)" << endl;
         cout << "====================================================================================" << endl;
         cout << "Size  | Buffer (ms) | Avg (ms) | Min (ms) | Max (ms) | StdDev | RTF   " << endl;
@@ -221,13 +219,17 @@ public:
         std::vector<std::vector<std::string>> csv_data;
         csv_data.push_back({"Size", "Buffer_ms", "Avg_ms", "Min_ms", "Max_ms", "StdDev", "RTF"});
 
+        // Get engine for this thread (benchmark runs on main thread)
+        FRFTEngine* engine = FRFTEngineManager::instance().get_thread_engine();
+
         for (int size : sizes) {
             if (size % 2 != 0) {
                 cout << size << "    | SKIPPED (must be even)" << endl;
                 continue;
             }
 
-            ensure_buffer_size(size);
+            // Prepare engine for this size
+            engine->prepare(size);
 
             std::vector<double> in_real(size);
             std::vector<double> in_imag(size);
@@ -239,39 +241,48 @@ public:
                 in_imag[i] = static_cast<double>(rand()) / RAND_MAX * 2.0 - 1.0;
             }
 
-            for (int w = 0; w < warmup; w++) {
-                engine.compute(in_real.data(), in_imag.data(),
-                             out_real.data(), out_imag.data(), size, alpha_val);
+            // Warmup
+            for (int i = 0; i < warmup; i++) {
+                engine->compute(in_real.data(), in_imag.data(),
+                               out_real.data(), out_imag.data(),
+                               size, alpha_val);
             }
 
             std::vector<double> times;
             times.reserve(iterations);
 
-            for (int iter = 0; iter < iterations; iter++) {
+            for (int i = 0; i < iterations; i++) {
 #ifdef WIN32
-                LARGE_INTEGER freq, start, end;
-                QueryPerformanceFrequency(&freq);
+                LARGE_INTEGER frequency, start, end;
+                QueryPerformanceFrequency(&frequency);
                 QueryPerformanceCounter(&start);
-#elif defined(__APPLE__)
-                uint64_t start = mach_absolute_time();
-#else
-                auto start = std::chrono::high_resolution_clock::now();
-#endif
 
-                engine.compute(in_real.data(), in_imag.data(),
-                             out_real.data(), out_imag.data(), size, alpha_val);
+                engine->compute(in_real.data(), in_imag.data(),
+                               out_real.data(), out_imag.data(),
+                               size, alpha_val);
 
-#ifdef WIN32
                 QueryPerformanceCounter(&end);
-                double elapsed = static_cast<double>(end.QuadPart - start.QuadPart) / freq.QuadPart * 1e3;
+                double elapsed = (double)(end.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
                 times.push_back(elapsed);
 #elif defined(__APPLE__)
+                uint64_t start = mach_absolute_time();
+
+                engine->compute(in_real.data(), in_imag.data(),
+                               out_real.data(), out_imag.data(),
+                               size, alpha_val);
+
                 uint64_t end = mach_absolute_time();
                 mach_timebase_info_data_t timebase;
                 mach_timebase_info(&timebase);
                 double elapsed = (end - start) * timebase.numer / timebase.denom / 1e6;
                 times.push_back(elapsed);
 #else
+                auto start = std::chrono::high_resolution_clock::now();
+
+                engine->compute(in_real.data(), in_imag.data(),
+                               out_real.data(), out_imag.data(),
+                               size, alpha_val);
+
                 auto end = std::chrono::high_resolution_clock::now();
                 double elapsed = std::chrono::duration<double, std::milli>(end - start).count();
                 times.push_back(elapsed);
@@ -306,6 +317,36 @@ public:
                  << max_time << " | "
                  << stddev << " | "
                  << rtf << endl;
+
+            // Store for CSV
+            csv_data.push_back({
+                std::to_string(size),
+                std::to_string(buffer_duration_ms),
+                std::to_string(mean),
+                std::to_string(min_time),
+                std::to_string(max_time),
+                std::to_string(stddev),
+                std::to_string(rtf)
+            });
+        }
+
+        // Export CSV if path is set
+        if (csv_path != "") {
+            std::string path_str = std::string(csv_path.get());
+            std::ofstream csv_file(path_str);
+            if (csv_file.is_open()) {
+                for (const auto& row : csv_data) {
+                    for (size_t i = 0; i < row.size(); i++) {
+                        csv_file << row[i];
+                        if (i < row.size() - 1) csv_file << ",";
+                    }
+                    csv_file << "\n";
+                }
+                csv_file.close();
+                cout << "\n✅ Benchmark results exported to: " << path_str << endl;
+            } else {
+                cerr << "\n❌ Failed to open CSV file: " << path_str << endl;
+            }
         }
 
         return {};
@@ -349,6 +390,11 @@ private:
     }
 
     void worker_thread_func() {
+        // Get engine for this worker thread (creates thread-local instance)
+        FRFTEngine* engine = FRFTEngineManager::instance().get_thread_engine();
+
+        int last_prepared_size = 0;
+
         while (thread_running_) {
             AudioFrame input_frame;
 
@@ -357,11 +403,17 @@ private:
                 continue;
             }
 
+            // Prepare engine for this size if needed (per-thread, no global lock)
+            if (last_prepared_size != input_frame.size) {
+                engine->prepare(input_frame.size);
+                last_prepared_size = input_frame.size;
+            }
+
             // Create output frame
             AudioFrame output_frame(input_frame.size, input_frame.alpha);
 
-            // Process
-            bool success = engine.compute(
+            // Process using thread-local engine
+            bool success = engine->compute(
                 input_frame.real.data(), input_frame.imag.data(),
                 output_frame.real.data(), output_frame.imag.data(),
                 input_frame.size, input_frame.alpha
@@ -379,18 +431,6 @@ private:
         }
     }
 
-    void ensure_buffer_size(int vs) {
-        if (current_buffer_size != vs) {
-            real_buffer.resize(vs);
-            imag_buffer.resize(vs);
-
-            // Pre-create FFTW plans for this buffer size
-            engine.prepare(vs);
-
-            current_buffer_size = vs;
-        }
-    }
-
 public:
     void operator()(audio_bundle input, audio_bundle output) {
         auto in_real = input.samples(0);
@@ -400,8 +440,8 @@ public:
 
         int vs = input.frame_count();
 
-        // Update engine debug state
-        engine.set_debug(debug);
+        // Update debug state atomically (no lock)
+        FRFTEngineManager::instance().set_debug_enabled(debug);
 
         // Track size changes per instance
         if (vs != last_vector_size) {
@@ -461,16 +501,24 @@ public:
             return;
         }
 
-        // SYNCHRONOUS MODE: Original behavior
+        // SYNCHRONOUS MODE: Get engine for audio thread (lock-free after first call)
         try {
-            // Ensure buffers are allocated
-            ensure_buffer_size(vs);
+            // Get engine for this audio thread (lock-free cached access)
+            FRFTEngine* engine = FRFTEngineManager::instance().get_thread_engine();
+
+            // Prepare engine if buffer size changed (per-thread, no global lock)
+            if (current_buffer_size != vs) {
+                real_buffer.resize(vs);
+                imag_buffer.resize(vs);
+                engine->prepare(vs);  // Only prepares THIS thread's engine
+                current_buffer_size = vs;
+            }
 
             // Get alpha parameter
             double alpha_param = static_cast<double>(alpha);
 
-            // Compute FRFT
-            bool success = engine.compute(
+            // Compute FRFT using thread-local engine
+            bool success = engine->compute(
                     in_real, in_imag,
                     out_real, out_imag,
                     vs, alpha_param
