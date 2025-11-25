@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <chrono>
 
 // Global mutex to protect FFTW plan creation
 // FFTW has global internal state that is not thread-safe, even with FFTW_ESTIMATE

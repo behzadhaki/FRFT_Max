@@ -330,25 +330,6 @@ public:
             });
         }
 
-        // Export CSV if path is set
-        if (csv_path != "") {
-            std::string path_str = std::string(csv_path.get());
-            std::ofstream csv_file(path_str);
-            if (csv_file.is_open()) {
-                for (const auto& row : csv_data) {
-                    for (size_t i = 0; i < row.size(); i++) {
-                        csv_file << row[i];
-                        if (i < row.size() - 1) csv_file << ",";
-                    }
-                    csv_file << "\n";
-                }
-                csv_file.close();
-                cout << "\n✅ Benchmark results exported to: " << path_str << endl;
-            } else {
-                cerr << "\n❌ Failed to open CSV file: " << path_str << endl;
-            }
-        }
-
         return {};
     }};
 
