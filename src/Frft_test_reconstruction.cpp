@@ -10,6 +10,11 @@
 #include <numeric>
 #include <map>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+
 // Test configuration
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
@@ -556,6 +561,13 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
 }
 
 int main(int argc, char* argv[]) {
+
+
+    #ifdef _WIN32
+    // Set console to UTF-8 mode on Windows
+        SetConsoleOutputCP(CP_UTF8);
+    #endif
+
     TestConfig config;
     
     if (!parse_arguments(argc, argv, config)) {
