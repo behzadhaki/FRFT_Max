@@ -22,7 +22,7 @@ struct TestConfig {
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000, 5000.0, 10000.0, 15000.0, 20000.0};
     double sample_rate = 44100.0;
     int n_analysis = 100;  // Number of frames to analyze
-    double alpha_start = -2.0;
+    double alpha_start = 0.0;
     double alpha_end = 2.0;
     double alpha_step = 0.1;
     std::string output_filename = "frft_test_results.txt";
