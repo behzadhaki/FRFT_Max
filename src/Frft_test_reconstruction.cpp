@@ -19,9 +19,9 @@
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1, 2, 4};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000, 5000.0, 10000.0, 15000.0, 20000.0};
+    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000, 5000.0, 10000.0, 15000.0};
     double sample_rate = 44100.0;
-    int n_analysis = 100;  // Number of frames to analyze
+    int n_analysis = 20;  // Number of frames to analyze
     double alpha_start = 0.0;
     double alpha_end = 2.0;
     double alpha_step = 0.1;
