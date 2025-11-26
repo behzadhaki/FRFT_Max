@@ -40,128 +40,164 @@ def load_accuracy_data(filename):
 
 
 def plot_processing_time(timing_data, output_dir):
-    """Plot processing time vs window size (forward only as average)."""
+    """Plot processing time vs window size with min/max and sample count."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
     window_sizes = timing_data['WindowSize']
     mean_forward = timing_data['MeanForward']
     min_forward = timing_data['MinForward']
     max_forward = timing_data['MaxForward']
+    num_samples = timing_data['NumSamples']
 
-    # Plot average (forward) with shaded min/max area
-    ax.plot(window_sizes, mean_forward, 'o-', label='Average',
-            linewidth=2.5, markersize=8, color='#1f77b4')
+    # Get number of trials (use first entry, should be consistent)
+    n_trials = num_samples.iloc[0] if len(num_samples) > 0 else 0
+
+    # Consistent professional colors
+    color_mean = '#1f77b4'    # Blue
+    color_min = '#2ca02c'     # Green
+    color_max = '#d62728'     # Red
+
+    # Plot mean, min, and max
+    ax.plot(window_sizes, mean_forward, 'o-', label=f'Average',
+            linewidth=2.5, markersize=8, color=color_mean, zorder=3)
+    ax.plot(window_sizes, min_forward, 's--', label='Min',
+            linewidth=1.5, markersize=6, color=color_min, alpha=0.7, zorder=2)
+    ax.plot(window_sizes, max_forward, '^--', label='Max',
+            linewidth=1.5, markersize=6, color=color_max, alpha=0.7, zorder=2)
 
     # Add shaded area for min/max range
     ax.fill_between(window_sizes, min_forward, max_forward,
-                    alpha=0.2, color='blue', label='Min/Max Range')
+                    alpha=0.15, color=color_mean, label='Min/Max Range', zorder=1)
 
     ax.set_xlabel('Window Size (samples)', fontsize=12)
     ax.set_ylabel('Processing Time (ms/frame)', fontsize=12)
-    ax.set_title('FRFT Processing Time vs Window Size', fontsize=14, fontweight='bold')
     ax.set_xscale('log', base=2)
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both')
     ax.legend(fontsize=10, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'processing_time.png', dpi=150, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / 'processing_time.png'}")
+    filename = f'processing_time_n{n_trials}.png'
+    plt.savefig(output_dir / filename, dpi=150, bbox_inches='tight')
+    print(f"  → Saved: {output_dir / filename}")
     plt.close()
 
 
 def plot_rtf(timing_data, output_dir):
-    """Plot Real-Time Factor vs window size."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    """Plot Real-Time Factor vs window size with sample count (linear scale)."""
 
     window_sizes = timing_data['WindowSize']
     rtf_mean = timing_data['RTF_Mean']
     rtf_best = timing_data['RTF_Best']
     rtf_worst = timing_data['RTF_Worst']
+    num_samples = timing_data['NumSamples']
+
+    # Get number of trials
+    n_trials = num_samples.iloc[0] if len(num_samples) > 0 else 0
+
+    # Consistent professional colors
+    color_mean = '#2ca02c'    # Green
+    color_threshold = '#d62728'  # Red
+
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     # Plot mean RTF
-    ax.plot(window_sizes, rtf_mean, 'o-', label='Mean RTF',
-            linewidth=2.5, markersize=8, color='#2ca02c')
+    ax.plot(window_sizes, rtf_mean, 'o-', label=f'Mean RTF',
+            linewidth=2.5, markersize=8, color=color_mean)
 
     # Shaded area for best/worst
     ax.fill_between(window_sizes, rtf_best, rtf_worst,
-                    alpha=0.3, color='green', label='Best/Worst Range')
+                    alpha=0.2, color=color_mean, label='Best/Worst Range')
 
     # Real-time threshold line
-    ax.axhline(y=1.0, color='red', linestyle='--', linewidth=2,
+    ax.axhline(y=1.0, color=color_threshold, linestyle='--', linewidth=2,
                label='Real-Time Threshold (RTF=1.0)', alpha=0.8)
 
     # Highlight real-time capable sizes
     for idx, row in timing_data.iterrows():
         if row['RTF_Mean'] < 1.0:
             ax.plot(row['WindowSize'], row['RTF_Mean'], 'o',
-                    markersize=14, color='green', alpha=0.3)
+                    markersize=14, color=color_mean, alpha=0.3)
 
     ax.set_xlabel('Window Size (samples)', fontsize=12)
     ax.set_ylabel('Real-Time Factor (RTF)', fontsize=12)
-    ax.set_title('Real-Time Performance: RTF vs Window Size\n(RTF < 1.0 = Faster than real-time)',
-                 fontsize=14, fontweight='bold')
     ax.set_xscale('log', base=2)
-    ax.set_yscale('log')
+    # Linear y-scale
     ax.grid(True, alpha=0.3, which='both')
     ax.legend(fontsize=10, loc='upper left')
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'rtf_analysis.png', dpi=150, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / 'rtf_analysis.png'}")
+    filename = f'rtf_analysis_n{n_trials}.png'
+    plt.savefig(output_dir / filename, dpi=150, bbox_inches='tight')
+    print(f"  → Saved: {output_dir / filename}")
     plt.close()
 
 
 def plot_complexity(timing_data, output_dir):
-    """Plot computational complexity analysis (log-log)."""
+    """Plot computational complexity analysis (log-log) with sample count."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
     window_sizes = timing_data['WindowSize'].values
-    times = timing_data['MeanTotal'].values
+    times_mean = timing_data['MeanTotal'].values
+    times_min = (timing_data['MinForward'] + timing_data['MinInverse']).values
+    times_max = (timing_data['MaxForward'] + timing_data['MaxInverse']).values
+    num_samples = timing_data['NumSamples']
 
-    # Plot measured data
-    ax.loglog(window_sizes, times, 'o-', linewidth=2.5, markersize=10,
-              label='Measured Time', color='#1f77b4', zorder=3)
+    # Get number of trials
+    n_trials = num_samples.iloc[0] if len(num_samples) > 0 else 0
+
+    # Consistent professional colors
+    color_measured = '#1f77b4'    # Blue
+    color_nlogn = '#2ca02c'       # Green
+    color_n2 = '#d62728'          # Red
+    color_n = '#9467bd'           # Purple
+
+    # Plot measured data (mean only)
+    ax.loglog(window_sizes, times_mean, 'o-', linewidth=2.5, markersize=10,
+              label=f'Mean Time', color=color_measured, zorder=3)
+
+    # Shaded area for min/max range
+    ax.fill_between(window_sizes, times_min, times_max,
+                    alpha=0.15, color=color_measured, label='Min/Max Range', zorder=1)
 
     # Fit O(N log N) - expected for FFT-based algorithms
-    nlogn_fit = times[0] * (window_sizes / window_sizes[0]) * \
+    nlogn_fit = times_mean[0] * (window_sizes / window_sizes[0]) * \
                 (np.log2(window_sizes) / np.log2(window_sizes[0]))
     ax.loglog(window_sizes, nlogn_fit, '--', linewidth=2,
-              label='O(N log N) Reference', color='#2ca02c', alpha=0.7)
+              label='O(N log N) Reference', color=color_nlogn, alpha=0.7)
 
     # O(N^2) for comparison
-    n2_fit = times[0] * (window_sizes / window_sizes[0])**2
+    n2_fit = times_mean[0] * (window_sizes / window_sizes[0])**2
     ax.loglog(window_sizes, n2_fit, '--', linewidth=2,
-              label='O(N²) Reference', color='#d62728', alpha=0.7)
+              label='O(N²) Reference', color=color_n2, alpha=0.7)
 
     # O(N) for comparison
-    n_fit = times[0] * (window_sizes / window_sizes[0])
+    n_fit = times_mean[0] * (window_sizes / window_sizes[0])
     ax.loglog(window_sizes, n_fit, '--', linewidth=2,
-              label='O(N) Reference', color='#9467bd', alpha=0.7)
+              label='O(N) Reference', color=color_n, alpha=0.7)
 
     ax.set_xlabel('Window Size N (samples)', fontsize=12)
     ax.set_ylabel('Processing Time (ms)', fontsize=12)
-    ax.set_title('Computational Complexity Analysis', fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3, which='both')
     ax.legend(fontsize=10, loc='upper left')
 
-    # Add text annotation about complexity
-    complexity_text = 'FRFT follows O(N log N)\ndue to FFT-based implementation'
-    ax.text(0.98, 0.05, complexity_text, transform=ax.transAxes,
-            fontsize=10, verticalalignment='bottom', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
     plt.tight_layout()
-    plt.savefig(output_dir / 'complexity_analysis.png', dpi=150, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / 'complexity_analysis.png'}")
+    filename = f'complexity_analysis_n{n_trials}.png'
+    plt.savefig(output_dir / filename, dpi=150, bbox_inches='tight')
+    print(f"  → Saved: {output_dir / filename}")
     plt.close()
 
 
 def plot_mse_vs_frequency(accuracy_data, output_dir):
-    """Plot MSE vs frequency with alphas from 0 to 2, aggregated across all window sizes and overlap factors."""
+    """Plot MSE vs frequency with alphas from 0 to 2 in four subplots (1 row x 4 cols), aggregated across all window sizes and overlap factors."""
 
     # Filter for alphas from 0 to 2 only
     subset = accuracy_data[(accuracy_data['Alpha'] >= 0.0) & (accuracy_data['Alpha'] <= 2.0)]
+
+    # Count unique window sizes and overlap factors
+    n_window_sizes = subset['WindowSize'].nunique()
+    n_overlap_factors = subset['OverlapFactor'].nunique()
+    n_combinations = n_window_sizes * n_overlap_factors
 
     # Get alpha values in 0.1 increments from 0 to 2
     alphas = sorted(subset['Alpha'].unique())
@@ -169,72 +205,60 @@ def plot_mse_vs_frequency(accuracy_data, output_dir):
     alphas = [round(a, 1) for a in alphas if 0.0 <= a <= 2.0]
     alphas = sorted(list(set(alphas)))  # Remove duplicates and sort
 
-    # Create colormap for alphas
-    cmap = plt.cm.viridis
-    colors = [cmap(i / (len(alphas) - 1)) for i in range(len(alphas))]
+    # Split alphas into 4 ranges
+    alpha_ranges = [
+        (0.0, 0.5, 'α: 0.0 - 0.5'),
+        (0.5, 1.0, 'α: 0.5 - 1.0'),
+        (1.0, 1.5, 'α: 1.0 - 1.5'),
+        (1.5, 2.0, 'α: 1.5 - 2.0')
+    ]
 
-    # === Plot 1: Log Y-axis ===
-    fig, ax = plt.subplots(figsize=(12, 7))
+    # Create colormap for alphas - professional tab20 colors
+    cmap = plt.cm.tab20
+    colors = [cmap(i / len(alphas)) for i in range(len(alphas))]
+    alpha_to_color = {alpha: colors[i] for i, alpha in enumerate(alphas)}
 
-    for i, alpha in enumerate(alphas):
-        # Get all data for this alpha (across all window sizes and overlap factors)
-        alpha_data = subset[np.abs(subset['Alpha'] - alpha) < 0.05]
+    # Create 1x4 subplot layout (one row, four columns)
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
 
-        if len(alpha_data) == 0:
-            continue
+    for subplot_idx, (alpha_min, alpha_max, title) in enumerate(alpha_ranges):
+        ax = axes[subplot_idx]
 
-        # Aggregate by frequency - calculate mean MSE across all window sizes and overlap factors
-        freq_grouped = alpha_data.groupby('Frequency')['MSE'].mean().reset_index()
-        freq_grouped = freq_grouped.sort_values('Frequency')
+        # Filter alphas for this range
+        range_alphas = [a for a in alphas if alpha_min <= a <= alpha_max]
 
-        # Label all alphas
-        label = f'α = {alpha:.1f}'
-        ax.semilogy(freq_grouped['Frequency'], freq_grouped['MSE'],
-                    'o-', color=colors[i], linewidth=1.5, markersize=4,
+        for alpha in range_alphas:
+            # Get all data for this alpha (across all window sizes and overlap factors)
+            alpha_data = subset[np.abs(subset['Alpha'] - alpha) < 0.05]
+
+            if len(alpha_data) == 0:
+                continue
+
+            # Aggregate by frequency - calculate mean MSE across all window sizes and overlap factors
+            freq_grouped = alpha_data.groupby('Frequency')['MSE'].mean().reset_index()
+            freq_grouped = freq_grouped.sort_values('Frequency')
+
+            # Label all alphas
+            label = f'α = {alpha:.1f}'
+            ax.plot(freq_grouped['Frequency'], freq_grouped['MSE'],
+                    'o-', color=alpha_to_color[alpha], linewidth=1.5, markersize=4,
                     label=label, alpha=0.8)
 
-    ax.set_xlabel('Frequency (Hz)', fontsize=12)
-    ax.set_ylabel('Mean Squared Error (MSE) - Log Scale', fontsize=12)
-    ax.set_title('MSE vs Frequency (α: 0.0 to 2.0)\n(Averaged across all window sizes and overlap factors)',
-                 fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8, ncol=3, loc='best')
+        # Add subplot title as text annotation in upper left
+        ax.text(0.02, 0.98, title, transform=ax.transAxes,
+                fontsize=11, fontweight='bold', verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
 
-    plt.tight_layout()
-    plt.savefig(output_dir / 'mse_vs_frequency_log.png', dpi=150, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / 'mse_vs_frequency_log.png'}")
-    plt.close()
+        ax.set_xlabel('Frequency (Hz)', fontsize=11)
+        if subplot_idx == 0:
+            ax.set_ylabel('Mean Squared Error (MSE)', fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=10, loc='best', ncol=1)
 
-    # === Plot 2: Linear Y-axis ===
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    for i, alpha in enumerate(alphas):
-        # Get all data for this alpha (across all window sizes and overlap factors)
-        alpha_data = subset[np.abs(subset['Alpha'] - alpha) < 0.05]
-
-        if len(alpha_data) == 0:
-            continue
-
-        # Aggregate by frequency - calculate mean MSE across all window sizes and overlap factors
-        freq_grouped = alpha_data.groupby('Frequency')['MSE'].mean().reset_index()
-        freq_grouped = freq_grouped.sort_values('Frequency')
-
-        # Label all alphas
-        label = f'α = {alpha:.1f}'
-        ax.plot(freq_grouped['Frequency'], freq_grouped['MSE'],
-                'o-', color=colors[i], linewidth=1.5, markersize=4,
-                label=label, alpha=0.8)
-
-    ax.set_xlabel('Frequency (Hz)', fontsize=12)
-    ax.set_ylabel('Mean Squared Error (MSE) - Linear Scale', fontsize=12)
-    ax.set_title('MSE vs Frequency (α: 0.0 to 2.0)\n(Averaged across all window sizes and overlap factors)',
-                 fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8, ncol=3, loc='best')
-
-    plt.tight_layout()
-    plt.savefig(output_dir / 'mse_vs_frequency_linear.png', dpi=150, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / 'mse_vs_frequency_linear.png'}")
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    filename = f'mse_vs_frequency_n{n_combinations}.png'
+    plt.savefig(output_dir / filename, dpi=150, bbox_inches='tight')
+    print(f"  → Saved: {output_dir / filename}")
     plt.close()
 
 
@@ -304,8 +328,7 @@ Examples:
         print("\n⚠ Skipping timing plots (no timing data)")
 
     if accuracy_data is not None:
-        print("\n[4/5] MSE vs Frequency (Log Scale)")
-        print("[5/5] MSE vs Frequency (Linear Scale)")
+        print("\n[4/4] MSE vs Frequency")
         plot_mse_vs_frequency(accuracy_data, output_dir)
     else:
         print("\n⚠ Skipping accuracy plots (no accuracy data)")
@@ -317,23 +340,22 @@ Examples:
 
     plot_count = 0
     if timing_data is not None:
-        plot_count += 3
+        plot_count += 3  # 3 timing plots
     if accuracy_data is not None:
-        plot_count += 2  # Now generating 2 MSE plots
+        plot_count += 1  # 1 MSE plot
 
     print(f"\n✓ Generated {plot_count} plots in: {output_dir}/")
     print()
 
     if timing_data is not None:
         print("Performance Plots:")
-        print(f"  • {output_dir}/processing_time.png")
-        print(f"  • {output_dir}/rtf_analysis.png")
-        print(f"  • {output_dir}/complexity_analysis.png")
+        print(f"  • {output_dir}/processing_time_n{{trials}}.png")
+        print(f"  • {output_dir}/rtf_analysis_n{{trials}}.png")
+        print(f"  • {output_dir}/complexity_analysis_n{{trials}}.png")
 
     if accuracy_data is not None:
         print("\nAccuracy Plots:")
-        print(f"  • {output_dir}/mse_vs_frequency_log.png")
-        print(f"  • {output_dir}/mse_vs_frequency_linear.png")
+        print(f"  • {output_dir}/mse_vs_frequency_n{{combinations}}.png")
 
     print()
 
