@@ -19,9 +19,9 @@
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1, 2, 4};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {100.0, 440.0, 1000.0, 5000.0, 10000.0};  // Hz
+    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000, 5000.0, 10000.0, 15000.0, 20000.0};
     double sample_rate = 44100.0;
-    double audio_duration = 5.0;  // 1 second of audio
+    int n_analysis = 100;  // Number of frames to analyze
     double alpha_start = -2.0;
     double alpha_end = 2.0;
     double alpha_step = 0.1;
@@ -123,7 +123,7 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
                                double frequency,
                                double alpha,
                                double sample_rate,
-                               double audio_duration) {
+                               int n_analysis) {
     TestResult result;
     result.window_size = window_size;
     result.overlap_factor = overlap_factor;
@@ -139,8 +139,8 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     int hop_size = window_size / overlap_factor;
     if (hop_size < 1) hop_size = 1;
 
-    // Generate 1 second of test signal
-    int signal_length = static_cast<int>(audio_duration * sample_rate);
+    // Generate enough signal for n_analysis frames
+    int signal_length = window_size + (n_analysis - 1) * hop_size;
     std::vector<double> original_signal;
     generate_sine_wave(original_signal, signal_length, frequency, sample_rate);
 
@@ -163,15 +163,15 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     for (int pos = 0; pos + window_size <= signal_length; pos += hop_size) {
         // Extract frame
         std::copy(original_signal.begin() + pos,
-                 original_signal.begin() + pos + window_size,
-                 real_in.begin());
+                  original_signal.begin() + pos + window_size,
+                  real_in.begin());
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
         // Time forward FRFT (-alpha)
         auto forward_start = std::chrono::high_resolution_clock::now();
         bool forward_success = engine.compute(real_in.data(), imag_in.data(),
-                                             real_temp.data(), imag_temp.data(),
-                                             window_size, -alpha);
+                                              real_temp.data(), imag_temp.data(),
+                                              window_size, -alpha);
         auto forward_end = std::chrono::high_resolution_clock::now();
 
         if (!forward_success) {
@@ -187,8 +187,8 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
         // Time inverse FRFT (+alpha)
         auto inverse_start = std::chrono::high_resolution_clock::now();
         bool inverse_success = engine.compute(real_temp.data(), imag_temp.data(),
-                                             real_out.data(), imag_out.data(),
-                                             window_size, alpha);
+                                              real_out.data(), imag_out.data(),
+                                              window_size, alpha);
         auto inverse_end = std::chrono::high_resolution_clock::now();
 
         if (!inverse_success) {
@@ -203,7 +203,7 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
 
         // Copy reconstructed frame (simple copy, no overlap-add)
         std::copy(real_out.begin(), real_out.end(),
-                 reconstructed_signal.begin() + pos);
+                  reconstructed_signal.begin() + pos);
 
         num_frames++;
     }
@@ -220,7 +220,7 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     std::vector<double> original_valid(original_signal.begin(),
                                        original_signal.begin() + valid_length);
     std::vector<double> reconstructed_valid(reconstructed_signal.begin(),
-                                           reconstructed_signal.begin() + valid_length);
+                                            reconstructed_signal.begin() + valid_length);
 
     result.mse = calculate_mse(original_valid, reconstructed_valid);
     result.max_error = calculate_max_error(original_valid, reconstructed_valid);
@@ -284,8 +284,8 @@ TimingStats calculate_timing_stats(const std::vector<TestResult>& results,
 
 // Write timing benchmarks to file
 void write_timing_benchmarks(const std::vector<TestResult>& all_results,
-                            const TestConfig& config,
-                            const std::string& filename) {
+                             const TestConfig& config,
+                             const std::string& filename) {
     std::ofstream out_file(filename);
     if (!out_file.is_open()) {
         std::cerr << "Error: Cannot open timing file: " << filename << "\n";
@@ -295,7 +295,7 @@ void write_timing_benchmarks(const std::vector<TestResult>& all_results,
     // Write header
     out_file << "# FRFT Performance Benchmarks\n";
     out_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
-    out_file << "# Audio Duration: " << config.audio_duration << " seconds\n";
+    out_file << "# Number of Analysis Frames: " << config.n_analysis << "\n";
     out_file << "# All times are per-frame averages across all test conditions\n";
     out_file << "#\n";
     out_file << "# Real-Time Factor (RTF):\n";
@@ -318,7 +318,7 @@ void write_timing_benchmarks(const std::vector<TestResult>& all_results,
     out_file << "# 12. RTF Worst\n";
     out_file << "#\n";
     out_file << "WindowSize\tNumSamples\tMeanForward\tMinForward\tMaxForward\t"
-            << "MeanInverse\tMinInverse\tMaxInverse\tMeanTotal\tRTF_Mean\tRTF_Best\tRTF_Worst\n";
+             << "MeanInverse\tMinInverse\tMaxInverse\tMeanTotal\tRTF_Mean\tRTF_Best\tRTF_Worst\n";
 
     // Calculate and write statistics for each window size
     for (int window_size : config.window_sizes) {
@@ -326,19 +326,19 @@ void write_timing_benchmarks(const std::vector<TestResult>& all_results,
 
         if (stats.num_samples > 0) {
             out_file << stats.window_size << "\t"
-                    << stats.num_samples << "\t"
-                    << std::fixed << std::setprecision(6)
-                    << stats.mean_forward_ms << "\t"
-                    << stats.min_forward_ms << "\t"
-                    << stats.max_forward_ms << "\t"
-                    << stats.mean_inverse_ms << "\t"
-                    << stats.min_inverse_ms << "\t"
-                    << stats.max_inverse_ms << "\t"
-                    << stats.mean_total_ms << "\t"
-                    << std::setprecision(4)
-                    << stats.rtf_mean << "\t"
-                    << stats.rtf_best << "\t"
-                    << stats.rtf_worst << "\n";
+                     << stats.num_samples << "\t"
+                     << std::fixed << std::setprecision(6)
+                     << stats.mean_forward_ms << "\t"
+                     << stats.min_forward_ms << "\t"
+                     << stats.max_forward_ms << "\t"
+                     << stats.mean_inverse_ms << "\t"
+                     << stats.min_inverse_ms << "\t"
+                     << stats.max_inverse_ms << "\t"
+                     << stats.mean_total_ms << "\t"
+                     << std::setprecision(4)
+                     << stats.rtf_mean << "\t"
+                     << stats.rtf_best << "\t"
+                     << stats.rtf_worst << "\n";
         }
     }
 
@@ -354,9 +354,7 @@ void run_test_suite(const TestConfig& config) {
 
     std::cout << "Configuration:\n";
     std::cout << "  Sample Rate: " << config.sample_rate << " Hz\n";
-    std::cout << "  Audio Duration: " << config.audio_duration << " seconds\n";
-    int total_samples = static_cast<int>(config.audio_duration * config.sample_rate);
-    std::cout << "  Total Samples: " << total_samples << "\n";
+    std::cout << "  Number of Analysis Frames: " << config.n_analysis << "\n";
     std::cout << "  Window Sizes: ";
     for (size_t i = 0; i < config.window_sizes.size(); ++i) {
         std::cout << config.window_sizes[i];
@@ -401,8 +399,7 @@ void run_test_suite(const TestConfig& config) {
     out_file << "# FRFT Round-Trip Accuracy Test Results\n";
     out_file << "# Generated: " << std::chrono::system_clock::now().time_since_epoch().count() << "\n";
     out_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
-    out_file << "# Audio Duration: " << config.audio_duration << " seconds\n";
-    out_file << "# Total Samples: " << total_samples << "\n";
+    out_file << "# Number of Analysis Frames: " << config.n_analysis << "\n";
     out_file << "# Processing: Direct frame-by-frame (no windowing)\n";
     out_file << "#\n";
     out_file << "# Columns:\n";
@@ -421,7 +418,7 @@ void run_test_suite(const TestConfig& config) {
     out_file << "# 13. Success\n";
     out_file << "#\n";
     out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\tAlpha\t"
-            << "ForwardTime\tInverseTime\tTotalTime\tMSE\tMaxError\tMeanError\tSuccess\n";
+             << "ForwardTime\tInverseTime\tTotalTime\tMSE\tMaxError\tMeanError\tSuccess\n";
 
     // Create FRFT engine
     FRFTEngine engine;
@@ -455,26 +452,26 @@ void run_test_suite(const TestConfig& config) {
 
                 for (double alpha = config.alpha_start; alpha <= config.alpha_end; alpha += config.alpha_step) {
                     TestResult result = test_frft_roundtrip(engine, window_size, overlap_factor,
-                                                           frequency, alpha,
-                                                           config.sample_rate, config.audio_duration);
+                                                            frequency, alpha,
+                                                            config.sample_rate, config.n_analysis);
 
                     // Store for timing analysis
                     all_results.push_back(result);
 
                     // Write result to file
                     out_file << result.window_size << "\t"
-                            << result.overlap_factor << "\t"
-                            << hop_size << "\t"
-                            << result.num_frames << "\t"
-                            << result.frequency << "\t"
-                            << std::fixed << std::setprecision(2) << result.alpha << "\t"
-                            << std::setprecision(6) << result.forward_time_ms << "\t"
-                            << result.inverse_time_ms << "\t"
-                            << result.total_time_ms << "\t"
-                            << std::scientific << std::setprecision(10) << result.mse << "\t"
-                            << result.max_error << "\t"
-                            << result.mean_error << "\t"
-                            << (result.success ? 1 : 0) << "\n";
+                             << result.overlap_factor << "\t"
+                             << hop_size << "\t"
+                             << result.num_frames << "\t"
+                             << result.frequency << "\t"
+                             << std::fixed << std::setprecision(2) << result.alpha << "\t"
+                             << std::setprecision(6) << result.forward_time_ms << "\t"
+                             << result.inverse_time_ms << "\t"
+                             << result.total_time_ms << "\t"
+                             << std::scientific << std::setprecision(10) << result.mse << "\t"
+                             << result.max_error << "\t"
+                             << result.mean_error << "\t"
+                             << (result.success ? 1 : 0) << "\n";
 
                     test_count++;
                     if (!result.success) {
@@ -533,7 +530,7 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
             std::cout << "  --output FILE       Output filename (default: frft_test_results.txt)\n";
             std::cout << "  --timing FILE       Timing benchmark filename (default: frft_timing_benchmarks.txt)\n";
             std::cout << "  --sample-rate SR    Sample rate in Hz (default: 44100)\n";
-            std::cout << "  --duration SECS     Audio duration in seconds (default: 1.0)\n";
+            std::cout << "  --n-analysis N      Number of frames to analyze (default: 100)\n";
             std::cout << "  --quick            Run quick test (fewer window sizes and frequencies)\n";
             std::cout << "  --help             Show this help message\n";
             return false;
@@ -547,8 +544,8 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
         else if (arg == "--sample-rate" && i + 1 < argc) {
             config.sample_rate = std::stod(argv[++i]);
         }
-        else if (arg == "--duration" && i + 1 < argc) {
-            config.audio_duration = std::stod(argv[++i]);
+        else if (arg == "--n-analysis" && i + 1 < argc) {
+            config.n_analysis = std::stoi(argv[++i]);
         }
         else if (arg == "--quick") {
             config.window_sizes = {64, 256, 1024};
@@ -556,30 +553,30 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
             config.overlap_factors = {1, 2, 4};
         }
     }
-    
+
     return true;
 }
 
 int main(int argc, char* argv[]) {
 
 
-    #ifdef _WIN32
+#ifdef _WIN32
     // Set console to UTF-8 mode on Windows
-        SetConsoleOutputCP(CP_UTF8);
-    #endif
+    SetConsoleOutputCP(CP_UTF8);
+#endif
 
     TestConfig config;
-    
+
     if (!parse_arguments(argc, argv, config)) {
         return 0;  // Help was shown
     }
-    
+
     try {
         run_test_suite(config);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
-    
+
     return 0;
 }
