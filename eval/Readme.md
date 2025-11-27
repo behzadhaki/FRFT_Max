@@ -13,4 +13,9 @@ e.g.
 ```terminal
 cd eval/
 python plot_results.py -d ./Arm64_M4Pro
+
+or 
+
+python plot_results.py -d ./AMDRyzen9_5900X_12Core_3.7Ghz
+
 ```
