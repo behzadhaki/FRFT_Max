@@ -352,84 +352,7 @@ else()
     )
 endif()
 
-# ------------------------------------------------------------------------------
-# Signal Inspector Target (Optional)
-# ------------------------------------------------------------------------------
-if(EXISTS ${SRC_DIR}/signalinspector.cpp)
-    set(SignalInspector signalinspector)
 
-    set(INSPECTOR_SOURCE_FILES ${SRC_DIR}/signalinspector.cpp)
-    if(IS_MACOS)
-        list(APPEND INSPECTOR_SOURCE_FILES ${MAX_SDK_INCLUDES}/common/commonsyms.c)
-    endif()
-
-    add_library(${SignalInspector} MODULE ${INSPECTOR_SOURCE_FILES})
-    target_include_directories(${SignalInspector} PRIVATE ${COMMON_INCLUDES})
-    target_link_libraries(${SignalInspector} PRIVATE frft_engine)
-
-    if(IS_WINDOWS)
-        target_link_libraries(${SignalInspector} PRIVATE
-                ${PLATFORM_LIBRARIES}
-                ${MAXAPI_LIB}
-        )
-
-        if(MAXAUDIO_LIB)
-            target_link_libraries(${SignalInspector} PRIVATE ${MAXAUDIO_LIB})
-        endif()
-
-        if(JITTER_LIB)
-            target_link_libraries(${SignalInspector} PRIVATE ${JITTER_LIB})
-        endif()
-
-        target_link_options(${SignalInspector} PRIVATE
-                "/FORCE:MULTIPLE"
-                "/IGNORE:4006"
-        )
-
-        set_target_properties(${SignalInspector} PROPERTIES
-                OUTPUT_NAME ${SignalInspector}
-                SUFFIX ".${EXTERNAL_EXTENSION}"
-                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-        )
-
-    elseif(IS_MACOS)
-        target_link_libraries(${SignalInspector} PRIVATE ${PLATFORM_LIBRARIES})
-
-        set_target_properties(${SignalInspector} PROPERTIES
-                LINK_FLAGS "-undefined dynamic_lookup"
-                BUNDLE TRUE
-                BUNDLE_EXTENSION ${EXTERNAL_EXTENSION}
-                OUTPUT_NAME ${SignalInspector}
-                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}/Contents/MacOS
-                INSTALL_RPATH "@loader_path"
-                BUILD_WITH_INSTALL_RPATH TRUE
-        )
-
-        configure_file(
-                ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
-                ${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}/Contents/Info.plist
-                @ONLY
-        )
-    endif()
-
-    deploy_to_max(${SignalInspector})
-
-    if(IS_WINDOWS)
-        install(FILES "$<TARGET_FILE:${SignalInspector}>"
-                DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-                RENAME "${SignalInspector}.${EXTERNAL_EXTENSION}"
-        )
-    else()
-        install(DIRECTORY "${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}"
-                DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-        )
-    endif()
-
-    add_custom_target(FRFTAll DEPENDS ${FRFT} ${SignalInspector})
-else()
-    message(STATUS "ℹ️  signalinspector.cpp not found, skipping")
-    add_custom_target(FRFTAll DEPENDS ${FRFT})
-endif()
 
 # ------------------------------------------------------------------------------
 # FRFT Test Executable (Standalone Testing)
@@ -468,16 +391,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(frft_engine PRIVATE /O2 /fp:fast)
         target_compile_options(${FRFT} PRIVATE /O2 /fp:fast)
         target_compile_options(frft_test_reconstruction PRIVATE /O2 /fp:fast)
-        if(TARGET ${SignalInspector})
-            target_compile_options(${SignalInspector} PRIVATE /O2 /fp:fast)
-        endif()
     else()
         target_compile_options(frft_engine PRIVATE -O3 -march=native -ffast-math)
         target_compile_options(${FRFT} PRIVATE -O3 -march=native -ffast-math)
         target_compile_options(frft_test_reconstruction PRIVATE -O3 -march=native -ffast-math)
-        if(TARGET ${SignalInspector})
-            target_compile_options(${SignalInspector} PRIVATE -O3 -march=native -ffast-math)
-        endif()
     endif()
     message(STATUS "✅ Release optimizations enabled")
 endif()
