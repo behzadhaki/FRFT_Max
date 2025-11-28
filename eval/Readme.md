@@ -1,4 +1,36 @@
-1. To regenerate the plots, first run the evaluation cpp application called (frft_test_reconstruction)
+# Run Evaluations First
+
+Before regenerating the plots, please ensure you have run the evaluation cpp applications to generate the necessary text files containing the evaluation results. Follow these steps:
+
+## For reconstruction evaluations:
+
+```commandline
+chmod +x run_test_*.sh
+./run_test_reconstruction.sh
+```
+
+## For fft vs alpha=1 evaluations:
+
+```commandline
+chmod +x run_test_*.sh
+./run_test_fft_comparison.sh
+```
+
+## For homomorphism evaluations:
+
+```commandline
+chmod +x run_test_*.sh
+./frft_test_homomorphic.sh
+```
+    
+    
+
+
+
+2. 
+3. 
+4. 
+5. To regenerate the plots, first run the evaluation cpp application called (frft_test_reconstruction)
 
 2. Move the generated text files to a directory (or put them in the same directory as the plotting scripts - i.e. /eval/)
 

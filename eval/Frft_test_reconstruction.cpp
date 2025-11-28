@@ -1,5 +1,4 @@
 #include "frft_engine.h"
-#include "mss_loss.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -19,12 +18,12 @@
 // Test configuration
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
-    std::vector<int> overlap_factors = {1, 2, 4};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000, 5000.0, 10000.0, 15000.0};
+    std::vector<int> overlap_factors = {4};  // 1=no overlap, 2=50%, 4=75%, etc.
+    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 4000.0, 5000.0, 8000., 10000.0, 15000.0};
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
     double alpha_start = 0.0;
-    double alpha_end = 2.0;
+    double alpha_end = 2.1;
     double alpha_step = 0.1;
     std::string output_filename = "frft_test_results.txt";
     std::string timing_filename = "frft_timing_benchmarks.txt";
@@ -37,7 +36,6 @@ struct TestResult {
     double frequency;
     double alpha;
     double mse;
-    double mss_loss;  // Multi-scale spectrogram loss
     double max_error;
     double mean_error;
     int num_frames;
@@ -120,7 +118,6 @@ double calculate_mean_error(const std::vector<double>& original, const std::vect
 
 // Perform a single round-trip FRFT test with timing
 TestResult test_frft_roundtrip(FRFTEngine& engine,
-                               MultiscaleSpectrogramLoss& mss_calculator,
                                int window_size,
                                int overlap_factor,
                                double frequency,
@@ -226,7 +223,6 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
                                             reconstructed_signal.begin() + valid_length);
 
     result.mse = calculate_mse(original_valid, reconstructed_valid);
-    result.mss_loss = mss_calculator.compute(original_valid, reconstructed_valid);
     result.max_error = calculate_max_error(original_valid, reconstructed_valid);
     result.mean_error = calculate_mean_error(original_valid, reconstructed_valid);
     result.success = true;
@@ -417,20 +413,15 @@ void run_test_suite(const TestConfig& config) {
     out_file << "# 8. Inverse Time (ms total)\n";
     out_file << "# 9. Total Time (ms)\n";
     out_file << "# 10. MSE\n";
-    out_file << "# 11. MSS Loss\n";
-    out_file << "# 12. Max Error\n";
-    out_file << "# 13. Mean Error\n";
-    out_file << "# 14. Success\n";
+    out_file << "# 11. Max Error\n";
+    out_file << "# 12. Mean Error\n";
+    out_file << "# 13. Success\n";
     out_file << "#\n";
     out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\tAlpha\t"
-             << "ForwardTime\tInverseTime\tTotalTime\tMSE\tMSS_Loss\tMaxError\tMeanError\tSuccess\n";
+             << "ForwardTime\tInverseTime\tTotalTime\tMSE\tMaxError\tMeanError\tSuccess\n";
 
     // Create FRFT engine
     FRFTEngine engine;
-
-    // Create Multi-scale Spectrogram Loss calculator
-    // Use scales appropriate for audio: 2048, 1024, 512
-    MultiscaleSpectrogramLoss mss_calculator({2048, 1024, 512}, 0.75, false);
 
     // Progress tracking
     int test_count = 0;
@@ -460,7 +451,7 @@ void run_test_suite(const TestConfig& config) {
                 int alpha_success = 0;
 
                 for (double alpha = config.alpha_start; alpha <= config.alpha_end; alpha += config.alpha_step) {
-                    TestResult result = test_frft_roundtrip(engine, mss_calculator, window_size, overlap_factor,
+                    TestResult result = test_frft_roundtrip(engine, window_size, overlap_factor,
                                                             frequency, alpha,
                                                             config.sample_rate, config.n_analysis);
 
@@ -478,7 +469,6 @@ void run_test_suite(const TestConfig& config) {
                              << result.inverse_time_ms << "\t"
                              << result.total_time_ms << "\t"
                              << std::scientific << std::setprecision(10) << result.mse << "\t"
-                             << result.mss_loss << "\t"
                              << result.max_error << "\t"
                              << result.mean_error << "\t"
                              << (result.success ? 1 : 0) << "\n";
