@@ -25,21 +25,17 @@ chmod +x run_test_*.sh
     
     
 
+## Generate Plots
 
+Move the generated text files to a directory (or put them in the same directory as the plotting scripts - i.e. /eval/)
 
-2. 
-3. 
-4. 
-5. To regenerate the plots, first run the evaluation cpp application called (frft_test_reconstruction)
-
-2. Move the generated text files to a directory (or put them in the same directory as the plotting scripts - i.e. /eval/)
-
-3. Run the plotting scripts (e.g. plot_results.py) to generate the plots from the text files.
+Then run the plotting scripts (e.g. plot_results.py) to generate the plots from the text files.
 
 ```terminal
 cd eval/
 python plot_results.py -d <directory_with_text_files>
 ```
+
 e.g.
 
 ```terminal
@@ -51,3 +47,5 @@ or
 python plot_results.py -d ./AMDRyzen9_5900X_12Core_3.7Ghz
 
 ```
+
+This will create the plots in the specified directory.
