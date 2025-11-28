@@ -116,7 +116,8 @@ fftw_include_dirs, fftw_library_dirs, fftw_libraries = get_fftw_paths()
 all_include_dirs = [
                        get_pybind_include(),
                        pybind11.get_include(),
-                       '.',  # Current directory for frft_engine.h
+                       '.',  # Current directory (pybind)
+                       '../src',  # Source directory for frft_engine.h
                    ] + fftw_include_dirs
 
 # Combine all library directories
@@ -127,7 +128,7 @@ ext_modules = [
         'frft_cpp',
         sources=[
             'frft_bindings.cpp',
-            'frft_engine.cpp',
+            '../src/frft_engine.cpp',
         ],
         include_dirs=all_include_dirs,
         library_dirs=all_library_dirs,

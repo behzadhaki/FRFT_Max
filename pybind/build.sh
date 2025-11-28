@@ -64,11 +64,37 @@ if [ "$BUILD_METHOD" = "1" ]; then
     echo ""
     echo "✓ Build complete!"
     echo ""
-    echo "To install system-wide, run:"
-    echo "  pip install ."
-    echo ""
-    echo "Or for development mode:"
-    echo "  pip install -e ."
+    echo "Installation options:"
+    echo "1) No installation (use locally only)"
+    echo "2) Install for current user (accessible in all environments)"
+    echo "3) Install system-wide (requires sudo)"
+    echo "4) Development mode (changes reflected immediately)"
+    read -p "Choose installation option (1-4): " INSTALL_OPTION
+
+    case $INSTALL_OPTION in
+        1)
+            echo "Skipping installation. Module available in current directory."
+            ;;
+        2)
+            echo "Installing for current user..."
+            $PIP_CMD install --user .
+            echo "✓ Installed! Package 'frft_cpp' is now accessible from any environment."
+            ;;
+        3)
+            echo "Installing system-wide..."
+            sudo $PIP_CMD install .
+            echo "✓ Installed system-wide!"
+            ;;
+        4)
+            echo "Installing in development mode..."
+            $PIP_CMD install --user -e .
+            echo "✓ Installed in development mode!"
+            echo "Note: Changes to the code will require rebuilding with 'python3 setup.py build_ext --inplace'"
+            ;;
+        *)
+            echo "Invalid choice. Skipping installation."
+            ;;
+    esac
     
 elif [ "$BUILD_METHOD" = "2" ]; then
     # Check for CMake

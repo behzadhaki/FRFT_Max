@@ -7,7 +7,6 @@ Python equivalent of Frft_test_reconstruction.cpp
 import numpy as np
 import torch
 import frft_cpp
-from MSS import MultiscaleSpectrogramLoss
 import time
 import json
 from dataclasses import dataclass, asdict
@@ -75,11 +74,6 @@ class FRFTTestSuite:
 
     def __init__(self, config: TestConfig):
         self.config = config
-        self.mss_loss = MultiscaleSpectrogramLoss(
-            scales=[2048, 1024, 512],
-            overlap=0.75,
-            verbose=False
-        )
         self.results: List[TestResult] = []
 
     def generate_sine_wave(self, size: int, frequency: float, phase: float = 0.0) -> np.ndarray:
