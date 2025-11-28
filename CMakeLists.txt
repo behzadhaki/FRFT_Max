@@ -355,46 +355,15 @@ endif()
 
 
 # ------------------------------------------------------------------------------
-# FRFT Test Executable (Standalone Testing)
-# ------------------------------------------------------------------------------
-add_executable(frft_test_reconstruction ${SRC_DIR}/frft_test_reconstruction.cpp)
-target_include_directories(frft_test_reconstruction PRIVATE
-        ${SRC_DIR}
-        ${FFTW3_INCLUDE_DIRS}
-)
-target_link_libraries(frft_test_reconstruction PRIVATE frft_engine)
-
-if(IS_WINDOWS)
-    # Windows-specific: no additional libraries needed for standalone test
-else()
-    # macOS/Linux: link math library
-    target_link_libraries(frft_test_reconstruction PRIVATE m)
-endif()
-
-set_target_properties(frft_test_reconstruction PROPERTIES
-        OUTPUT_NAME frft_test_reconstruction
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-)
-
-message(STATUS "✅ FRFT Test executable configured")
-
-# Install test executable
-install(TARGETS frft_test_reconstruction
-        RUNTIME DESTINATION "${CMAKE_SOURCE_DIR}/bin"
-)
-
-# ------------------------------------------------------------------------------
 # Optimization flags for Release builds
 # ------------------------------------------------------------------------------
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(MSVC)
         target_compile_options(frft_engine PRIVATE /O2 /fp:fast)
         target_compile_options(${FRFT} PRIVATE /O2 /fp:fast)
-        target_compile_options(frft_test_reconstruction PRIVATE /O2 /fp:fast)
     else()
         target_compile_options(frft_engine PRIVATE -O3 -march=native -ffast-math)
         target_compile_options(${FRFT} PRIVATE -O3 -march=native -ffast-math)
-        target_compile_options(frft_test_reconstruction PRIVATE -O3 -march=native -ffast-math)
     endif()
     message(STATUS "✅ Release optimizations enabled")
 endif()
