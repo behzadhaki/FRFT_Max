@@ -77,17 +77,17 @@ if [ "$BUILD_METHOD" = "1" ]; then
             ;;
         2)
             echo "Installing for current user..."
-            $PIP_CMD install --user .
+            $PIP_CMD install --user --no-build-isolation .
             echo "✓ Installed! Package 'frft_cpp' is now accessible from any environment."
             ;;
         3)
             echo "Installing system-wide..."
-            sudo $PIP_CMD install .
+            sudo $PIP_CMD install --no-build-isolation .
             echo "✓ Installed system-wide!"
             ;;
         4)
             echo "Installing in development mode..."
-            $PIP_CMD install --user -e .
+            $PIP_CMD install --user -e . --no-build-isolation
             echo "✓ Installed in development mode!"
             echo "Note: Changes to the code will require rebuilding with 'python3 setup.py build_ext --inplace'"
             ;;
