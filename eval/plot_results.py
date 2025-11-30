@@ -151,84 +151,6 @@ def plot_rtf(timing_data, output_dir):
     plt.close()
 
 
-def plot_mse_vs_frequency(accuracy_data, output_dir):
-    """Plot MSE vs frequency with alphas from 0 to 2 in four subplots (1 row x 4 cols), aggregated across all window sizes and overlap factors."""
-
-    # Filter for alphas from 0 to 2 only
-    subset = accuracy_data[(accuracy_data['Alpha'] >= 0.0) & (accuracy_data['Alpha'] <= 2.0)]
-
-    # Count unique window sizes and overlap factors
-    n_window_sizes = subset['WindowSize'].nunique()
-    n_overlap_factors = subset['OverlapFactor'].nunique()
-    n_combinations = n_window_sizes * n_overlap_factors
-
-    # Get unique frequencies and alphas
-    frequencies = sorted(subset['Frequency'].unique())
-    alphas = sorted(subset['Alpha'].unique())
-    # Round to avoid floating point issues
-    alphas = [round(a, 1) for a in alphas if 0.0 <= a <= 2.0]
-    alphas = sorted(list(set(alphas)))  # Remove duplicates and sort
-
-    # Create subplots: 1 row x 4 columns
-    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
-
-    # Color scheme for frequency ranges
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-
-    # Group frequencies into 4 buckets
-    freq_buckets = [
-        [f for f in frequencies if f < 500],
-        [f for f in frequencies if 500 <= f < 2000],
-        [f for f in frequencies if 2000 <= f < 8000],
-        [f for f in frequencies if f >= 8000]
-    ]
-    bucket_labels = ['< 500 Hz', '500 Hz - 2 kHz', '2 kHz - 8 kHz', '≥ 8 kHz']
-
-    for bucket_idx, (freq_bucket, label) in enumerate(zip(freq_buckets, bucket_labels)):
-        ax = axes[bucket_idx]
-
-        if not freq_bucket:
-            ax.text(0.5, 0.5, 'No data', transform=ax.transAxes,
-                    ha='center', va='center', fontsize=16)
-            ax.set_title(label, fontsize=16, fontweight='bold')
-            continue
-
-        # Aggregate MSE for all frequencies in this bucket
-        for freq in freq_bucket:
-            freq_data = subset[np.abs(subset['Frequency'] - freq) < 0.01]
-
-            # Calculate mean MSE across all window sizes and overlap factors for each alpha
-            mse_values = []
-            for alpha in alphas:
-                alpha_data = freq_data[np.abs(freq_data['Alpha'] - alpha) < 0.05]
-                if len(alpha_data) > 0:
-                    mse_values.append(alpha_data['MSE'].mean())
-                else:
-                    mse_values.append(np.nan)
-
-            # Plot line for this frequency
-            if freq >= 1000:
-                freq_label = f'{freq/1000:.1f} kHz'
-            else:
-                freq_label = f'{freq:.0f} Hz'
-
-            ax.semilogy(alphas, mse_values, 'o-', label=freq_label, alpha=0.7, linewidth=2)
-
-        ax.set_title(label, fontsize=16, fontweight='bold')
-        ax.set_xlabel('Alpha (α)', fontsize=14, fontweight='bold')
-        if bucket_idx == 0:
-            ax.set_ylabel('Mean Squared Error (MSE)', fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3, which='both')
-        ax.legend(fontsize=10, loc='best', framealpha=0.9)
-        ax.tick_params(axis='both', which='major', labelsize=12)
-
-    plt.tight_layout()
-    filename = f'mse_vs_frequency_n{n_combinations}.png'
-    plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / filename}")
-    plt.close()
-
-
 def plot_mse_vs_alpha(accuracy_data, output_dir, global_y_limits=None):
     """Plot MSE vs alpha for each frequency as bar charts in vertical subplots, aggregated across all window sizes and overlap factors."""
 
@@ -270,13 +192,14 @@ def plot_mse_vs_alpha(accuracy_data, output_dir, global_y_limits=None):
                     mean_mse = alpha_data['MSE'].mean()
                     global_min = min(global_min, mean_mse)
                     global_max = max(global_max, mean_mse)
-    else:
-        global_min, global_max = global_y_limits
 
-    # Add some padding to the range
-    y_range = global_max - global_min
-    global_min = max(0, global_min - 0.1 * y_range)
-    global_max = global_max + 0.1 * y_range
+        # Add some padding to the range
+        y_range = global_max - global_min
+        global_min = max(0, global_min - 0.1 * y_range)
+        global_max = global_max + 0.1 * y_range
+    else:
+        # Use provided limits directly (padding already applied in main)
+        global_min, global_max = global_y_limits
 
     # Color scheme
     bar_color = '#1f77b4'  # Blue
@@ -388,10 +311,11 @@ def plot_homomorphic_mse_vs_alpha(homo_data, output_dir, global_y_limits=None):
         global_min = max(0, global_min - 0.1 * y_range) if y_range > 0 else 0
         global_max = global_max + 0.1 * y_range if y_range > 0 else global_max * 1.1
     else:
+        # Use provided limits directly (padding already applied in main)
         global_min, global_max = global_y_limits
 
-    # Color scheme
-    bar_color = '#2ca02c'  # Green (different from reconstruction test)
+    # Color scheme (same as reconstruction test)
+    bar_color = '#1f77b4'  # Blue
 
     for idx, freq in enumerate(frequencies):
         ax = axes[idx]
@@ -436,7 +360,7 @@ def plot_homomorphic_mse_vs_alpha(homo_data, output_dir, global_y_limits=None):
 
         # Only show y-label on middle subplot
         if idx == n_freqs // 2:
-            ax.set_ylabel('Homomorphic MSE', fontsize=18, fontweight='bold')
+            ax.set_ylabel('Mean Squared Error (MSE)', fontsize=18, fontweight='bold')
 
         ax.grid(True, alpha=0.3, axis='y')
         ax.tick_params(axis='both', which='major', labelsize=16)
@@ -446,61 +370,6 @@ def plot_homomorphic_mse_vs_alpha(homo_data, output_dir, global_y_limits=None):
 
     plt.tight_layout(pad=0.5, h_pad=0.3)
     filename = f'homomorphic_mse_vs_alpha_n{n_combinations}.png'
-    plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
-    print(f"  → Saved: {output_dir / filename}")
-    plt.close()
-
-
-def plot_homomorphic_mse_heatmap(homo_data, output_dir):
-    """Plot heatmap of homomorphic MSE across window sizes and alphas."""
-
-    # Get unique values
-    window_sizes = sorted(homo_data['WindowSize'].unique())
-    alphas = sorted(homo_data['Alpha_Total'].unique())
-    alphas = [round(a, 1) for a in alphas]
-    alphas = sorted(list(set(alphas)))
-
-    # Create matrix: rows = window sizes, cols = alphas
-    mse_matrix = np.zeros((len(window_sizes), len(alphas)))
-
-    for i, ws in enumerate(window_sizes):
-        for j, alpha in enumerate(alphas):
-            data_subset = homo_data[
-                (homo_data['WindowSize'] == ws) &
-                (np.abs(homo_data['Alpha_Total'] - alpha) < 0.05)
-                ]
-            if len(data_subset) > 0:
-                mse_matrix[i, j] = data_subset['MSE_Homomorphic'].mean()
-            else:
-                mse_matrix[i, j] = np.nan
-
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 8))
-
-    # Create heatmap with log scale for better visualization
-    im = ax.imshow(np.log10(mse_matrix + 1e-20), aspect='auto', cmap='viridis',
-                   interpolation='nearest', origin='lower')
-
-    # Set ticks
-    ax.set_xticks(np.arange(len(alphas)))
-    ax.set_yticks(np.arange(len(window_sizes)))
-
-    # Set tick labels
-    ax.set_xticklabels([f'{a:.1f}' for a in alphas], fontsize=12)
-    ax.set_yticklabels([str(ws) for ws in window_sizes], fontsize=12)
-
-    # Labels
-    ax.set_xlabel('Alpha Total (α)', fontsize=16, fontweight='bold')
-    ax.set_ylabel('Window Size', fontsize=16, fontweight='bold')
-    ax.set_title('Homomorphic MSE Heatmap (log₁₀ scale)', fontsize=18, fontweight='bold')
-
-    # Colorbar
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('log₁₀(MSE)', fontsize=14, fontweight='bold')
-    cbar.ax.tick_params(labelsize=12)
-
-    plt.tight_layout()
-    filename = 'homomorphic_mse_heatmap.png'
     plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
     print(f"  → Saved: {output_dir / filename}")
     plt.close()
@@ -570,14 +439,40 @@ Examples:
     if accuracy_data is not None and homomorphic_data is not None:
         print("\n[Computing shared y-axis limits...]")
 
-        # Get min/max from reconstruction data
+        # Get min/max from AGGREGATED reconstruction data (what will be shown in bars)
         recon_subset = accuracy_data[(accuracy_data['Alpha'] >= 0.0) & (accuracy_data['Alpha'] <= 2.0)]
-        recon_min = recon_subset['MSE'].min()
-        recon_max = recon_subset['MSE'].max()
+        frequencies_recon = sorted(recon_subset['Frequency'].unique())
+        alphas_recon = sorted(recon_subset['Alpha'].unique())
+        alphas_recon = [round(a, 1) for a in alphas_recon if 0.0 <= a <= 2.0]
+        alphas_recon = sorted(list(set(alphas_recon)))
 
-        # Get min/max from homomorphic data
-        homo_min = homomorphic_data['MSE_Homomorphic'].min()
-        homo_max = homomorphic_data['MSE_Homomorphic'].max()
+        recon_min = float('inf')
+        recon_max = float('-inf')
+        for freq in frequencies_recon:
+            freq_data = recon_subset[np.abs(recon_subset['Frequency'] - freq) < 0.01]
+            for alpha in alphas_recon:
+                alpha_data = freq_data[np.abs(freq_data['Alpha'] - alpha) < 0.05]
+                if len(alpha_data) > 0:
+                    mean_mse = alpha_data['MSE'].mean()
+                    recon_min = min(recon_min, mean_mse)
+                    recon_max = max(recon_max, mean_mse)
+
+        # Get min/max from AGGREGATED homomorphic data (what will be shown in bars)
+        frequencies_homo = sorted(homomorphic_data['Frequency'].unique())
+        alphas_homo = sorted(homomorphic_data['Alpha_Total'].unique())
+        alphas_homo = [round(a, 1) for a in alphas_homo]
+        alphas_homo = sorted(list(set(alphas_homo)))
+
+        homo_min = float('inf')
+        homo_max = float('-inf')
+        for freq in frequencies_homo:
+            freq_data = homomorphic_data[np.abs(homomorphic_data['Frequency'] - freq) < 0.01]
+            for alpha in alphas_homo:
+                alpha_data = freq_data[np.abs(freq_data['Alpha_Total'] - alpha) < 0.05]
+                if len(alpha_data) > 0:
+                    mean_mse = alpha_data['MSE_Homomorphic'].mean()
+                    homo_min = min(homo_min, mean_mse)
+                    homo_max = max(homo_max, mean_mse)
 
         # Combine
         global_min = min(recon_min, homo_min)
@@ -607,11 +502,7 @@ Examples:
     # Accuracy plots (reconstruction test)
     if accuracy_data is not None:
         print("\n[Reconstruction Test - Accuracy]")
-        print("  [3] MSE vs Frequency")
-        plot_mse_vs_frequency(accuracy_data, output_dir)
-        plot_count += 1
-
-        print("  [4] MSE vs Alpha (by Frequency)")
+        print("  [3] MSE vs Alpha (by Frequency)")
         recon_y_limits = plot_mse_vs_alpha(accuracy_data, output_dir, global_y_limits=y_limits)
         # Update y_limits if we didn't have homomorphic data
         if y_limits is None:
@@ -623,12 +514,8 @@ Examples:
     # Homomorphic plots
     if homomorphic_data is not None:
         print("\n[Homomorphic Property Test]")
-        print("  [5] Homomorphic MSE vs Alpha")
+        print("  [4] Homomorphic MSE vs Alpha")
         plot_homomorphic_mse_vs_alpha(homomorphic_data, output_dir, global_y_limits=y_limits)
-        plot_count += 1
-
-        print("  [6] Homomorphic MSE Heatmap")
-        plot_homomorphic_mse_heatmap(homomorphic_data, output_dir)
         plot_count += 1
     else:
         print("\n⚠ Skipping homomorphic plots (no homomorphic data)")
@@ -648,13 +535,11 @@ Examples:
 
     if accuracy_data is not None:
         print("\nReconstruction Test - Accuracy:")
-        print(f"  • {output_dir}/mse_vs_frequency_n{{combinations}}.png")
         print(f"  • {output_dir}/mse_vs_alpha_n{{combinations}}.png")
 
     if homomorphic_data is not None:
         print("\nHomomorphic Property Test:")
         print(f"  • {output_dir}/homomorphic_mse_vs_alpha_n{{combinations}}.png")
-        print(f"  • {output_dir}/homomorphic_mse_heatmap.png")
 
     print()
 

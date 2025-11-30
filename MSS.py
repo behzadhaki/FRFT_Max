@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as func
 import math
 from typing import List
+
 class MultiscaleSpectrogramLoss:
     def __init__(self,
                  scales=[8192, 4096, 2048],
