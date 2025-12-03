@@ -7,9 +7,13 @@
 #include <string>
 #include <algorithm>
 #include <random>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
 #endif
 
 // Test configuration
@@ -22,7 +26,8 @@ struct TestConfig {
     double alpha_start = 0.0;
     double alpha_end = 2.0;
     double alpha_step = 0.1;
-    std::string output_filename = "frft_homomorphic_results.txt";
+    std::string output_filename = "homomorphic_test/results.txt";
+    std::string figures_dir = "homomorphic_test/figures";
 };
 
 // Result for a single homomorphic test
@@ -41,6 +46,129 @@ struct HomomorphicTestResult {
     int num_frames;
     bool success;
 };
+
+// Create directory recursively
+bool create_directories(const std::string& path) {
+    std::string current_path;
+    for (size_t i = 0; i < path.length(); ++i) {
+        if (path[i] == '/' || path[i] == '\\' || i == path.length() - 1) {
+            if (i == path.length() - 1 && path[i] != '/' && path[i] != '\\') {
+                current_path += path[i];
+            } else {
+                current_path += path[i];
+            }
+
+            #ifdef _WIN32
+            _mkdir(current_path.c_str());
+            #else
+            mkdir(current_path.c_str(), 0755);
+            #endif
+        } else {
+            current_path += path[i];
+        }
+    }
+    return true;
+}
+
+// Write homomorphic comparison to CSV
+void write_homomorphic_to_csv(const std::string& filename,
+                              const std::vector<double>& direct_result,
+                              const std::vector<double>& composed_result,
+                              double sample_rate) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file for writing: " << filename << "\n";
+        return;
+    }
+
+    file << "sample,time,frft_direct,frft_composed,error\n";
+    for (size_t i = 0; i < direct_result.size(); ++i) {
+        double time = static_cast<double>(i) / sample_rate;
+        double error = direct_result[i] - composed_result[i];
+        file << i << ","
+             << time << ","
+             << direct_result[i] << ","
+             << composed_result[i] << ","
+             << error << "\n";
+    }
+    file.close();
+}
+
+// Generate Python plotting script for homomorphic property
+void generate_homomorphic_plot_script(const std::string& csv_filename,
+                                     const std::string& output_png,
+                                     int window_size,
+                                     double test_frequency,
+                                     double alpha_total,
+                                     double alpha1,
+                                     double alpha2,
+                                     double sample_rate,
+                                     double mse,
+                                     double max_error) {
+    std::ofstream script("plot_homomorphic.py");
+    if (!script.is_open()) {
+        std::cerr << "Error: Cannot create plotting script\n";
+        return;
+    }
+
+    script << "import matplotlib.pyplot as plt\n";
+    script << "import pandas as pd\n";
+    script << "import numpy as np\n\n";
+
+    script << "# Read data\n";
+    script << "data = pd.read_csv('" << csv_filename << "')\n\n";
+
+    script << "# Create figure with 3 subplots\n";
+    script << "fig, axes = plt.subplots(3, 1, figsize=(14, 12))\n";
+    script << "fig.suptitle(f'FRFT Homomorphic Property Test\\n";
+    script << "Window Size: " << window_size
+           << ", Frequency: " << test_frequency << " Hz\\n";
+    script << "α_total = " << alpha_total << " = α₁(" << alpha1 << ") + α₂(" << alpha2 << ")\\n";
+    script << "Sample Rate: " << sample_rate << " Hz', fontsize=14, fontweight='bold')\n\n";
+
+    script << "# Plot 1: Full signal comparison\n";
+    script << "axes[0].plot(data['time'], data['frft_direct'], 'b-', linewidth=1.5, alpha=0.7, label='FRFT(α)')\n";
+    script << "axes[0].plot(data['time'], data['frft_composed'], 'r--', linewidth=1.5, alpha=0.7, label='FRFT(α₂) ∘ FRFT(α₁)')\n";
+    script << "axes[0].set_ylabel('Amplitude', fontsize=11)\n";
+    script << "axes[0].set_title('Full Signal: FRFT(α) vs FRFT(α₂) ∘ FRFT(α₁)', fontsize=12, fontweight='bold')\n";
+    script << "axes[0].grid(True, alpha=0.3)\n";
+    script << "axes[0].legend(loc='upper right', fontsize=10)\n";
+    script << "axes[0].set_xlabel('Time (s)', fontsize=10)\n\n";
+
+    script << "# Plot 2: Zoomed view (first 10% or 2 periods)\n";
+    script << "test_freq = " << test_frequency << "\n";
+    script << "if test_freq > 0:\n";
+    script << "    period = 1.0 / test_freq\n";
+    script << "    zoom_duration = min(2 * period, data['time'].max() * 0.1)\n";
+    script << "else:\n";
+    script << "    zoom_duration = data['time'].max() * 0.1\n";
+    script << "mask = data['time'] <= zoom_duration\n";
+    script << "if mask.any():\n";
+    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'frft_direct'], 'b-', linewidth=2, label='FRFT(α)')\n";
+    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'frft_composed'], 'r--', linewidth=2, label='FRFT(α₂) ∘ FRFT(α₁)')\n";
+    script << "    axes[1].set_ylabel('Amplitude', fontsize=11)\n";
+    script << "    axes[1].set_title('Zoomed View (First ~2 Periods)', fontsize=12, fontweight='bold')\n";
+    script << "    axes[1].grid(True, alpha=0.3)\n";
+    script << "    axes[1].legend(loc='upper right', fontsize=10)\n";
+    script << "    axes[1].set_xlabel('Time (s)', fontsize=10)\n\n";
+
+    script << "# Plot 3: Error signal\n";
+    script << "axes[2].plot(data['time'], data['error'], 'g-', linewidth=1.5)\n";
+    script << "axes[2].set_ylabel('Error (Direct - Composed)', fontsize=11)\n";
+    script << "axes[2].set_xlabel('Time (s)', fontsize=10)\n";
+    script << "axes[2].set_title(f'Homomorphic Error (MSE: {" << mse
+           << ":.2e}, Max Error: {" << max_error << ":.2e})', fontsize=12, fontweight='bold')\n";
+    script << "axes[2].grid(True, alpha=0.3)\n";
+    script << "axes[2].axhline(y=0, color='k', linestyle='--', linewidth=0.5)\n\n";
+
+    script << "# Adjust layout and save\n";
+    script << "plt.tight_layout()\n";
+    script << "plt.savefig('" << output_png << "', dpi=150, bbox_inches='tight')\n";
+    script << "plt.close()\n";
+    script << "print('Plot saved to: " << output_png << "')\n";
+
+    script.close();
+}
 
 // Generate a sinusoidal signal
 void generate_sine_wave(std::vector<double>& signal, int size, double frequency, double sample_rate, double phase = 0.0) {
@@ -102,22 +230,22 @@ double calculate_mean_error(const std::vector<double>& signal1, const std::vecto
 void generate_alpha_decomposition(double alpha_total, double& alpha1, double& alpha2, std::mt19937& rng) {
     // We need: alpha1 + alpha2 = alpha_total
     // Constraints: 0 <= alpha1 <= 2.0 and 0 <= alpha2 <= 2.0
-    
+
     double min_alpha1 = std::max(0.0, alpha_total - 2.0);  // alpha1 >= alpha_total - 2
     double max_alpha1 = std::min(2.0, alpha_total);        // alpha1 <= 2 and alpha1 <= alpha_total
-    
+
     // If alpha_total > 4.0, there's no valid decomposition
     if (alpha_total > 4.0 || min_alpha1 > max_alpha1) {
         alpha1 = 0.0;
         alpha2 = 0.0;
         return;
     }
-    
+
     // Generate random alpha1 in valid range
     std::uniform_real_distribution<double> dist(min_alpha1, max_alpha1);
     alpha1 = dist(rng);
     alpha2 = alpha_total - alpha1;
-    
+
     // Ensure alpha2 is also within bounds (should be guaranteed by construction)
     alpha2 = std::max(0.0, std::min(2.0, alpha2));
 }
@@ -131,7 +259,9 @@ HomomorphicTestResult test_homomorphic_property(FRFTEngine& engine,
                                                 double alpha1,
                                                 double alpha2,
                                                 double sample_rate,
-                                                int n_analysis) {
+                                                int n_analysis,
+                                                std::vector<double>& direct_result_out,
+                                                std::vector<double>& composed_result_out) {
     HomomorphicTestResult result;
     result.window_size = window_size;
     result.overlap_factor = overlap_factor;
@@ -236,6 +366,10 @@ HomomorphicTestResult test_homomorphic_property(FRFTEngine& engine,
     result.num_frames = num_frames;
     result.success = true;
 
+    // Copy signals for plotting
+    direct_result_out = direct_transform;
+    composed_result_out = composed_transform;
+
     return result;
 }
 
@@ -267,10 +401,16 @@ void run_test_suite(const TestConfig& config) {
     }
     std::cout << "\n";
     std::cout << "  Sample Rate: " << config.sample_rate << " Hz\n";
-    std::cout << "  Alpha Range: " << config.alpha_start << " to " << config.alpha_end 
+    std::cout << "  Alpha Range: " << config.alpha_start << " to " << config.alpha_end
               << " (step " << config.alpha_step << ")\n";
     std::cout << "  Frames per Test: " << config.n_analysis << "\n";
-    std::cout << "  Output File: " << config.output_filename << "\n\n";
+    std::cout << "  Output File: " << config.output_filename << "\n";
+    std::cout << "  Figures Directory: " << config.figures_dir << "\n\n";
+
+    // Create directories
+    std::cout << "Creating output directories...\n";
+    create_directories("homomorphic_test");
+    create_directories(config.figures_dir);
 
     // Calculate total number of tests
     int num_alphas = static_cast<int>((config.alpha_end - config.alpha_start) / config.alpha_step) + 1;
@@ -345,6 +485,7 @@ void run_test_suite(const TestConfig& config) {
                 int alpha_count = 0;
                 double alpha_sum_mse_homomorphic = 0.0;
                 int alpha_success = 0;
+                bool plot_generated = false;
 
                 for (double alpha = config.alpha_start; alpha <= config.alpha_end + 1e-9; alpha += config.alpha_step) {
                     // Generate decomposition: alpha = alpha1 + alpha2
@@ -356,10 +497,13 @@ void run_test_suite(const TestConfig& config) {
                         continue;
                     }
 
+                    std::vector<double> direct_result, composed_result;
+
                     HomomorphicTestResult result = test_homomorphic_property(
                         engine, window_size, overlap_factor,
                         frequency, alpha, alpha1, alpha2,
-                        config.sample_rate, config.n_analysis);
+                        config.sample_rate, config.n_analysis,
+                        direct_result, composed_result);
 
                     // Write result to file
                     out_file << result.window_size << "\t"
@@ -370,13 +514,37 @@ void run_test_suite(const TestConfig& config) {
                              << std::fixed << std::setprecision(2) << result.alpha_total << "\t"
                              << std::setprecision(4) << result.alpha1 << "\t"
                              << result.alpha2 << "\t"
-                             << std::scientific << std::setprecision(10) 
+                             << std::scientific << std::setprecision(10)
                              << result.mse_direct << "\t"
                              << result.mse_composed << "\t"
                              << result.mse_homomorphic << "\t"
                              << result.max_error_homomorphic << "\t"
                              << result.mean_error_homomorphic << "\t"
                              << (result.success ? 1 : 0) << "\n";
+
+                    // Generate plot for alpha = 1.0 (most interesting case)
+                    if (!plot_generated && result.success && std::abs(alpha - 1.0) < 0.05) {
+                        std::string csv_filename = "temp_homomorphic.csv";
+                        std::string png_filename = config.figures_dir + "/freq" +
+                                                  std::to_string(static_cast<int>(frequency)) +
+                                                  "_ws" + std::to_string(window_size) +
+                                                  "_alpha" + std::to_string(static_cast<int>(alpha * 10)) + ".png";
+
+                        write_homomorphic_to_csv(csv_filename, direct_result, composed_result,
+                                                config.sample_rate);
+                        generate_homomorphic_plot_script(csv_filename, png_filename, window_size, frequency,
+                                                        alpha, alpha1, alpha2, config.sample_rate,
+                                                        result.mse_homomorphic, result.max_error_homomorphic);
+
+                        int ret = system("python3 plot_homomorphic.py 2>/dev/null");
+                        if (ret == 0) {
+                            plot_generated = true;
+                        }
+
+                        // Clean up temporary files
+                        remove(csv_filename.c_str());
+                        remove("plot_homomorphic.py");
+                    }
 
                     test_count++;
                     if (!result.success) {
@@ -391,7 +559,7 @@ void run_test_suite(const TestConfig& config) {
                 // Print summary for this frequency/overlap combination
                 if (alpha_success > 0) {
                     double avg_mse = alpha_sum_mse_homomorphic / alpha_success;
-                    std::cout << "→ Avg Homomorphic MSE: " << std::scientific 
+                    std::cout << "→ Avg Homomorphic MSE: " << std::scientific
                               << std::setprecision(3) << avg_mse << "\n";
                 } else {
                     std::cout << "→ ALL FAILED\n";
@@ -416,7 +584,9 @@ void run_test_suite(const TestConfig& config) {
     std::cout << "  Success rate: " << std::fixed << std::setprecision(2)
               << (100.0 * (test_count - failed_count) / test_count) << "%\n";
     std::cout << "  Duration: " << duration.count() / 1000.0 << " seconds\n";
-    std::cout << "  Results saved to: " << config.output_filename << "\n\n";
+    std::cout << "  Results saved to: " << config.output_filename << "\n";
+    std::cout << "  Plots saved to: " << config.figures_dir << "/\n";
+    std::cout << "  Expected plots: " << (config.window_sizes.size() * config.test_frequencies.size()) << " (α=1.0 cases)\n\n";
 }
 
 // Parse command line arguments

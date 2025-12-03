@@ -9,9 +9,13 @@
 #include <algorithm>
 #include <numeric>
 #include <map>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
 #endif
 
 
@@ -19,14 +23,15 @@
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
+    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0, 15000.0};
     double sample_rate = 44100.0;
     int n_analysis = 10;  // Number of frames to analyze
     double alpha_start = 0.0;
     double alpha_end = 2.1;
     double alpha_step = 0.1;
-    std::string output_filename = "frft_test_results.txt";
-    std::string timing_filename = "frft_timing_benchmarks.txt";
+    std::string output_filename = "reconstruction_test/results.txt";
+    std::string timing_filename = "reconstruction_test/timing_benchmarks.txt";
+    std::string figures_dir = "reconstruction_test/figures";
 };
 
 // Result for a single test
@@ -60,6 +65,126 @@ struct TimingStats {
     double rtf_best;          // Best case RTF
     double rtf_worst;         // Worst case RTF
 };
+
+// Create directory recursively
+bool create_directories(const std::string& path) {
+    std::string current_path;
+    for (size_t i = 0; i < path.length(); ++i) {
+        if (path[i] == '/' || path[i] == '\\' || i == path.length() - 1) {
+            if (i == path.length() - 1 && path[i] != '/' && path[i] != '\\') {
+                current_path += path[i];
+            } else {
+                current_path += path[i];
+            }
+
+            #ifdef _WIN32
+            _mkdir(current_path.c_str());
+            #else
+            mkdir(current_path.c_str(), 0755);
+            #endif
+        } else {
+            current_path += path[i];
+        }
+    }
+    return true;
+}
+
+// Write signal comparison to CSV
+void write_reconstruction_to_csv(const std::string& filename,
+                                const std::vector<double>& original,
+                                const std::vector<double>& reconstructed,
+                                double sample_rate) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file for writing: " << filename << "\n";
+        return;
+    }
+
+    file << "sample,time,original,reconstructed,error\n";
+    for (size_t i = 0; i < original.size(); ++i) {
+        double time = static_cast<double>(i) / sample_rate;
+        double error = original[i] - reconstructed[i];
+        file << i << ","
+             << time << ","
+             << original[i] << ","
+             << reconstructed[i] << ","
+             << error << "\n";
+    }
+    file.close();
+}
+
+// Generate Python plotting script for reconstruction
+void generate_reconstruction_plot_script(const std::string& csv_filename,
+                                        const std::string& output_png,
+                                        int window_size,
+                                        double test_frequency,
+                                        double alpha,
+                                        double sample_rate,
+                                        double mse,
+                                        double max_error) {
+    std::ofstream script("plot_reconstruction.py");
+    if (!script.is_open()) {
+        std::cerr << "Error: Cannot create plotting script\n";
+        return;
+    }
+
+    script << "import matplotlib.pyplot as plt\n";
+    script << "import pandas as pd\n";
+    script << "import numpy as np\n\n";
+
+    script << "# Read data\n";
+    script << "data = pd.read_csv('" << csv_filename << "')\n\n";
+
+    script << "# Create figure with 3 subplots\n";
+    script << "fig, axes = plt.subplots(3, 1, figsize=(14, 12))\n";
+    script << "fig.suptitle(f'FRFT Round-Trip Reconstruction Test\\n";
+    script << "Window Size: " << window_size
+           << ", Frequency: " << test_frequency << " Hz, Alpha: " << alpha << "\\n";
+    script << "Sample Rate: " << sample_rate << " Hz', fontsize=14, fontweight='bold')\n\n";
+
+    script << "# Plot 1: Full signal comparison\n";
+    script << "axes[0].plot(data['time'], data['original'], 'b-', linewidth=1.5, alpha=0.7, label='Original')\n";
+    script << "axes[0].plot(data['time'], data['reconstructed'], 'r--', linewidth=1.5, alpha=0.7, label='Reconstructed')\n";
+    script << "axes[0].set_ylabel('Amplitude', fontsize=11)\n";
+    script << "axes[0].set_title('Full Signal: Original vs Reconstructed', fontsize=12, fontweight='bold')\n";
+    script << "axes[0].grid(True, alpha=0.3)\n";
+    script << "axes[0].legend(loc='upper right', fontsize=10)\n";
+    script << "axes[0].set_xlabel('Time (s)', fontsize=10)\n\n";
+
+    script << "# Plot 2: Zoomed view (first 2 periods or first 10% of signal)\n";
+    script << "test_freq = " << test_frequency << "\n";
+    script << "if test_freq > 0:\n";
+    script << "    period = 1.0 / test_freq\n";
+    script << "    zoom_duration = min(2 * period, data['time'].max() * 0.1)\n";
+    script << "else:\n";
+    script << "    zoom_duration = data['time'].max() * 0.1\n";
+    script << "mask = data['time'] <= zoom_duration\n";
+    script << "if mask.any():\n";
+    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'original'], 'b-', linewidth=2, label='Original')\n";
+    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'reconstructed'], 'r--', linewidth=2, label='Reconstructed')\n";
+    script << "    axes[1].set_ylabel('Amplitude', fontsize=11)\n";
+    script << "    axes[1].set_title('Zoomed View (First ~2 Periods)', fontsize=12, fontweight='bold')\n";
+    script << "    axes[1].grid(True, alpha=0.3)\n";
+    script << "    axes[1].legend(loc='upper right', fontsize=10)\n";
+    script << "    axes[1].set_xlabel('Time (s)', fontsize=10)\n\n";
+
+    script << "# Plot 3: Error signal\n";
+    script << "axes[2].plot(data['time'], data['error'], 'g-', linewidth=1.5)\n";
+    script << "axes[2].set_ylabel('Error (Original - Reconstructed)', fontsize=11)\n";
+    script << "axes[2].set_xlabel('Time (s)', fontsize=10)\n";
+    script << "axes[2].set_title(f'Reconstruction Error (MSE: {" << mse
+           << ":.2e}, Max Error: {" << max_error << ":.2e})', fontsize=12, fontweight='bold')\n";
+    script << "axes[2].grid(True, alpha=0.3)\n";
+    script << "axes[2].axhline(y=0, color='k', linestyle='--', linewidth=0.5)\n\n";
+
+    script << "# Adjust layout and save\n";
+    script << "plt.tight_layout()\n";
+    script << "plt.savefig('" << output_png << "', dpi=150, bbox_inches='tight')\n";
+    script << "plt.close()\n";
+    script << "print('Plot saved to: " << output_png << "')\n";
+
+    script.close();
+}
 
 // Generate a sinusoidal signal
 void generate_sine_wave(std::vector<double>& signal, int size, double frequency, double sample_rate, double phase = 0.0) {
@@ -123,7 +248,9 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
                                double frequency,
                                double alpha,
                                double sample_rate,
-                               int n_analysis) {
+                               int n_analysis,
+                               std::vector<double>& original_signal_out,
+                               std::vector<double>& reconstructed_signal_out) {
     TestResult result;
     result.window_size = window_size;
     result.overlap_factor = overlap_factor;
@@ -226,6 +353,10 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     result.max_error = calculate_max_error(original_valid, reconstructed_valid);
     result.mean_error = calculate_mean_error(original_valid, reconstructed_valid);
     result.success = true;
+
+    // Copy signals for plotting
+    original_signal_out = original_valid;
+    reconstructed_signal_out = reconstructed_valid;
 
     return result;
 }
@@ -379,7 +510,13 @@ void run_test_suite(const TestConfig& config) {
     std::cout << "  Alpha Range: " << config.alpha_start << " to " << config.alpha_end
               << " (step: " << config.alpha_step << ")\n";
     std::cout << "  Output File: " << config.output_filename << "\n";
-    std::cout << "  Timing File: " << config.timing_filename << "\n\n";
+    std::cout << "  Timing File: " << config.timing_filename << "\n";
+    std::cout << "  Figures Directory: " << config.figures_dir << "\n\n";
+
+    // Create directories
+    std::cout << "Creating output directories...\n";
+    create_directories("reconstruction_test");
+    create_directories(config.figures_dir);
 
     // Calculate total number of tests
     int num_alphas = static_cast<int>((config.alpha_end - config.alpha_start) / config.alpha_step) + 1;
@@ -449,11 +586,15 @@ void run_test_suite(const TestConfig& config) {
                 int alpha_count = 0;
                 double alpha_sum_mse = 0.0;
                 int alpha_success = 0;
+                bool plot_generated = false;
 
                 for (double alpha = config.alpha_start; alpha <= config.alpha_end; alpha += config.alpha_step) {
+                    std::vector<double> original_signal, reconstructed_signal;
+
                     TestResult result = test_frft_roundtrip(engine, window_size, overlap_factor,
                                                             frequency, alpha,
-                                                            config.sample_rate, config.n_analysis);
+                                                            config.sample_rate, config.n_analysis,
+                                                            original_signal, reconstructed_signal);
 
                     // Store for timing analysis
                     all_results.push_back(result);
@@ -472,6 +613,29 @@ void run_test_suite(const TestConfig& config) {
                              << result.max_error << "\t"
                              << result.mean_error << "\t"
                              << (result.success ? 1 : 0) << "\n";
+
+                    // Generate plot for alpha = 1.0 (most interesting case)
+                    if (!plot_generated && result.success && std::abs(alpha - 1.0) < 0.05) {
+                        std::string csv_filename = "temp_reconstruction.csv";
+                        std::string png_filename = config.figures_dir + "/freq" +
+                                                  std::to_string(static_cast<int>(frequency)) +
+                                                  "_ws" + std::to_string(window_size) +
+                                                  "_alpha" + std::to_string(static_cast<int>(alpha * 10)) + ".png";
+
+                        write_reconstruction_to_csv(csv_filename, original_signal, reconstructed_signal,
+                                                   config.sample_rate);
+                        generate_reconstruction_plot_script(csv_filename, png_filename, window_size, frequency,
+                                                          alpha, config.sample_rate, result.mse, result.max_error);
+
+                        int ret = system("python3 plot_reconstruction.py 2>/dev/null");
+                        if (ret == 0) {
+                            plot_generated = true;
+                        }
+
+                        // Clean up temporary files
+                        remove(csv_filename.c_str());
+                        remove("plot_reconstruction.py");
+                    }
 
                     test_count++;
                     if (!result.success) {
@@ -515,7 +679,9 @@ void run_test_suite(const TestConfig& config) {
               << (100.0 * (test_count - failed_count) / test_count) << "%\n";
     std::cout << "  Duration: " << duration.count() / 1000.0 << " seconds\n";
     std::cout << "  Results saved to: " << config.output_filename << "\n";
-    std::cout << "  Benchmarks saved to: " << config.timing_filename << "\n\n";
+    std::cout << "  Benchmarks saved to: " << config.timing_filename << "\n";
+    std::cout << "  Plots saved to: " << config.figures_dir << "/\n";
+    std::cout << "  Expected plots: " << (config.window_sizes.size() * config.test_frequencies.size()) << " (α=1.0 cases)\n\n";
 }
 
 // Parse command line arguments
