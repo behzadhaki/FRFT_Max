@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <numeric>
 #include <map>
+#include <set>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -18,12 +19,27 @@
 #define mkdir(path, mode) _mkdir(path)
 #endif
 
+// Generate Hamming window coefficients
+void generate_hamming_window(std::vector<double>& window, int size) {
+    window.resize(size);
+    for (int i = 0; i < size; ++i) {
+        window[i] = 0.54 - 0.46 * std::cos(2.0 * M_PI * i / (size - 1));
+    }
+}
+
+// Apply window to signal
+void apply_window(std::vector<double>& signal, const std::vector<double>& window) {
+    for (size_t i = 0; i < signal.size(); ++i) {
+        signal[i] *= window[i];
+    }
+}
+
 
 // Test configuration
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0, 15000.0};
+    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0, 12000.0, 15000.0, 18000.0, 20000.0};
     double sample_rate = 44100.0;
     int n_analysis = 10;  // Number of frames to analyze
     double alpha_start = 0.0;
@@ -31,6 +47,7 @@ struct TestConfig {
     double alpha_step = 0.1;
     std::string output_filename = "reconstruction_test/results.txt";
     std::string timing_filename = "reconstruction_test/timing_benchmarks.txt";
+    std::string detailed_log_filename = "reconstruction_test/detailed_log.txt";
     std::string figures_dir = "reconstruction_test/figures";
 };
 
@@ -137,36 +154,29 @@ void generate_reconstruction_plot_script(const std::string& csv_filename,
 
     script << "# Create figure with 3 subplots\n";
     script << "fig, axes = plt.subplots(3, 1, figsize=(14, 12))\n";
-    script << "fig.suptitle(f'FRFT Round-Trip Reconstruction Test\\n";
+    script << "fig.suptitle(f'FRFT Round-Trip Reconstruction Test (Single Frame)\\n";
     script << "Window Size: " << window_size
-           << ", Frequency: " << test_frequency << " Hz, Alpha: " << alpha << "\\n";
-    script << "Sample Rate: " << sample_rate << " Hz', fontsize=14, fontweight='bold')\n\n";
+           << " samples, Frequency: " << test_frequency << " Hz, Alpha: " << alpha << "\\n";
+    script << "Sample Rate: " << sample_rate << " Hz\\n";
+    script << "Showing: Hamming-windowed signals (what FRFT actually processes)', fontsize=14, fontweight='bold')\n\n";
 
-    script << "# Plot 1: Full signal comparison\n";
-    script << "axes[0].plot(data['time'], data['original'], 'b-', linewidth=1.5, alpha=0.7, label='Original')\n";
-    script << "axes[0].plot(data['time'], data['reconstructed'], 'r--', linewidth=1.5, alpha=0.7, label='Reconstructed')\n";
+    script << "# Plot 1: Full frame comparison\n";
+    script << "axes[0].plot(data['time'], data['original'], 'b-', linewidth=1, alpha=0.7, label='Windowed Original', marker='o', markersize=2)\n";
+    script << "axes[0].plot(data['time'], data['reconstructed'], 'r--', linewidth=1, alpha=0.7, label='Reconstructed', marker='s', markersize=2)\n";
     script << "axes[0].set_ylabel('Amplitude', fontsize=11)\n";
-    script << "axes[0].set_title('Full Signal: Original vs Reconstructed', fontsize=12, fontweight='bold')\n";
+    script << "axes[0].set_title(f'Single Frame ({" << window_size << "} samples): Windowed Original vs Reconstructed', fontsize=12, fontweight='bold')\n";
     script << "axes[0].grid(True, alpha=0.3)\n";
     script << "axes[0].legend(loc='upper right', fontsize=10)\n";
     script << "axes[0].set_xlabel('Time (s)', fontsize=10)\n\n";
 
-    script << "# Plot 2: Zoomed view (first 2 periods or first 10% of signal)\n";
-    script << "test_freq = " << test_frequency << "\n";
-    script << "if test_freq > 0:\n";
-    script << "    period = 1.0 / test_freq\n";
-    script << "    zoom_duration = min(2 * period, data['time'].max() * 0.1)\n";
-    script << "else:\n";
-    script << "    zoom_duration = data['time'].max() * 0.1\n";
-    script << "mask = data['time'] <= zoom_duration\n";
-    script << "if mask.any():\n";
-    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'original'], 'b-', linewidth=2, label='Original')\n";
-    script << "    axes[1].plot(data.loc[mask, 'time'], data.loc[mask, 'reconstructed'], 'r--', linewidth=2, label='Reconstructed')\n";
-    script << "    axes[1].set_ylabel('Amplitude', fontsize=11)\n";
-    script << "    axes[1].set_title('Zoomed View (First ~2 Periods)', fontsize=12, fontweight='bold')\n";
-    script << "    axes[1].grid(True, alpha=0.3)\n";
-    script << "    axes[1].legend(loc='upper right', fontsize=10)\n";
-    script << "    axes[1].set_xlabel('Time (s)', fontsize=10)\n\n";
+    script << "# Plot 2: Same as plot 1 but with sample indices on x-axis for clarity\n";
+    script << "axes[1].plot(data['sample'], data['original'], 'b-', linewidth=1, alpha=0.7, label='Windowed Original', marker='o', markersize=2)\n";
+    script << "axes[1].plot(data['sample'], data['reconstructed'], 'r--', linewidth=1, alpha=0.7, label='Reconstructed', marker='s', markersize=2)\n";
+    script << "axes[1].set_ylabel('Amplitude', fontsize=11)\n";
+    script << "axes[1].set_title('Sample-by-Sample Comparison', fontsize=12, fontweight='bold')\n";
+    script << "axes[1].grid(True, alpha=0.3)\n";
+    script << "axes[1].legend(loc='upper right', fontsize=10)\n";
+    script << "axes[1].set_xlabel('Sample Index', fontsize=10)\n\n";
 
     script << "# Plot 3: Error signal\n";
     script << "axes[2].plot(data['time'], data['error'], 'g-', linewidth=1.5)\n";
@@ -282,6 +292,10 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     std::vector<double> real_out(window_size);
     std::vector<double> imag_out(window_size);
 
+    // Generate Hamming window for this window size
+    std::vector<double> hamming_window;
+    generate_hamming_window(hamming_window, window_size);
+
     // Process frames
     int num_frames = 0;
     double total_forward_time = 0.0;
@@ -293,6 +307,9 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
                   original_signal.begin() + pos + window_size,
                   real_in.begin());
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
+
+        // Apply Hamming window
+        apply_window(real_in, hamming_window);
 
         // Time forward FRFT (-alpha)
         auto forward_start = std::chrono::high_resolution_clock::now();
@@ -354,9 +371,29 @@ TestResult test_frft_roundtrip(FRFTEngine& engine,
     result.mean_error = calculate_mean_error(original_valid, reconstructed_valid);
     result.success = true;
 
-    // Copy signals for plotting
-    original_signal_out = original_valid;
-    reconstructed_signal_out = reconstructed_valid;
+    // Copy signals for plotting - ONLY FIRST FRAME (single window)
+    // Store the WINDOWED signal (what actually went into FRFT)
+    original_signal_out.resize(window_size);
+    reconstructed_signal_out.resize(window_size);
+
+    // Copy first frame before windowing
+    std::copy(original_signal.begin(), original_signal.begin() + window_size,
+              original_signal_out.begin());
+
+    // Apply window to the copied original (to show what FRFT actually processed)
+    std::vector<double> hamming_window_plot;
+    generate_hamming_window(hamming_window_plot, window_size);
+    apply_window(original_signal_out, hamming_window_plot);
+
+    // Copy reconstructed (already from first frame processing)
+    std::copy(reconstructed_signal.begin(), reconstructed_signal.begin() + window_size,
+              reconstructed_signal_out.begin());
+
+    // IMPORTANT: Recalculate metrics on the WINDOWED first frame (what we're plotting)
+    // The previous MSE was calculated on unwindowed vs reconstructed (misleading!)
+    result.mse = calculate_mse(original_signal_out, reconstructed_signal_out);
+    result.max_error = calculate_max_error(original_signal_out, reconstructed_signal_out);
+    result.mean_error = calculate_mean_error(original_signal_out, reconstructed_signal_out);
 
     return result;
 }
@@ -537,7 +574,7 @@ void run_test_suite(const TestConfig& config) {
     out_file << "# Generated: " << std::chrono::system_clock::now().time_since_epoch().count() << "\n";
     out_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
     out_file << "# Number of Analysis Frames: " << config.n_analysis << "\n";
-    out_file << "# Processing: Direct frame-by-frame (no windowing)\n";
+    out_file << "# Processing: Frame-by-frame with Hamming window applied to each frame\n";
     out_file << "#\n";
     out_file << "# Columns:\n";
     out_file << "# 1. Window Size\n";
@@ -556,6 +593,21 @@ void run_test_suite(const TestConfig& config) {
     out_file << "#\n";
     out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\tAlpha\t"
              << "ForwardTime\tInverseTime\tTotalTime\tMSE\tMaxError\tMeanError\tSuccess\n";
+
+    // Open detailed log file
+    std::ofstream detail_file(config.detailed_log_filename);
+    if (!detail_file.is_open()) {
+        std::cerr << "Warning: Cannot open detailed log file: " << config.detailed_log_filename << "\n";
+        std::cerr << "Continuing without detailed logging...\n";
+    } else {
+        detail_file << "# FRFT Round-Trip Reconstruction Test - Detailed Log\n";
+        detail_file << "# Every individual test result is logged here\n";
+        detail_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
+        detail_file << "# StartSample and EndSample refer to the first frame (frame 0) position\n";
+        detail_file << "#\n";
+        detail_file << "TestID\tWindowSize\tOverlapFactor\tHopSize\tNumFrames\tStartSample\tEndSample\tFrequency\tAlpha\t"
+                   << "ForwardTime_ms\tInverseTime_ms\tTotalTime_ms\tMSE\tMaxError\tMeanError\tSuccess\n";
+    }
 
     // Create FRFT engine
     FRFTEngine engine;
@@ -586,7 +638,7 @@ void run_test_suite(const TestConfig& config) {
                 int alpha_count = 0;
                 double alpha_sum_mse = 0.0;
                 int alpha_success = 0;
-                bool plot_generated = false;
+                std::set<int> plots_generated;  // Track which alphas we've plotted
 
                 for (double alpha = config.alpha_start; alpha <= config.alpha_end; alpha += config.alpha_step) {
                     std::vector<double> original_signal, reconstructed_signal;
@@ -614,13 +666,39 @@ void run_test_suite(const TestConfig& config) {
                              << result.mean_error << "\t"
                              << (result.success ? 1 : 0) << "\n";
 
-                    // Generate plot for alpha = 1.0 (most interesting case)
-                    if (!plot_generated && result.success && std::abs(alpha - 1.0) < 0.05) {
+                    // Write to detailed log
+                    if (detail_file.is_open()) {
+                        int start_sample = 0;  // First frame always starts at 0
+                        int end_sample = window_size - 1;  // First frame ends at window_size-1
+
+                        detail_file << test_count << "\t"
+                                   << result.window_size << "\t"
+                                   << result.overlap_factor << "\t"
+                                   << hop_size << "\t"
+                                   << result.num_frames << "\t"
+                                   << start_sample << "\t"
+                                   << end_sample << "\t"
+                                   << result.frequency << "\t"
+                                   << std::fixed << std::setprecision(2) << result.alpha << "\t"
+                                   << std::setprecision(6) << result.forward_time_ms << "\t"
+                                   << result.inverse_time_ms << "\t"
+                                   << result.total_time_ms << "\t"
+                                   << std::scientific << std::setprecision(10) << result.mse << "\t"
+                                   << result.max_error << "\t"
+                                   << result.mean_error << "\t"
+                                   << (result.success ? 1 : 0) << "\n";
+                    }
+
+                    // Generate plots for alpha = 0.5, 1.0, and 1.5
+                    int alpha_int = static_cast<int>(std::round(alpha * 10));
+                    if (result.success && plots_generated.find(alpha_int) == plots_generated.end() &&
+                        (std::abs(alpha - 0.5) < 0.05 || std::abs(alpha - 1.0) < 0.05 || std::abs(alpha - 1.5) < 0.05)) {
+
                         std::string csv_filename = "temp_reconstruction.csv";
                         std::string png_filename = config.figures_dir + "/freq" +
                                                   std::to_string(static_cast<int>(frequency)) +
                                                   "_ws" + std::to_string(window_size) +
-                                                  "_alpha" + std::to_string(static_cast<int>(alpha * 10)) + ".png";
+                                                  "_alpha" + std::to_string(alpha_int) + ".png";
 
                         write_reconstruction_to_csv(csv_filename, original_signal, reconstructed_signal,
                                                    config.sample_rate);
@@ -629,7 +707,7 @@ void run_test_suite(const TestConfig& config) {
 
                         int ret = system("python3 plot_reconstruction.py 2>/dev/null");
                         if (ret == 0) {
-                            plot_generated = true;
+                            plots_generated.insert(alpha_int);
                         }
 
                         // Clean up temporary files
@@ -662,6 +740,9 @@ void run_test_suite(const TestConfig& config) {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
     out_file.close();
+    if (detail_file.is_open()) {
+        detail_file.close();
+    }
 
     // Generate timing benchmarks
     std::cout << "\nGenerating performance benchmarks...\n";
@@ -679,9 +760,11 @@ void run_test_suite(const TestConfig& config) {
               << (100.0 * (test_count - failed_count) / test_count) << "%\n";
     std::cout << "  Duration: " << duration.count() / 1000.0 << " seconds\n";
     std::cout << "  Results saved to: " << config.output_filename << "\n";
-    std::cout << "  Benchmarks saved to: " << config.timing_filename << "\n";
+    std::cout << "  Detailed log saved to: " << config.detailed_log_filename << "\n";
+    std::cout << "  Timing benchmarks saved to: " << config.timing_filename << "\n";
     std::cout << "  Plots saved to: " << config.figures_dir << "/\n";
-    std::cout << "  Expected plots: " << (config.window_sizes.size() * config.test_frequencies.size()) << " (α=1.0 cases)\n\n";
+    std::cout << "  Expected plots: " << (config.window_sizes.size() * config.test_frequencies.size() * 3)
+              << " (α=0.5, 1.0, 1.5 for each window/freq)\n\n";
 }
 
 // Parse command line arguments

@@ -17,14 +17,30 @@
 #define mkdir(path, mode) _mkdir(path)
 #endif
 
+// Generate Hamming window coefficients
+void generate_hamming_window(std::vector<double>& window, int size) {
+    window.resize(size);
+    for (int i = 0; i < size; ++i) {
+        window[i] = 0.54 - 0.46 * std::cos(2.0 * M_PI * i / (size - 1));
+    }
+}
+
+// Apply window to signal
+void apply_window(std::vector<double>& signal, const std::vector<double>& window) {
+    for (size_t i = 0; i < signal.size(); ++i) {
+        signal[i] *= window[i];
+    }
+}
+
 // Test configuration
 struct TestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {4};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 4000.0, 5000.0, 8000., 10000.0, 15000.0};
+    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0, 12000.0, 15000.0, 18000.0, 20000.0};
     double sample_rate = 44100.0;
     int n_analysis = 5;  // Number of frames to analyze
     std::string output_filename = "fft_comparison/results.txt";
+    std::string detailed_log_filename = "fft_comparison/detailed_log.txt";
     std::string figures_dir = "fft_comparison/figures";
 };
 
@@ -330,6 +346,10 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
     std::vector<double> real_fft(window_size);
     std::vector<double> imag_fft(window_size);
 
+    // Generate Hamming window for this window size
+    std::vector<double> hamming_window;
+    generate_hamming_window(hamming_window, window_size);
+
     // Accumulators for statistics across all frames
     std::vector<double> frft_magnitude_accum(window_size, 0.0);
     std::vector<double> fft_magnitude_accum(window_size, 0.0);
@@ -349,6 +369,9 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
                   original_signal.begin() + pos + window_size,
                   real_in.begin());
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
+
+        // Apply Hamming window
+        apply_window(real_in, hamming_window);
 
         // Compute FRFT with alpha = 1.0
         bool frft_success = engine.compute(real_in.data(), imag_in.data(),
@@ -518,6 +541,7 @@ void run_test_suite(const TestConfig& config) {
     out_file << "# Testing: FRFT(α=1) ≈ FFT\n";
     out_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
     out_file << "# Number of Analysis Frames: " << config.n_analysis << "\n";
+    out_file << "# Processing: Frame-by-frame with Hamming window applied to each frame\n";
     out_file << "#\n";
     out_file << "# NOTE: All magnitude metrics are calculated on NORMALIZED spectra\n";
     out_file << "# (both FRFT and FFT are normalized to their own peak = 1.0)\n";
@@ -540,6 +564,23 @@ void run_test_suite(const TestConfig& config) {
     out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\t"
              << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\tCorrelation_Mag\t"
              << "MaxError_Mag\tMeanError_Mag\tSuccess\n";
+
+    // Open detailed log file
+    std::ofstream detail_file(config.detailed_log_filename);
+    if (!detail_file.is_open()) {
+        std::cerr << "Warning: Cannot open detailed log file: " << config.detailed_log_filename << "\n";
+        std::cerr << "Continuing without detailed logging...\n";
+    } else {
+        detail_file << "# FRFT vs FFT Comparison Test - Detailed Log\n";
+        detail_file << "# Every individual test result is logged here\n";
+        detail_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
+        detail_file << "# All magnitude metrics are on normalized spectra\n";
+        detail_file << "# StartSample and EndSample refer to the first frame (frame 0) position\n";
+        detail_file << "#\n";
+        detail_file << "TestID\tWindowSize\tOverlapFactor\tHopSize\tNumFrames\tStartSample\tEndSample\tFrequency\t"
+                   << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\tCorrelation_Mag\t"
+                   << "MaxError_Mag\tMeanError_Mag\tSuccess\n";
+    }
 
     // Create FRFT engine
     FRFTEngine engine;
@@ -591,6 +632,31 @@ void run_test_suite(const TestConfig& config) {
                          << result.mean_error_mag << "\t"
                          << (result.success ? 1 : 0) << "\n";
 
+                // Write to detailed log
+                if (detail_file.is_open()) {
+                    int start_sample = 0;  // First frame always starts at 0
+                    int end_sample = window_size - 1;  // First frame ends at window_size-1
+
+                    detail_file << test_count << "\t"
+                               << result.window_size << "\t"
+                               << result.overlap_factor << "\t"
+                               << hop_size << "\t"
+                               << result.num_frames << "\t"
+                               << start_sample << "\t"
+                               << end_sample << "\t"
+                               << result.frequency << "\t"
+                               << std::scientific << std::setprecision(10)
+                               << result.mse_magnitude << "\t"
+                               << result.mse_phase << "\t"
+                               << result.mse_complex << "\t"
+                               << std::fixed << std::setprecision(6)
+                               << result.correlation_mag << "\t"
+                               << std::scientific << std::setprecision(10)
+                               << result.max_error_mag << "\t"
+                               << result.mean_error_mag << "\t"
+                               << (result.success ? 1 : 0) << "\n";
+                }
+
                 test_count++;
                 if (!result.success) {
                     failed_count++;
@@ -628,6 +694,9 @@ void run_test_suite(const TestConfig& config) {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
     out_file.close();
+    if (detail_file.is_open()) {
+        detail_file.close();
+    }
 
     // Print summary
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
@@ -641,6 +710,7 @@ void run_test_suite(const TestConfig& config) {
               << (100.0 * (test_count - failed_count) / test_count) << "%\n";
     std::cout << "  Duration: " << duration.count() / 1000.0 << " seconds\n";
     std::cout << "  Results saved to: " << config.output_filename << "\n";
+    std::cout << "  Detailed log saved to: " << config.detailed_log_filename << "\n";
     std::cout << "  Plots saved to: " << config.figures_dir << "/\n";
     std::cout << "  Total plots generated: " << (test_count - failed_count) << "\n\n";
 }

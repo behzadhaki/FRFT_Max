@@ -15,47 +15,16 @@
 #define mkdir(path, mode) _mkdir(path)
 #endif
 
-// Signal types for testing
-enum class SignalType {
-    IMPULSE_QUARTER,      // Impulse at N/4
-    IMPULSE_THREE_QUARTER, // Impulse at 3*N/4
-    DECAYING_SINE,        // Exponentially decaying sine
-    GROWING_SINE,         // Exponentially growing sine
-    LINEAR_CHIRP,         // Linear chirp 200->800 Hz
-    STEP_TONE,           // Step function: silence then tone
-    MULTI_TONE           // Multiple tones with varying amplitudes
-};
-
-// Get signal type name
-std::string get_signal_name(SignalType type) {
-    switch(type) {
-        case SignalType::IMPULSE_QUARTER: return "Impulse_Quarter";
-        case SignalType::IMPULSE_THREE_QUARTER: return "Impulse_ThreeQuarter";
-        case SignalType::DECAYING_SINE: return "Decaying_Sine";
-        case SignalType::GROWING_SINE: return "Growing_Sine";
-        case SignalType::LINEAR_CHIRP: return "Linear_Chirp";
-        case SignalType::STEP_TONE: return "Step_Tone";
-        case SignalType::MULTI_TONE: return "Multi_Tone";
-        default: return "Unknown";
-    }
-}
-
 // Test configuration
 struct ReversalTestConfig {
     std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
-    std::vector<SignalType> signal_types = {
-        SignalType::IMPULSE_QUARTER,
-        SignalType::IMPULSE_THREE_QUARTER,
-        SignalType::DECAYING_SINE,
-        SignalType::GROWING_SINE,
-        SignalType::LINEAR_CHIRP,
-        SignalType::STEP_TONE,
-        SignalType::MULTI_TONE
-    };
     double sample_rate = 44100.0;
+    double chirp_duration = 0.05;  // 50ms per chirp for easy viewing
+    double chirp_f_start = 200.0;   // Start frequency
+    double chirp_f_end = 800.0;     // End frequency (slow chirp)
     double alpha = -2.0;            // FRFT alpha for reversal
+    int num_test_frames = 5;        // Test 5 frames
     std::string figures_dir = "reversal_test/figures";
-    std::string results_file = "reversal_test/results.txt";
 };
 
 // Create directory recursively
@@ -81,105 +50,17 @@ bool create_directories(const std::string& path) {
     return true;
 }
 
-// Generate test signal based on type
-void generate_test_signal(std::vector<double>& signal, int size, SignalType type, double sample_rate) {
+// Generate a chirp signal
+void generate_chirp(std::vector<double>& signal, int size, double f_start,
+                   double f_end, double sample_rate) {
     signal.resize(size);
+    double duration = static_cast<double>(size) / sample_rate;
+    double k = (f_end - f_start) / duration;  // Chirp rate
 
-    switch(type) {
-        case SignalType::IMPULSE_QUARTER: {
-            // Impulse at N/4
-            std::fill(signal.begin(), signal.end(), 0.0);
-            int impulse_pos = size / 4;
-            if (impulse_pos < size) {
-                signal[impulse_pos] = 1.0;
-            }
-            break;
-        }
-
-        case SignalType::IMPULSE_THREE_QUARTER: {
-            // Impulse at 3*N/4
-            std::fill(signal.begin(), signal.end(), 0.0);
-            int impulse_pos = (3 * size) / 4;
-            if (impulse_pos < size) {
-                signal[impulse_pos] = 1.0;
-            }
-            break;
-        }
-
-        case SignalType::DECAYING_SINE: {
-            // Exponentially decaying sine wave at 200 Hz
-            double frequency = 200.0;
-            double tau = static_cast<double>(size) / (sample_rate * 3.0); // Decay to ~5% by end
-            for (int i = 0; i < size; ++i) {
-                double t = static_cast<double>(i) / sample_rate;
-                signal[i] = std::exp(-t / tau) * std::sin(2.0 * M_PI * frequency * t);
-            }
-            break;
-        }
-
-        case SignalType::GROWING_SINE: {
-            // Exponentially growing sine wave at 200 Hz
-            double frequency = 200.0;
-            double duration = static_cast<double>(size) / sample_rate;
-            double tau = duration / 3.0;
-            for (int i = 0; i < size; ++i) {
-                double t = static_cast<double>(i) / sample_rate;
-                signal[i] = std::exp(t / tau - duration / tau) * std::sin(2.0 * M_PI * frequency * t);
-            }
-            break;
-        }
-
-        case SignalType::LINEAR_CHIRP: {
-            // Linear chirp from 200 Hz to 800 Hz
-            double f_start = 200.0;
-            double f_end = 800.0;
-            double duration = static_cast<double>(size) / sample_rate;
-            double k = (f_end - f_start) / duration;
-            for (int i = 0; i < size; ++i) {
-                double t = static_cast<double>(i) / sample_rate;
-                double phase = 2.0 * M_PI * (f_start * t + 0.5 * k * t * t);
-                signal[i] = std::sin(phase);
-            }
-            break;
-        }
-
-        case SignalType::STEP_TONE: {
-            // First half silence, second half 440 Hz tone
-            double frequency = 440.0;
-            int half_size = size / 2;
-            for (int i = 0; i < size; ++i) {
-                if (i < half_size) {
-                    signal[i] = 0.0;
-                } else {
-                    double t = static_cast<double>(i) / sample_rate;
-                    signal[i] = std::sin(2.0 * M_PI * frequency * t);
-                }
-            }
-            break;
-        }
-
-        case SignalType::MULTI_TONE: {
-            // Multiple tones with time-varying amplitudes
-            double f1 = 200.0;
-            double f2 = 400.0;
-            double f3 = 600.0;
-            double duration = static_cast<double>(size) / sample_rate;
-
-            for (int i = 0; i < size; ++i) {
-                double t = static_cast<double>(i) / sample_rate;
-                double t_norm = t / duration;
-
-                // Varying amplitude envelopes
-                double a1 = 1.0 - t_norm;           // Decreasing
-                double a2 = t_norm;                  // Increasing
-                double a3 = std::sin(M_PI * t_norm); // Bell curve
-
-                signal[i] = a1 * std::sin(2.0 * M_PI * f1 * t) +
-                           a2 * std::sin(2.0 * M_PI * f2 * t) +
-                           a3 * std::sin(2.0 * M_PI * f3 * t);
-            }
-            break;
-        }
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / sample_rate;
+        double phase = 2.0 * M_PI * (f_start * t + 0.5 * k * t * t);
+        signal[i] = std::sin(phase);
     }
 }
 
@@ -189,6 +70,66 @@ void generate_hamming_window(std::vector<double>& window, int size) {
     for (int i = 0; i < size; ++i) {
         window[i] = 0.54 - 0.46 * std::cos(2.0 * M_PI * i / (size - 1));
     }
+}
+
+// Manually reverse a signal
+void reverse_signal(const std::vector<double>& input, std::vector<double>& output) {
+    output.resize(input.size());
+    for (size_t i = 0; i < input.size(); ++i) {
+        output[i] = input[input.size() - 1 - i];
+    }
+}
+
+// Test a single frame with FRFT
+void test_single_frame(FRFTEngine& engine,
+                      int window_size,
+                      int frame_num,
+                      const ReversalTestConfig& config,
+                      std::vector<double>& original_frame,
+                      std::vector<double>& frft_output,
+                      std::vector<double>& reversed_frft) {
+
+    // Generate a slow-moving chirp for this frame
+    // The chirp duration should match the window size
+    int chirp_samples = window_size;
+    generate_chirp(original_frame, chirp_samples, config.chirp_f_start,
+                  config.chirp_f_end, config.sample_rate);
+
+    // Apply Hamming window to reduce edge effects
+    std::vector<double> window;
+    generate_hamming_window(window, window_size);
+    for (int i = 0; i < window_size; ++i) {
+        original_frame[i] *= window[i];
+    }
+
+    // Prepare FRFT engine
+    engine.prepare(window_size);
+
+    // Allocate buffers
+    std::vector<double> real_in(window_size);
+    std::vector<double> imag_in(window_size, 0.0);
+    std::vector<double> real_out(window_size);
+    std::vector<double> imag_out(window_size);
+
+    // Copy to FRFT input buffers
+    std::copy(original_frame.begin(), original_frame.end(), real_in.begin());
+
+    // Apply FRFT with alpha = -2
+    bool success = engine.compute(real_in.data(), imag_in.data(),
+                                 real_out.data(), imag_out.data(),
+                                 window_size, config.alpha);
+
+    if (!success) {
+        std::cerr << "Error: FRFT computation failed for frame " << frame_num << "\n";
+        return;
+    }
+
+    // Copy FRFT output
+    frft_output.resize(window_size);
+    std::copy(real_out.begin(), real_out.end(), frft_output.begin());
+
+    // Reverse the FRFT output
+    reverse_signal(frft_output, reversed_frft);
 }
 
 // Calculate Mean Squared Error
@@ -201,18 +142,6 @@ double calculate_mse(const std::vector<double>& signal1, const std::vector<doubl
         sum_squared_error += error * error;
     }
     return sum_squared_error / signal1.size();
-}
-
-// Calculate maximum absolute error
-double calculate_max_error(const std::vector<double>& signal1, const std::vector<double>& signal2) {
-    if (signal1.size() != signal2.size()) return -1.0;
-
-    double max_err = 0.0;
-    for (size_t i = 0; i < signal1.size(); ++i) {
-        double error = std::abs(signal1[i] - signal2[i]);
-        if (error > max_err) max_err = error;
-    }
-    return max_err;
 }
 
 // Calculate correlation coefficient
@@ -249,70 +178,6 @@ double calculate_correlation(const std::vector<double>& signal1, const std::vect
     return numerator / denominator;
 }
 
-// Manually reverse a signal (shifted reversal - what actually works with FRFT)
-// This uses output[i] = input[N-i] with wraparound instead of input[N-1-i]
-void reverse_signal(const std::vector<double>& input, std::vector<double>& output) {
-    output.resize(input.size());
-    int N = input.size();
-    for (int i = 0; i < N; ++i) {
-        int rev_idx = N - i;
-        if (rev_idx >= N) rev_idx = 0; // Wrap around for i=0 case
-        output[i] = input[rev_idx];
-    }
-}
-
-// Test a single frame with FRFT
-void test_single_frame(FRFTEngine& engine,
-                      int window_size,
-                      SignalType signal_type,
-                      const ReversalTestConfig& config,
-                      std::vector<double>& original_frame,
-                      std::vector<double>& frft_output,
-                      std::vector<double>& reversed_frft) {
-
-    // Generate test signal
-    generate_test_signal(original_frame, window_size, signal_type, config.sample_rate);
-
-    // Apply Hamming window to reduce edge effects (except for impulses)
-    if (signal_type != SignalType::IMPULSE_QUARTER &&
-        signal_type != SignalType::IMPULSE_THREE_QUARTER) {
-        std::vector<double> window;
-        generate_hamming_window(window, window_size);
-        for (int i = 0; i < window_size; ++i) {
-            original_frame[i] *= window[i];
-        }
-    }
-
-    // Prepare FRFT engine
-    engine.prepare(window_size);
-
-    // Allocate buffers
-    std::vector<double> real_in(window_size);
-    std::vector<double> imag_in(window_size, 0.0);
-    std::vector<double> real_out(window_size);
-    std::vector<double> imag_out(window_size);
-
-    // Copy to FRFT input buffers
-    std::copy(original_frame.begin(), original_frame.end(), real_in.begin());
-
-    // Apply FRFT with alpha = -2
-    bool success = engine.compute(real_in.data(), imag_in.data(),
-                                 real_out.data(), imag_out.data(),
-                                 window_size, config.alpha);
-
-    if (!success) {
-        std::cerr << "Error: FRFT computation failed\n";
-        return;
-    }
-
-    // Copy FRFT output
-    frft_output.resize(window_size);
-    std::copy(real_out.begin(), real_out.end(), frft_output.begin());
-
-    // Reverse the FRFT output (equivalent to Python's [::-1])
-    reverse_signal(frft_output, reversed_frft);
-}
-
 // Write signal data to CSV for plotting
 void write_signals_to_csv(const std::string& filename,
                          const std::vector<double>& original,
@@ -338,7 +203,7 @@ void write_signals_to_csv(const std::string& filename,
 void generate_plot_script(const std::string& csv_filename,
                          const std::string& output_png,
                          int window_size,
-                         const std::string& signal_name,
+                         int frame_num,
                          double sample_rate,
                          double mse,
                          double correlation) {
@@ -357,14 +222,14 @@ void generate_plot_script(const std::string& csv_filename,
 
     script << "# Create figure with 3 subplots\n";
     script << "fig, axes = plt.subplots(3, 1, figsize=(12, 10))\n";
-    script << "fig.suptitle(f'FRFT Reversal Test - " << signal_name
+    script << "fig.suptitle(f'FRFT Reversal Test - Frame " << frame_num
            << "\\nWindow Size: " << window_size
            << ", Sample Rate: " << sample_rate << " Hz', fontsize=14, fontweight='bold')\n\n";
 
-    script << "# Plot 1: Original Signal\n";
-    script << "axes[0].plot(data['sample'], data['original'], 'b-', linewidth=2, label='Original: " << signal_name << "')\n";
+    script << "# Plot 1: Original Chirp\n";
+    script << "axes[0].plot(data['sample'], data['original'], 'b-', linewidth=2, label='Original Chirp')\n";
     script << "axes[0].set_ylabel('Amplitude', fontsize=11)\n";
-    script << "axes[0].set_title('Original Signal', fontsize=12, fontweight='bold')\n";
+    script << "axes[0].set_title('Original Chirp Signal', fontsize=12, fontweight='bold')\n";
     script << "axes[0].grid(True, alpha=0.3)\n";
     script << "axes[0].legend(loc='upper right', fontsize=10)\n";
     script << "axes[0].set_xlim([0, len(data)-1])\n\n";
@@ -397,135 +262,85 @@ void generate_plot_script(const std::string& csv_filename,
     script.close();
 }
 
-// Run the reversal test with comprehensive signal suite
+// Run the reversal test with frame-by-frame analysis
 void run_reversal_test_suite(const ReversalTestConfig& config) {
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║      FRFT Reversal Test - Comprehensive Signal Suite         ║\n";
+    std::cout << "║      FRFT Reversal Test - Frame by Frame Analysis            ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n\n";
 
     std::cout << "Test Configuration:\n";
     std::cout << "  Alpha: " << config.alpha << " (expected to reverse signal)\n";
     std::cout << "  Sample Rate: " << config.sample_rate << " Hz\n";
-    std::cout << "  Signal Types: " << config.signal_types.size() << "\n";
-    for (const auto& type : config.signal_types) {
-        std::cout << "    - " << get_signal_name(type) << "\n";
-    }
+    std::cout << "  Chirp per frame: " << config.chirp_f_start << " Hz → "
+              << config.chirp_f_end << " Hz\n";
+    std::cout << "  Number of test frames: " << config.num_test_frames << "\n";
     std::cout << "  Window Sizes: ";
     for (size_t i = 0; i < config.window_sizes.size(); ++i) {
         std::cout << config.window_sizes[i];
         if (i < config.window_sizes.size() - 1) std::cout << ", ";
     }
     std::cout << "\n";
-    std::cout << "  Figures Directory: " << config.figures_dir << "\n";
-    std::cout << "  Results File: " << config.results_file << "\n\n";
+    std::cout << "  Figures Directory: " << config.figures_dir << "\n\n";
 
-    // Create directories
-    std::cout << "Creating output directories...\n";
+    // Create figures directory
+    std::cout << "Creating figures directory: " << config.figures_dir << "\n\n";
     create_directories(config.figures_dir);
-    create_directories("reversal_test");
-
-    // Open results file
-    std::ofstream results_file(config.results_file);
-    if (!results_file.is_open()) {
-        std::cerr << "Error: Cannot open results file: " << config.results_file << "\n";
-        return;
-    }
-
-    // Write header to results file
-    results_file << "# FRFT Reversal Test Results (Alpha = " << config.alpha << ")\n";
-    results_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
-    results_file << "# Test Date: " << __DATE__ << " " << __TIME__ << "\n";
-    results_file << "#\n";
-    results_file << "# Reversal method: output[i] = input[N-i] with wraparound\n";
-    results_file << "# Note: This differs from standard [::-1] by one sample shift\n";
-    results_file << "# This is the correct reversal convention for this FRFT implementation\n";
-    results_file << "#\n";
-    results_file << "# Columns:\n";
-    results_file << "# 1. Window Size\n";
-    results_file << "# 2. Signal Type\n";
-    results_file << "# 3. MSE (Mean Squared Error)\n";
-    results_file << "# 4. Max Error\n";
-    results_file << "# 5. Correlation Coefficient\n";
-    results_file << "# 6. Reversal Status (CONFIRMED/PARTIAL/FAILED)\n";
-    results_file << "#\n";
-    results_file << "WindowSize\tSignalType\tMSE\tMaxError\tCorrelation\tStatus\n";
 
     // Create FRFT engine
     FRFTEngine engine;
 
-    // Statistics tracking
-    int total_tests = config.window_sizes.size() * config.signal_types.size();
-    int tests_passed = 0;
-    int tests_partial = 0;
-    int tests_failed = 0;
-
     // Process for each window size
     for (int window_size : config.window_sizes) {
-        std::cout << "\n" << std::string(70, '=') << "\n";
+        std::cout << "\n" << std::string(70, '-') << "\n";
         std::cout << "Testing window size: " << window_size << "\n";
-        std::cout << std::string(70, '=') << "\n";
+        std::cout << std::string(70, '-') << "\n";
 
         double frame_duration = static_cast<double>(window_size) / config.sample_rate;
         std::cout << "Frame duration: " << (frame_duration * 1000.0) << " ms\n";
         std::cout << "Samples per frame: " << window_size << "\n\n";
 
-        // Test each signal type
-        for (SignalType signal_type : config.signal_types) {
-            std::string signal_name = get_signal_name(signal_type);
-            std::cout << "  Testing " << signal_name << "... ";
+        // Test multiple frames
+        for (int frame_num = 1; frame_num <= config.num_test_frames; ++frame_num) {
+            std::cout << "  Frame " << frame_num << "/" << config.num_test_frames << ": ";
             std::cout.flush();
 
-            // Generate and test signal
+            // Generate and test frame
             std::vector<double> original_frame;
             std::vector<double> frft_output;
             std::vector<double> reversed_frft;
 
-            test_single_frame(engine, window_size, signal_type, config,
+            test_single_frame(engine, window_size, frame_num, config,
                             original_frame, frft_output, reversed_frft);
 
             // Calculate metrics
             double mse = calculate_mse(original_frame, reversed_frft);
-            double max_error = calculate_max_error(original_frame, reversed_frft);
             double correlation = calculate_correlation(original_frame, reversed_frft);
 
-            // Determine status
-            std::string status;
+            // Print results
+            std::cout << "MSE=" << std::scientific << std::setprecision(2) << mse
+                     << ", Corr=" << std::fixed << std::setprecision(6) << correlation;
+
             if (correlation > 0.99) {
-                status = "CONFIRMED";
-                tests_passed++;
-                std::cout << "✓ PASS";
+                std::cout << " ✓ REVERSAL CONFIRMED";
             } else if (correlation > 0.95) {
-                status = "PARTIAL";
-                tests_partial++;
-                std::cout << "⚠ PARTIAL";
+                std::cout << " ⚠ PARTIAL REVERSAL";
             } else {
-                status = "FAILED";
-                tests_failed++;
-                std::cout << "✗ FAIL";
+                std::cout << " ✗ NOT REVERSED";
             }
+            std::cout << "\n";
 
-            std::cout << " (MSE=" << std::scientific << std::setprecision(2) << mse
-                     << ", Corr=" << std::fixed << std::setprecision(6) << correlation << ")\n";
-
-            // Write to results file
-            results_file << window_size << "\t"
-                        << signal_name << "\t"
-                        << std::scientific << std::setprecision(6) << mse << "\t"
-                        << max_error << "\t"
-                        << std::fixed << std::setprecision(6) << correlation << "\t"
-                        << status << "\n";
-
-            // Generate ONE plot per window size and signal type
+            // Generate plot for this frame
             std::string csv_filename = "temp_signal_data.csv";
-            std::string png_filename = config.figures_dir + "/" + signal_name +
+            std::string png_filename = config.figures_dir + "/frame" +
+                                      std::to_string(frame_num) +
                                       "_ws" + std::to_string(window_size) + ".png";
 
             write_signals_to_csv(csv_filename, original_frame, frft_output, reversed_frft);
 
-            generate_plot_script(csv_filename, png_filename, window_size, signal_name,
+            generate_plot_script(csv_filename, png_filename, window_size, frame_num,
                                config.sample_rate, mse, correlation);
 
-            int ret = system("python3 plot_signals.py 2>/dev/null");
+            int ret = system("python3 plot_signals.py");
             if (ret != 0) {
                 std::cerr << "    Warning: Failed to generate plot\n";
             }
@@ -536,25 +351,11 @@ void run_reversal_test_suite(const ReversalTestConfig& config) {
         }
     }
 
-    results_file.close();
-
-    // Print summary
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "╔════════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                  Test Suite Complete                          ║\n";
+    std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║                  Reversal Test Complete                       ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n";
-    std::cout << "\nSummary:\n";
-    std::cout << "  Total tests: " << total_tests << "\n";
-    std::cout << "  Passed (correlation > 0.99): " << tests_passed
-              << " (" << std::fixed << std::setprecision(1)
-              << (100.0 * tests_passed / total_tests) << "%)\n";
-    std::cout << "  Partial (correlation > 0.95): " << tests_partial
-              << " (" << (100.0 * tests_partial / total_tests) << "%)\n";
-    std::cout << "  Failed: " << tests_failed
-              << " (" << (100.0 * tests_failed / total_tests) << "%)\n";
-    std::cout << "\n  Results saved to: " << config.results_file << "\n";
-    std::cout << "  Plots saved to: " << config.figures_dir << "/\n";
-    std::cout << "  Total plots generated: " << total_tests << "\n\n";
+    std::cout << "\nAll plots saved to: " << config.figures_dir << "/\n";
+    std::cout << "Plot naming: frame[1-5]_ws[window_size].png\n\n";
 }
 
 // Parse command line arguments
@@ -563,27 +364,20 @@ bool parse_arguments(int argc, char* argv[], ReversalTestConfig& config) {
         std::string arg = argv[i];
 
         if (arg == "--help" || arg == "-h") {
-            std::cout << "FRFT Reversal Test - Comprehensive Signal Suite (Alpha = -2)\n\n";
+            std::cout << "FRFT Reversal Test - Frame by Frame Analysis (Alpha = -2)\n\n";
             std::cout << "Usage: " << argv[0] << " [options]\n\n";
-            std::cout << "Tests FRFT reversal property with multiple signal types:\n";
-            std::cout << "  - Impulse at N/4 position\n";
-            std::cout << "  - Impulse at 3*N/4 position\n";
-            std::cout << "  - Exponentially decaying sine\n";
-            std::cout << "  - Exponentially growing sine\n";
-            std::cout << "  - Linear chirp (200-800 Hz)\n";
-            std::cout << "  - Step function (silence then tone)\n";
-            std::cout << "  - Multi-tone with varying amplitudes\n\n";
             std::cout << "Options:\n";
             std::cout << "  --sample-rate SR    Sample rate in Hz (default: 44100)\n";
+            std::cout << "  --num-frames N      Number of test frames (default: 5)\n";
             std::cout << "  --figures-dir DIR   Directory for saving plots (default: reversal_test/figures)\n";
-            std::cout << "  --help             Show this help message\n\n";
-            std::cout << "Output:\n";
-            std::cout << "  - Results text file: reversal_test/results.txt\n";
-            std::cout << "  - PNG plots: reversal_test/figures/[SignalType]_ws[WindowSize].png\n";
+            std::cout << "  --help             Show this help message\n";
             return false;
         }
         else if (arg == "--sample-rate" && i + 1 < argc) {
             config.sample_rate = std::stod(argv[++i]);
+        }
+        else if (arg == "--num-frames" && i + 1 < argc) {
+            config.num_test_frames = std::stoi(argv[++i]);
         }
         else if (arg == "--figures-dir" && i + 1 < argc) {
             config.figures_dir = argv[++i];
