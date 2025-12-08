@@ -227,10 +227,9 @@ void FRFTEngine::dflip(const std::vector<Complex>& input, size_t n, std::vector<
     }
 
     ensure_size(output, n);
-    output[0] = input[0];
 
-    for (size_t i = 1; i < n; ++i) {
-        output[i] = input[n - i];
+    for (size_t i = 0; i < n; ++i) {
+        output[i] = input[n - i - 1];
     }
 }
 
