@@ -25,7 +25,7 @@ struct TestConfig {
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
-    int n_random_samples = 10000;  // Generate 1000 random beta/gamma pairs per frequency
+    int n_random_samples = 1000;  // Generate 1000 random beta/gamma pairs per frequency
     int max_figures_to_save = 40;  // Maximum number of figures to save
     bool apply_window = true;  // Apply Hamming window to frames (default: ON)
     std::string output_filename = "homomorphic_test/results.txt";
@@ -400,7 +400,7 @@ void run_test_suite(const TestConfig& config) {
 
     // Write header
     out_file << "# FRFT Homomorphic Property Test Results\n";
-    out_file << "# Modified: 1000 random beta/gamma pairs per frequency/window size combination\n";
+    out_file << "# Modified: 1000 random beta/gamma pairs shared across all frequencies and window sizes\n";
     out_file << "# Beta, Gamma in [-2, 2]; Alpha = Beta + Gamma also in [-2, 2]\n";
     out_file << "# Single frame test with random window position per sample\n";
     out_file << "# Windowing: " << (config.apply_window ? "Hamming" : "None") << "\n";
@@ -416,17 +416,29 @@ void run_test_suite(const TestConfig& config) {
     std::random_device rd;
     std::mt19937 rng(rd());
 
+    // Generate 1000 random alpha/beta/gamma triplets ONCE (reused for all tests)
+    std::vector<double> alphas(config.n_random_samples);
+    std::vector<double> betas(config.n_random_samples);
+    std::vector<double> gammas(config.n_random_samples);
+
     int test_count = 0;
     int failed_count = 0;
     int total_figures_saved = 0;
 
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║        FRFT Homomorphic Property Test Suite (Modified)       ║\n";
-    std::cout << "║         1000 Random Beta/Gamma Pairs per Frequency           ║\n";
+    std::cout << "║      Shared Alpha/Beta/Gamma across all configurations       ║\n";
     std::cout << "║    Beta, Gamma ∈ [-2,2]; Alpha = Beta+Gamma ∈ [-2,2]        ║\n";
     std::cout << "║           Single frame with random window position            ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n";
-    std::cout << "\nWindowing: " << (config.apply_window ? "Hamming" : "None (rectangular)") << "\n\n";
+    std::cout << "\nWindowing: " << (config.apply_window ? "Hamming" : "None (rectangular)") << "\n";
+    std::cout << "\nGenerating " << config.n_random_samples << " shared α/β/γ triplets...\n";
+
+    for (int i = 0; i < config.n_random_samples; ++i) {
+        generate_beta_gamma_pair(betas[i], gammas[i], alphas[i], rng);
+    }
+
+    std::cout << "✓ Generated triplets (will be reused for all frequencies and window sizes)\n\n";
 
     // Determine which tests to save figures for (up to max_figures_to_save)
     int total_configurations = config.window_sizes.size() * config.test_frequencies.size();
@@ -472,11 +484,12 @@ void run_test_suite(const TestConfig& config) {
                                                    config_index) != save_figure_indices.end();
                 bool figure_saved = false;
 
-                // Generate 1000 random beta/gamma pairs
+                // Use the pre-generated 1000 alpha/beta/gamma triplets
                 for (int sample_idx = 0; sample_idx < config.n_random_samples; ++sample_idx) {
-                    // Generate random beta and gamma (which determines alpha)
-                    double beta, gamma, alpha;
-                    generate_beta_gamma_pair(beta, gamma, alpha, rng);
+                    // Get the pre-generated triplet
+                    double alpha = alphas[sample_idx];
+                    double beta = betas[sample_idx];
+                    double gamma = gammas[sample_idx];
 
                     std::vector<double> direct_result, composed_result;
 

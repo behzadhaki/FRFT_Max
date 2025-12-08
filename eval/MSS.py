@@ -64,6 +64,3 @@ class MultiscaleSpectrogramLoss:
             log_loss = (self.safe_log(s_x) - self.safe_log(s_y)).abs().mean()
             loss += lin_loss + log_loss
         return loss / len(self.scales)
-
-mse_loss = nn.MSELoss()
-sound_loss = lambda x,y, sample_rate: mse_loss(x.view(1,-1), y.view(1,-1))
