@@ -215,8 +215,9 @@ def plot_reconstruction_mse_vs_alpha(data, output_dir):
 def plot_homomorphic_mse_vs_alpha_kde(data, output_dir):
     """
     Plot KDE-style representation of MSE vs Alpha for each frequency.
-    X-axis: Alpha values (0-2), Y-axis: MSE (linear scale)
+    X-axis: Alpha values (-2 to 2), Y-axis: MSE (linear scale)
     Each subplot shows one frequency with all window sizes mixed together.
+    Journal-quality formatting.
     """
     # Filter for the focus window sizes
     focus_window_sizes = [512, 1024, 2048, 4096]
@@ -255,6 +256,10 @@ def plot_homomorphic_mse_vs_alpha_kde(data, output_dir):
     if n_freqs == 1:
         axes = [axes]
 
+    # Define alpha bins (0.1 width) from -2 to 2 - same as boxplots
+    alpha_bins = np.arange(-2.0, 2.1, 0.1)
+    alpha_bin_centers = alpha_bins[:-1] + 0.05
+
     for idx, freq in enumerate(frequencies):
         ax = axes[idx]
         freq_data = data_filtered[np.abs(data_filtered['Frequency'] - freq) < 0.01]
@@ -269,58 +274,49 @@ def plot_homomorphic_mse_vs_alpha_kde(data, output_dir):
         mses = mses[valid_mask]
 
         if len(alphas) > 10:
-            # Create alpha bins
-            alpha_bins = np.linspace(0, 2, 40)
             mse_medians = []
+            mse_p25 = []
+            mse_p75 = []
             alpha_centers = []
 
-            # For each alpha bin, compute median of MSE values (all window sizes mixed)
-            bin_width = 0.1
-            for alpha_val in alpha_bins:
-                # Get MSE values near this alpha
-                alpha_mask = np.abs(alphas - alpha_val) < bin_width
-                if np.sum(alpha_mask) > 5:
-                    nearby_mses = mses[alpha_mask]
-                    mse_medians.append(np.median(nearby_mses))
-                    alpha_centers.append(alpha_val)
+            # Use explicit bins like boxplots
+            for bin_idx, (bin_start, bin_end) in enumerate(zip(alpha_bins[:-1], alpha_bins[1:])):
+                bin_center = alpha_bin_centers[bin_idx]
+
+                # Get MSE values in this alpha bin
+                mask = (alphas >= bin_start) & (alphas < bin_end)
+                bin_mses = mses[mask]
+
+                if len(bin_mses) > 0:
+                    mse_medians.append(np.median(bin_mses))
+                    mse_p25.append(np.percentile(bin_mses, 25))
+                    mse_p75.append(np.percentile(bin_mses, 75))
+                    alpha_centers.append(bin_center)
 
             # Plot smooth curve
             if len(alpha_centers) > 0:
-                ax.plot(alpha_centers, mse_medians, '-', linewidth=2.5,
+                ax.plot(alpha_centers, mse_medians, '-', linewidth=3,
                         color='#1f77b4', alpha=0.85)
 
                 # Add shaded region for IQR
-                mse_p25 = []
-                mse_p75 = []
-                for alpha_val in alpha_centers:
-                    alpha_mask = np.abs(alphas - alpha_val) < bin_width
-                    if np.sum(alpha_mask) > 5:
-                        nearby_mses = mses[alpha_mask]
-                        mse_p25.append(np.percentile(nearby_mses, 25))
-                        mse_p75.append(np.percentile(nearby_mses, 75))
-                    else:
-                        mse_p25.append(np.nan)
-                        mse_p75.append(np.nan)
-
                 ax.fill_between(alpha_centers, mse_p25, mse_p75,
                                 alpha=0.3, color='#1f77b4', label='IQR (25th-75th percentile)')
 
         # Frequency label
         ax.text(0.02, 0.95, f'{freq:.0f} Hz (n={len(alphas)} samples)',
-                transform=ax.transAxes, fontsize=14, fontweight='bold',
+                transform=ax.transAxes, fontsize=18, fontweight='bold',
                 verticalalignment='top', horizontalalignment='left',
                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='black'))
 
-        ax.set_xlabel('Alpha (α)' if idx == n_freqs - 1 else '', fontsize=13, fontweight='bold')
-        ax.set_ylabel('MSE (median)', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Alpha (α)' if idx == n_freqs - 1 else '', fontsize=20, fontweight='bold')
+        ax.set_ylabel('MSE (median)', fontsize=20, fontweight='bold')
         ax.grid(True, alpha=0.3, which='both')
+        ax.tick_params(axis='both', which='major', labelsize=16)
         if len(alpha_centers) > 0:
-            ax.legend(fontsize=10, loc='upper right', framealpha=0.95)
-        ax.set_xlim(0, 2)
+            ax.legend(fontsize=16, loc='upper right', framealpha=0.95)
+        ax.set_xlim(-2, 2)
         ax.set_ylim(global_min, global_max)
 
-    fig.suptitle('Homomorphic MSE vs Alpha (All window sizes combined)',
-                 fontsize=16, fontweight='bold', y=0.995)
     plt.tight_layout()
 
     filename = output_dir / 'homomorphic_mse_vs_alpha_kde.png'
@@ -332,7 +328,7 @@ def plot_homomorphic_mse_vs_alpha_kde(data, output_dir):
 def plot_homomorphic_mse_vs_alpha_boxplots(data, output_dir):
     """
     Plot box plots of MSE for alpha bins (0.1 width) for each frequency.
-    X-axis: Alpha bins, Y-axis: MSE (linear scale)
+    X-axis: Alpha bins (-2 to 2), Y-axis: MSE (linear scale)
     Each subplot shows one frequency with all window sizes mixed together in each box.
     """
     # Filter for the focus window sizes
@@ -346,8 +342,8 @@ def plot_homomorphic_mse_vs_alpha_boxplots(data, output_dir):
     frequencies = sorted(data_filtered['Frequency'].unique())
     n_freqs = len(frequencies)
 
-    # Define alpha bins (0.1 width)
-    alpha_bins = np.arange(0, 2.1, 0.1)
+    # Define alpha bins (0.1 width) from -2 to 2
+    alpha_bins = np.arange(-2.0, 2.1, 0.1)
     alpha_bin_centers = alpha_bins[:-1] + 0.05
     n_bins = len(alpha_bin_centers)
 
@@ -401,29 +397,28 @@ def plot_homomorphic_mse_vs_alpha_boxplots(data, output_dir):
         if len(all_boxplot_data) > 0:
             bp = ax.boxplot(all_boxplot_data, positions=all_positions, widths=0.08,
                             patch_artist=True, showfliers=False,
-                            medianprops=dict(color='red', linewidth=2),
-                            boxprops=dict(linewidth=1.5, facecolor='#1f77b4', alpha=0.6),
-                            whiskerprops=dict(linewidth=1.5),
-                            capprops=dict(linewidth=1.5))
+                            medianprops=dict(color='red', linewidth=2.5),
+                            boxprops=dict(linewidth=2, facecolor='#1f77b4', alpha=0.6),
+                            whiskerprops=dict(linewidth=2),
+                            capprops=dict(linewidth=2))
 
         # Frequency label with sample count
         total_samples = len(freq_data[freq_data['MSE_Homomorphic'] > 0])
         ax.text(0.02, 0.95, f'{freq:.0f} Hz (n={total_samples} samples)',
-                transform=ax.transAxes, fontsize=14, fontweight='bold',
+                transform=ax.transAxes, fontsize=18, fontweight='bold',
                 verticalalignment='top', horizontalalignment='left',
                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='black'))
 
-        ax.set_xlabel('Alpha (α)' if idx == n_freqs - 1 else '', fontsize=13, fontweight='bold')
-        ax.set_ylabel('MSE', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Alpha (α)' if idx == n_freqs - 1 else '', fontsize=20, fontweight='bold')
+        ax.set_ylabel('MSE', fontsize=20, fontweight='bold')
         ax.grid(True, alpha=0.3, which='both', axis='y')
         ax.grid(True, alpha=0.2, which='major', axis='x')
-        ax.set_xlim(-0.05, 2.05)
+        ax.set_xlim(-2.1, 2.1)
         ax.set_ylim(global_min, global_max)
-        ax.set_xticks(alpha_bin_centers[::2])  # Show every other tick
-        ax.set_xticklabels([f'{x:.1f}' for x in alpha_bin_centers[::2]], fontsize=10)
+        ax.set_xticks(alpha_bin_centers[::4])  # Show every 4th tick
+        ax.set_xticklabels([f'{x:.1f}' for x in alpha_bin_centers[::4]], fontsize=16)
+        ax.tick_params(axis='y', which='major', labelsize=16)
 
-    fig.suptitle('Homomorphic MSE Distribution by Alpha Bins (All window sizes combined)',
-                 fontsize=16, fontweight='bold', y=0.995)
     plt.tight_layout()
 
     filename = output_dir / 'homomorphic_mse_vs_alpha_boxplots.png'
@@ -435,8 +430,9 @@ def plot_homomorphic_mse_vs_alpha_boxplots(data, output_dir):
 def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
     """
     Plot median MSE vs Alpha with all frequencies in one plot.
-    X-axis: Alpha values (0-2), Y-axis: MSE (linear scale)
+    X-axis: Alpha values (-2 to 2), Y-axis: MSE (linear scale)
     Each frequency gets a different colored line with legend.
+    Only selected frequencies: 100, 220, 440, 1000, 2000, 4000, 6000, 8000, 10000 Hz
     """
     # Filter for the focus window sizes
     focus_window_sizes = [512, 1024, 2048, 4096]
@@ -446,7 +442,9 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
         print("⚠ No data found for focus window sizes. Using all available window sizes.")
         data_filtered = data
 
-    frequencies = sorted(data_filtered['Frequency'].unique())
+    # Filter for selected frequencies only
+    selected_frequencies = [100, 220, 440, 1000, 2000, 4000, 6000, 8000, 10000]
+    frequencies = sorted([f for f in data_filtered['Frequency'].unique() if f in selected_frequencies])
     n_freqs = len(frequencies)
 
     # Create single plot
@@ -461,6 +459,10 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
 
     all_plot_data = []
 
+    # Define alpha bins (0.1 width) from -2 to 2 - same as boxplots
+    alpha_bins = np.arange(-2.0, 2.1, 0.1)
+    alpha_bin_centers = alpha_bins[:-1] + 0.05
+
     for freq_idx, freq in enumerate(frequencies):
         freq_data = data_filtered[np.abs(data_filtered['Frequency'] - freq) < 0.01]
 
@@ -474,20 +476,20 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
         mses = mses[valid_mask]
 
         if len(alphas) > 10:
-            # Create alpha bins
-            alpha_bins = np.linspace(0, 2, 40)
             mse_medians = []
             alpha_centers = []
 
-            # For each alpha bin, compute median of MSE values
-            bin_width = 0.1
-            for alpha_val in alpha_bins:
-                # Get MSE values near this alpha
-                alpha_mask = np.abs(alphas - alpha_val) < bin_width
-                if np.sum(alpha_mask) > 5:
-                    nearby_mses = mses[alpha_mask]
-                    mse_medians.append(np.median(nearby_mses))
-                    alpha_centers.append(alpha_val)
+            # Use explicit bins like boxplots
+            for bin_idx, (bin_start, bin_end) in enumerate(zip(alpha_bins[:-1], alpha_bins[1:])):
+                bin_center = alpha_bin_centers[bin_idx]
+
+                # Get MSE values in this alpha bin
+                mask = (alphas >= bin_start) & (alphas < bin_end)
+                bin_mses = mses[mask]
+
+                if len(bin_mses) > 0:
+                    mse_medians.append(np.median(bin_mses))
+                    alpha_centers.append(bin_center)
 
             # Store for plotting
             if len(alpha_centers) > 0:
@@ -511,21 +513,20 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
     # Plot all frequencies
     for plot_data in all_plot_data:
         ax.plot(plot_data['alphas'], plot_data['mses'], '-',
-                linewidth=2.5, color=plot_data['color'], alpha=0.85,
-                label=f"{plot_data['freq']:.0f} Hz")
+                linewidth=3, color=plot_data['color'], alpha=0.85,
+                label=f"{plot_data['freq']:.0f} Hz", markersize=8)
 
-    ax.set_xlabel('Alpha (α)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('MSE (median)', fontsize=14, fontweight='bold')
-    ax.set_title('Homomorphic MSE vs Alpha - All Frequencies',
-                 fontsize=16, fontweight='bold')
+    ax.set_xlabel('Alpha (α)', fontsize=22, fontweight='bold')
+    ax.set_ylabel('MSE (median)', fontsize=22, fontweight='bold')
     ax.grid(True, alpha=0.3, which='both')
-    ax.set_xlim(0, 2)
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.set_xlim(-2, 2)
     if global_min != float('inf'):
         ax.set_ylim(global_min, global_max)
 
     # Legend with multiple columns for many frequencies
-    ncol = min(4, (n_freqs + 3) // 4)
-    ax.legend(fontsize=10, loc='upper right', framealpha=0.95, ncol=ncol)
+    ncol = min(3, (n_freqs + 2) // 3)
+    ax.legend(fontsize=16, loc='upper right', framealpha=0.95, ncol=ncol)
 
     plt.tight_layout()
 
@@ -538,8 +539,9 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
 def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
     """
     Plot median MSE vs Alpha with all frequencies in one plot, including IQR shading.
-    X-axis: Alpha values (0-2), Y-axis: MSE (linear scale)
+    X-axis: Alpha values (-2 to 2), Y-axis: MSE (linear scale)
     Each frequency gets a different colored line and shaded IQR region.
+    Only selected frequencies: 100, 220, 440, 1000, 2000, 4000, 6000, 8000, 10000 Hz
     """
     # Filter for the focus window sizes
     focus_window_sizes = [512, 1024, 2048, 4096]
@@ -549,7 +551,9 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
         print("⚠ No data found for focus window sizes. Using all available window sizes.")
         data_filtered = data
 
-    frequencies = sorted(data_filtered['Frequency'].unique())
+    # Filter for selected frequencies only
+    selected_frequencies = [100, 220, 440, 1000, 2000, 4000, 6000, 8000, 10000]
+    frequencies = sorted([f for f in data_filtered['Frequency'].unique() if f in selected_frequencies])
     n_freqs = len(frequencies)
 
     # Create single plot
@@ -564,6 +568,10 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
 
     all_plot_data = []
 
+    # Define alpha bins (0.1 width) from -2 to 2 - same as boxplots
+    alpha_bins = np.arange(-2.0, 2.1, 0.1)
+    alpha_bin_centers = alpha_bins[:-1] + 0.05
+
     for freq_idx, freq in enumerate(frequencies):
         freq_data = data_filtered[np.abs(data_filtered['Frequency'] - freq) < 0.01]
 
@@ -577,24 +585,24 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
         mses = mses[valid_mask]
 
         if len(alphas) > 10:
-            # Create alpha bins
-            alpha_bins = np.linspace(0, 2, 40)
             mse_medians = []
             mse_p25 = []
             mse_p75 = []
             alpha_centers = []
 
-            # For each alpha bin, compute median and IQR
-            bin_width = 0.1
-            for alpha_val in alpha_bins:
-                # Get MSE values near this alpha
-                alpha_mask = np.abs(alphas - alpha_val) < bin_width
-                if np.sum(alpha_mask) > 5:
-                    nearby_mses = mses[alpha_mask]
-                    mse_medians.append(np.median(nearby_mses))
-                    mse_p25.append(np.percentile(nearby_mses, 25))
-                    mse_p75.append(np.percentile(nearby_mses, 75))
-                    alpha_centers.append(alpha_val)
+            # Use explicit bins like boxplots
+            for bin_idx, (bin_start, bin_end) in enumerate(zip(alpha_bins[:-1], alpha_bins[1:])):
+                bin_center = alpha_bin_centers[bin_idx]
+
+                # Get MSE values in this alpha bin
+                mask = (alphas >= bin_start) & (alphas < bin_end)
+                bin_mses = mses[mask]
+
+                if len(bin_mses) > 0:
+                    mse_medians.append(np.median(bin_mses))
+                    mse_p25.append(np.percentile(bin_mses, 25))
+                    mse_p75.append(np.percentile(bin_mses, 75))
+                    alpha_centers.append(bin_center)
 
             # Store for plotting
             if len(alpha_centers) > 0:
@@ -625,21 +633,20 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
 
         # Plot median line
         ax.plot(plot_data['alphas'], plot_data['mses'], '-',
-                linewidth=2.5, color=plot_data['color'], alpha=0.85,
-                label=f"{plot_data['freq']:.0f} Hz")
+                linewidth=3, color=plot_data['color'], alpha=0.85,
+                label=f"{plot_data['freq']:.0f} Hz", markersize=8)
 
-    ax.set_xlabel('Alpha (α)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('MSE (median with IQR)', fontsize=14, fontweight='bold')
-    ax.set_title('Homomorphic MSE vs Alpha - All Frequencies (with IQR)',
-                 fontsize=16, fontweight='bold')
+    ax.set_xlabel('Alpha (α)', fontsize=22, fontweight='bold')
+    ax.set_ylabel('MSE (median with IQR)', fontsize=22, fontweight='bold')
     ax.grid(True, alpha=0.3, which='both')
-    ax.set_xlim(0, 2)
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.set_xlim(-2, 2)
     if global_min != float('inf'):
         ax.set_ylim(global_min, global_max)
 
     # Legend with multiple columns for many frequencies
-    ncol = min(4, (n_freqs + 3) // 4)
-    ax.legend(fontsize=10, loc='upper right', framealpha=0.95, ncol=ncol)
+    ncol = min(3, (n_freqs + 2) // 3)
+    ax.legend(fontsize=16, loc='upper right', framealpha=0.95, ncol=ncol)
 
     plt.tight_layout()
 

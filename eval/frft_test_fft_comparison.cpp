@@ -34,11 +34,11 @@ void apply_window(std::vector<double>& signal, const std::vector<double>& window
 
 // Test configuration
 struct TestConfig {
-    std::vector<int> window_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
-    std::vector<int> overlap_factors = {4};  // 1=no overlap, 2=50%, 4=75%, etc.
-    std::vector<double> test_frequencies = {20.0, 100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0, 12000.0, 15000.0, 18000.0, 20000.0};
+    std::vector<int> window_sizes = {512, 1024, 2048, 4096};  // Focus on these sizes
+    std::vector<int> overlap_factors = {1};  // 1=no overlap
+    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
-    int n_analysis = 5;  // Number of frames to analyze
+    int n_analysis = 20;  // Number of frames to analyze
     std::string output_filename = "fft_comparison/results.txt";
     std::string detailed_log_filename = "fft_comparison/detailed_log.txt";
     std::string figures_dir = "fft_comparison/figures";

@@ -25,9 +25,9 @@ struct TestConfig {
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
-    int n_random_alphas = 1000;  // Generate 1000 random alphas per frequency
+    int n_random_samples = 10000;  // Generate 1000 random beta/gamma pairs per frequency
     int max_figures_to_save = 40;  // Maximum number of figures to save
-    bool apply_window = false;  // Apply Hamming window to frames
+    bool apply_window = true;  // Apply Hamming window to frames (default: ON)
     std::string output_filename = "homomorphic_test/results.txt";
     std::string figures_dir = "homomorphic_test/figures";
 };
@@ -217,36 +217,29 @@ double calculate_mean_error(const std::vector<double>& a, const std::vector<doub
     return sum / a.size();
 }
 
-// Generate random alpha decomposition: alpha = alpha1 + alpha2
-// Both alpha1 and alpha2 can be in range [-2, 2]
-void generate_alpha_decomposition(double alpha_total, double& alpha1, double& alpha2, std::mt19937& rng) {
-    // We need: alpha1 + alpha2 = alpha_total
-    // Constraints: -2 <= alpha1 <= 2 and -2 <= alpha2 <= 2
+// Generate random alpha and decompose it into beta + gamma
+// Both beta and gamma will be in [-2, 2] and alpha will be uniformly distributed in [-2, 2]
+void generate_beta_gamma_pair(double& beta, double& gamma, double& alpha, std::mt19937& rng) {
+    // First generate random alpha in [-2, 2] - this ensures uniform distribution
+    std::uniform_real_distribution<double> alpha_dist(-2.0, 2.0);
+    alpha = alpha_dist(rng);
 
-    // From alpha2 = alpha_total - alpha1, we get:
-    // -2 <= alpha_total - alpha1 <= 2
-    // -2 - alpha_total <= -alpha1 <= 2 - alpha_total
-    // alpha_total - 2 <= alpha1 <= alpha_total + 2
+    // Now decompose alpha = beta + gamma where both beta, gamma ∈ [-2, 2]
+    // From gamma = alpha - beta and -2 ≤ gamma ≤ 2:
+    // -2 ≤ alpha - beta ≤ 2
+    // alpha - 2 ≤ beta ≤ alpha + 2
+    // Combined with -2 ≤ beta ≤ 2:
+    double min_beta = std::max(-2.0, alpha - 2.0);
+    double max_beta = std::min(2.0, alpha + 2.0);
 
-    // Combine with -2 <= alpha1 <= 2:
-    double min_alpha1 = std::max(-2.0, alpha_total - 2.0);
-    double max_alpha1 = std::min(2.0, alpha_total + 2.0);
+    // Generate random beta in valid range
+    std::uniform_real_distribution<double> beta_dist(min_beta, max_beta);
+    beta = beta_dist(rng);
+    gamma = alpha - beta;
 
-    // If no valid range exists (shouldn't happen for alpha_total in [-4, 4])
-    if (min_alpha1 > max_alpha1) {
-        alpha1 = 0.0;
-        alpha2 = alpha_total;
-        return;
-    }
-
-    // Generate random alpha1 in valid range
-    std::uniform_real_distribution<double> dist(min_alpha1, max_alpha1);
-    alpha1 = dist(rng);
-    alpha2 = alpha_total - alpha1;
-
-    // Clamp to ensure bounds (should be guaranteed by construction, but for safety)
-    alpha1 = std::max(-2.0, std::min(2.0, alpha1));
-    alpha2 = std::max(-2.0, std::min(2.0, alpha2));
+    // Safety clamps (should be guaranteed by construction)
+    beta = std::max(-2.0, std::min(2.0, beta));
+    gamma = std::max(-2.0, std::min(2.0, gamma));
 }
 
 // Perform homomorphic property test with frame-by-frame comparison
@@ -260,6 +253,7 @@ HomomorphicTestResult test_homomorphic_property(FRFTEngine& engine,
                                                 double sample_rate,
                                                 int n_analysis,
                                                 bool apply_windowing,
+                                                std::mt19937& rng,
                                                 std::vector<double>& single_frame_direct_out,
                                                 std::vector<double>& single_frame_composed_out) {
     HomomorphicTestResult result;
@@ -276,10 +270,15 @@ HomomorphicTestResult test_homomorphic_property(FRFTEngine& engine,
     int hop_size = window_size / overlap_factor;
     if (hop_size < 1) hop_size = 1;
 
-    // Generate enough signal for n_analysis frames
-    int signal_length = window_size + (n_analysis - 1) * hop_size;
-    std::vector<double> original_signal;
-    generate_sine_wave(original_signal, signal_length, frequency, sample_rate);
+    // Generate a longer signal to allow for random window selection
+    // Make it 10x longer than needed to have good randomness
+    int signal_length = window_size * 10;
+    std::vector<double> full_signal;
+    generate_sine_wave(full_signal, signal_length, frequency, sample_rate);
+
+    // Select a random starting position for the window
+    std::uniform_int_distribution<int> pos_dist(0, signal_length - window_size);
+    int random_start = pos_dist(rng);
 
     // Generate Hamming window if needed
     std::vector<double> hamming_window;
@@ -305,122 +304,83 @@ HomomorphicTestResult test_homomorphic_property(FRFTEngine& engine,
     // Storage for a single representative frame (for plotting)
     bool frame_stored_for_plot = false;
 
-    // Process frames
-    int num_frames = 0;
+    // Process single frame from random position
+    int pos = random_start;
 
-    for (int pos = 0; pos + window_size <= signal_length; pos += hop_size) {
-        // Extract frame
-        std::copy(original_signal.begin() + pos,
-                  original_signal.begin() + pos + window_size,
-                  real_in.begin());
+    // Extract frame
+    std::copy(full_signal.begin() + pos,
+              full_signal.begin() + pos + window_size,
+              real_in.begin());
 
-        // Apply windowing if enabled
-        if (apply_windowing) {
-            apply_window(real_in, hamming_window);
-        }
-
-        std::fill(imag_in.begin(), imag_in.end(), 0.0);
-
-        // Path 1: Direct FRFT with alpha_total
-        bool direct_success = engine.compute(real_in.data(), imag_in.data(),
-                                            real_direct.data(), imag_direct.data(),
-                                            window_size, alpha_total);
-
-        if (!direct_success) {
-            result.mse_direct = -1.0;
-            result.mse_composed = -1.0;
-            result.mse_homomorphic = -1.0;
-            result.max_error_homomorphic = -1.0;
-            result.mean_error_homomorphic = -1.0;
-            return result;
-        }
-
-        // Path 2: Composed FRFT with alpha1, then alpha2
-        // First transform: FRFT(α₁)
-        bool first_success = engine.compute(real_in.data(), imag_in.data(),
-                                           real_temp.data(), imag_temp.data(),
-                                           window_size, alpha1);
-
-        if (!first_success) {
-            result.mse_direct = -1.0;
-            result.mse_composed = -1.0;
-            result.mse_homomorphic = -1.0;
-            result.max_error_homomorphic = -1.0;
-            result.mean_error_homomorphic = -1.0;
-            return result;
-        }
-
-        // Second transform: FRFT(α₂) on result of first
-        bool second_success = engine.compute(real_temp.data(), imag_temp.data(),
-                                            real_composed.data(), imag_composed.data(),
-                                            window_size, alpha2);
-
-        if (!second_success) {
-            result.mse_direct = -1.0;
-            result.mse_composed = -1.0;
-            result.mse_homomorphic = -1.0;
-            result.max_error_homomorphic = -1.0;
-            result.mean_error_homomorphic = -1.0;
-            return result;
-        }
-
-        // Calculate frame-by-frame error metrics
-        std::vector<double> direct_frame(real_direct.begin(), real_direct.end());
-        std::vector<double> composed_frame(real_composed.begin(), real_composed.end());
-
-        double frame_mse = calculate_mse(direct_frame, composed_frame);
-        double frame_max = calculate_max_error(direct_frame, composed_frame);
-        double frame_mean = calculate_mean_error(direct_frame, composed_frame);
-
-        frame_mse_homomorphic.push_back(frame_mse);
-        frame_max_error.push_back(frame_max);
-        frame_mean_error.push_back(frame_mean);
-
-        // Store the first frame for plotting (representative example)
-        if (!frame_stored_for_plot) {
-            single_frame_direct_out = direct_frame;
-            single_frame_composed_out = composed_frame;
-            frame_stored_for_plot = true;
-        }
-
-        num_frames++;
-        if (num_frames >= n_analysis) {
-            break;
-        }
+    // Apply windowing if enabled
+    if (apply_windowing) {
+        apply_window(real_in, hamming_window);
     }
 
-    // Aggregate error metrics across all frames
-    if (num_frames > 0) {
-        // Average MSE across frames
-        double sum_mse = 0.0;
-        double max_of_max = 0.0;
-        double sum_mean = 0.0;
+    std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
-        for (int i = 0; i < num_frames; ++i) {
-            sum_mse += frame_mse_homomorphic[i];
-            if (frame_max_error[i] > max_of_max) {
-                max_of_max = frame_max_error[i];
-            }
-            sum_mean += frame_mean_error[i];
-        }
+    // Path 1: Direct FRFT with alpha_total
+    bool direct_success = engine.compute(real_in.data(), imag_in.data(),
+                                        real_direct.data(), imag_direct.data(),
+                                        window_size, alpha_total);
 
-        result.mse_homomorphic = sum_mse / num_frames;
-        result.max_error_homomorphic = max_of_max;
-        result.mean_error_homomorphic = sum_mean / num_frames;
-
-        // For mse_direct and mse_composed, compare with original (less meaningful with windowing)
-        result.mse_direct = -1.0;  // Not computed in frame-by-frame mode
-        result.mse_composed = -1.0;  // Not computed in frame-by-frame mode
-    } else {
+    if (!direct_success) {
         result.mse_direct = -1.0;
         result.mse_composed = -1.0;
         result.mse_homomorphic = -1.0;
         result.max_error_homomorphic = -1.0;
         result.mean_error_homomorphic = -1.0;
+        return result;
     }
 
-    result.num_frames = num_frames;
+    // Path 2: Composed FRFT with alpha1, then alpha2
+    // First transform: FRFT(α₁)
+    bool first_success = engine.compute(real_in.data(), imag_in.data(),
+                                       real_temp.data(), imag_temp.data(),
+                                       window_size, alpha1);
+
+    if (!first_success) {
+        result.mse_direct = -1.0;
+        result.mse_composed = -1.0;
+        result.mse_homomorphic = -1.0;
+        result.max_error_homomorphic = -1.0;
+        result.mean_error_homomorphic = -1.0;
+        return result;
+    }
+
+    // Second transform: FRFT(α₂) on result of first
+    bool second_success = engine.compute(real_temp.data(), imag_temp.data(),
+                                        real_composed.data(), imag_composed.data(),
+                                        window_size, alpha2);
+
+    if (!second_success) {
+        result.mse_direct = -1.0;
+        result.mse_composed = -1.0;
+        result.mse_homomorphic = -1.0;
+        result.max_error_homomorphic = -1.0;
+        result.mean_error_homomorphic = -1.0;
+        return result;
+    }
+
+    // Calculate frame error metrics
+    std::vector<double> direct_frame(real_direct.begin(), real_direct.end());
+    std::vector<double> composed_frame(real_composed.begin(), real_composed.end());
+
+    double frame_mse = calculate_mse(direct_frame, composed_frame);
+    double frame_max = calculate_max_error(direct_frame, composed_frame);
+    double frame_mean = calculate_mean_error(direct_frame, composed_frame);
+
+    result.mse_homomorphic = frame_mse;
+    result.max_error_homomorphic = frame_max;
+    result.mean_error_homomorphic = frame_mean;
+    result.mse_direct = -1.0;  // Not computed in single frame mode
+    result.mse_composed = -1.0;  // Not computed in single frame mode
+    result.num_frames = 1;
     result.success = true;
+
+    // Store frame for plotting
+    single_frame_direct_out = direct_frame;
+    single_frame_composed_out = composed_frame;
 
     return result;
 }
@@ -440,14 +400,14 @@ void run_test_suite(const TestConfig& config) {
 
     // Write header
     out_file << "# FRFT Homomorphic Property Test Results\n";
-    out_file << "# Modified: 1000 random alphas per frequency/window size combination\n";
-    out_file << "# Frame-by-frame comparison (no overlap-add synthesis)\n";
+    out_file << "# Modified: 1000 random beta/gamma pairs per frequency/window size combination\n";
+    out_file << "# Beta, Gamma in [-2, 2]; Alpha = Beta + Gamma also in [-2, 2]\n";
+    out_file << "# Single frame test with random window position per sample\n";
     out_file << "# Windowing: " << (config.apply_window ? "Hamming" : "None") << "\n";
-    out_file << "# Alpha decomposition: Alpha1, Alpha2 can be in range [-2, 2] where Alpha1 + Alpha2 = Alpha_Total\n";
     out_file << "# Columns: WindowSize OverlapFactor HopSize NumFrames Frequency ";
     out_file << "Alpha_Total Alpha1 Alpha2 MSE_Direct MSE_Composed MSE_Homomorphic ";
     out_file << "MaxError_Homomorphic MeanError_Homomorphic Success\n";
-    out_file << "# Note: MSE_Direct and MSE_Composed are -1 in frame-by-frame mode\n";
+    out_file << "# Note: MSE_Direct and MSE_Composed are -1 (not computed in single frame mode)\n";
     out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\t";
     out_file << "Alpha_Total\tAlpha1\tAlpha2\tMSE_Direct\tMSE_Composed\t";
     out_file << "MSE_Homomorphic\tMaxError_Homomorphic\tMeanError_Homomorphic\tSuccess\n";
@@ -462,8 +422,9 @@ void run_test_suite(const TestConfig& config) {
 
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║        FRFT Homomorphic Property Test Suite (Modified)       ║\n";
-    std::cout << "║             1000 Random Alphas per Configuration              ║\n";
-    std::cout << "║          Frame-by-frame comparison (no overlap-add)           ║\n";
+    std::cout << "║         1000 Random Beta/Gamma Pairs per Frequency           ║\n";
+    std::cout << "║    Beta, Gamma ∈ [-2,2]; Alpha = Beta+Gamma ∈ [-2,2]        ║\n";
+    std::cout << "║           Single frame with random window position            ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\nWindowing: " << (config.apply_window ? "Hamming" : "None (rectangular)") << "\n\n";
 
@@ -511,24 +472,19 @@ void run_test_suite(const TestConfig& config) {
                                                    config_index) != save_figure_indices.end();
                 bool figure_saved = false;
 
-                // Generate 1000 random alphas
-                std::uniform_real_distribution<double> alpha_dist(0.0, 2.0);
-
-                for (int alpha_idx = 0; alpha_idx < config.n_random_alphas; ++alpha_idx) {
-                    // Generate random alpha_total in range [0, 2]
-                    double alpha_total = alpha_dist(rng);
-
-                    // Generate decomposition: alpha = alpha1 + alpha2
-                    double alpha1, alpha2;
-                    generate_alpha_decomposition(alpha_total, alpha1, alpha2, rng);
+                // Generate 1000 random beta/gamma pairs
+                for (int sample_idx = 0; sample_idx < config.n_random_samples; ++sample_idx) {
+                    // Generate random beta and gamma (which determines alpha)
+                    double beta, gamma, alpha;
+                    generate_beta_gamma_pair(beta, gamma, alpha, rng);
 
                     std::vector<double> direct_result, composed_result;
 
                     HomomorphicTestResult result = test_homomorphic_property(
                         engine, window_size, overlap_factor,
-                        frequency, alpha_total, alpha1, alpha2,
+                        frequency, alpha, beta, gamma,
                         config.sample_rate, config.n_analysis,
-                        config.apply_window,
+                        config.apply_window, rng,
                         direct_result, composed_result);
 
                     // Write result to file
@@ -555,12 +511,12 @@ void run_test_suite(const TestConfig& config) {
                         std::string png_filename = config.figures_dir + "/freq" +
                                                   std::to_string(static_cast<int>(frequency)) +
                                                   "_ws" + std::to_string(window_size) +
-                                                  "_alpha" + std::to_string(static_cast<int>(alpha_total * 100)) + ".png";
+                                                  "_alpha" + std::to_string(static_cast<int>(alpha * 100)) + ".png";
 
                         write_homomorphic_to_csv(csv_filename, direct_result, composed_result,
                                                 config.sample_rate);
                         generate_homomorphic_plot_script(csv_filename, png_filename, window_size, frequency,
-                                                        alpha_total, alpha1, alpha2, config.sample_rate,
+                                                        alpha, beta, gamma, config.sample_rate,
                                                         result.mse_homomorphic, result.max_error_homomorphic);
 
                         int ret = system("python3 plot_homomorphic.py 2>/dev/null");
@@ -588,7 +544,7 @@ void run_test_suite(const TestConfig& config) {
                     double avg_mse = alpha_sum_mse_homomorphic / alpha_success;
                     std::cout << "→ Avg MSE: " << std::scientific
                               << std::setprecision(3) << avg_mse
-                              << " (" << alpha_success << "/" << config.n_random_alphas << " successful)\n";
+                              << " (" << alpha_success << "/" << config.n_random_samples << " successful)\n";
                 } else {
                     std::cout << "→ ALL FAILED\n";
                 }
@@ -626,17 +582,18 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
 
         if (arg == "--help" || arg == "-h") {
             std::cout << "FRFT Homomorphic Property Test Suite (Modified)\n\n";
-            std::cout << "Tests: FRFT(α) ≈ FRFT(α₂) ∘ FRFT(α₁) where α = α₁ + α₂\n";
-            std::cout << "Generates 1000 random alphas per frequency/window configuration\n";
-            std::cout << "Uses frame-by-frame comparison (no overlap-add)\n\n";
+            std::cout << "Tests: FRFT(α) ≈ FRFT(γ) ∘ FRFT(β) where α = β + γ\n";
+            std::cout << "Generates 1000 random β/γ pairs per frequency (β,γ ∈ [-2,2], α ∈ [-2,2])\n";
+            std::cout << "Single frame test with random window position\n\n";
             std::cout << "Usage: " << argv[0] << " [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --output FILE       Output filename (default: homomorphic_test/results.txt)\n";
             std::cout << "  --sample-rate SR    Sample rate in Hz (default: 44100)\n";
-            std::cout << "  --n-analysis N      Number of frames to analyze (default: 20)\n";
-            std::cout << "  --n-alphas N        Number of random alphas per config (default: 1000)\n";
+            std::cout << "  --n-analysis N      Number of frames to analyze (default: 20, not used in single frame mode)\n";
+            std::cout << "  --n-samples N       Number of random beta/gamma pairs per config (default: 1000)\n";
             std::cout << "  --max-figures N     Maximum figures to save (default: 40)\n";
-            std::cout << "  --window            Apply Hamming window to frames (default: off)\n";
+            std::cout << "  --window            Apply Hamming window to frames (default: ON)\n";
+            std::cout << "  --no-window         Disable Hamming window (use rectangular)\n";
             std::cout << "  --help             Show this help message\n";
             return false;
         }
@@ -649,14 +606,21 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
         else if (arg == "--n-analysis" && i + 1 < argc) {
             config.n_analysis = std::stoi(argv[++i]);
         }
+        else if (arg == "--n-samples" && i + 1 < argc) {
+            config.n_random_samples = std::stoi(argv[++i]);
+        }
         else if (arg == "--n-alphas" && i + 1 < argc) {
-            config.n_random_alphas = std::stoi(argv[++i]);
+            // Keep for backward compatibility, but use n_random_samples
+            config.n_random_samples = std::stoi(argv[++i]);
         }
         else if (arg == "--max-figures" && i + 1 < argc) {
             config.max_figures_to_save = std::stoi(argv[++i]);
         }
         else if (arg == "--window") {
             config.apply_window = true;
+        }
+        else if (arg == "--no-window") {
+            config.apply_window = false;
         }
     }
 
