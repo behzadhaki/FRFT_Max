@@ -295,9 +295,9 @@ void FRFTEngine::bizinter_real(const std::vector<double>& input, size_t n, std::
     // IFFT back into output
     ifft(conv_buffer_, n * 2, output);
 
-    // Scale by 2 to compensate for upsampling - CRITICAL: scale ALL 2*n elements
+    // Take real part first, then scale by 2 (matches Python: 2 * torch.real(ifft(...)))
     for (size_t i = 0; i < 2 * n; ++i) {
-        output[i] *= 2.0;
+        output[i] = Complex(2.0 * output[i].real(), 0.0);
     }
 }
 
