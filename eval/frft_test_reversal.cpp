@@ -24,7 +24,7 @@ struct ReversalTestConfig {
     double chirp_f_end = 800.0;     // End frequency (slow chirp)
     double alpha = -2.0;            // FRFT alpha for reversal
     int num_test_frames = 5;        // Test 5 frames
-    std::string figures_dir = "reversal_test/figures";
+    std::string figures_dir = "test_results/reversal_test/figures";
 };
 
 // Create directory recursively
@@ -286,6 +286,30 @@ void run_reversal_test_suite(const ReversalTestConfig& config) {
     std::cout << "Creating figures directory: " << config.figures_dir << "\n\n";
     create_directories(config.figures_dir);
 
+    // Open results file in the main reversal_test directory
+    std::string results_filename = "test_results/reversal_test/reversal_test_results.txt";
+    std::ofstream results_file(results_filename);
+    if (!results_file.is_open()) {
+        std::cerr << "Warning: Cannot create results file: " << results_filename << "\n";
+    } else {
+        // Write header to results file
+        results_file << "FRFT Reversal Test Results\n";
+        results_file << "==========================\n\n";
+        results_file << "Test Configuration:\n";
+        results_file << "  Alpha: " << config.alpha << " (expected to reverse signal)\n";
+        results_file << "  Sample Rate: " << config.sample_rate << " Hz\n";
+        results_file << "  Chirp per frame: " << config.chirp_f_start << " Hz → "
+                     << config.chirp_f_end << " Hz\n";
+        results_file << "  Number of test frames: " << config.num_test_frames << "\n";
+        results_file << "  Window Sizes: ";
+        for (size_t i = 0; i < config.window_sizes.size(); ++i) {
+            results_file << config.window_sizes[i];
+            if (i < config.window_sizes.size() - 1) results_file << ", ";
+        }
+        results_file << "\n\n";
+        results_file << std::string(70, '=') << "\n\n";
+    }
+
     // Create FRFT engine
     FRFTEngine engine;
 
@@ -298,6 +322,14 @@ void run_reversal_test_suite(const ReversalTestConfig& config) {
         double frame_duration = static_cast<double>(window_size) / config.sample_rate;
         std::cout << "Frame duration: " << (frame_duration * 1000.0) << " ms\n";
         std::cout << "Samples per frame: " << window_size << "\n\n";
+
+        // Write to results file
+        if (results_file.is_open()) {
+            results_file << "Window Size: " << window_size << "\n";
+            results_file << "Frame duration: " << (frame_duration * 1000.0) << " ms\n";
+            results_file << "Samples per frame: " << window_size << "\n";
+            results_file << std::string(70, '-') << "\n";
+        }
 
         // Test multiple frames
         for (int frame_num = 1; frame_num <= config.num_test_frames; ++frame_num) {
@@ -320,14 +352,26 @@ void run_reversal_test_suite(const ReversalTestConfig& config) {
             std::cout << "MSE=" << std::scientific << std::setprecision(2) << mse
                      << ", Corr=" << std::fixed << std::setprecision(6) << correlation;
 
+            std::string status;
             if (correlation > 0.99) {
                 std::cout << " ✓ REVERSAL CONFIRMED";
+                status = "REVERSAL CONFIRMED";
             } else if (correlation > 0.95) {
                 std::cout << " ⚠ PARTIAL REVERSAL";
+                status = "PARTIAL REVERSAL";
             } else {
                 std::cout << " ✗ NOT REVERSED";
+                status = "NOT REVERSED";
             }
             std::cout << "\n";
+
+            // Write to results file
+            if (results_file.is_open()) {
+                results_file << "  Frame " << frame_num << ": "
+                           << "MSE=" << std::scientific << std::setprecision(2) << mse
+                           << ", Corr=" << std::fixed << std::setprecision(6) << correlation
+                           << " - " << status << "\n";
+            }
 
             // Generate plot for this frame
             std::string csv_filename = "temp_signal_data.csv";
@@ -349,6 +393,18 @@ void run_reversal_test_suite(const ReversalTestConfig& config) {
             remove(csv_filename.c_str());
             remove("plot_signals.py");
         }
+
+        if (results_file.is_open()) {
+            results_file << "\n";
+        }
+    }
+
+    // Close results file
+    if (results_file.is_open()) {
+        results_file << std::string(70, '=') << "\n";
+        results_file << "Test Complete\n";
+        results_file.close();
+        std::cout << "\nResults saved to: " << results_filename << "\n";
     }
 
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";

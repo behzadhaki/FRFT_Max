@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 import argparse
+import seaborn as sns
 
 
 def load_timing_data(filename):
@@ -82,7 +83,7 @@ def plot_processing_time_and_complexity(timing_data, output_dir):
     ax.set_title('FRFT Processing Time vs Window Size', fontsize=16, fontweight='bold', pad=20)
     ax.set_xscale('log', base=2)
     ax.set_yscale('log')
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.legend(fontsize=11, loc='upper left', framealpha=0.95)
 
@@ -121,7 +122,7 @@ def plot_rtf(timing_data, output_dir):
     ax.set_ylabel('Real-Time Factor (RTF)', fontsize=14, fontweight='bold')
     ax.set_title('FRFT Real-Time Performance', fontsize=16, fontweight='bold', pad=20)
     ax.set_xscale('log', base=2)
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.legend(fontsize=11, loc='upper left', framealpha=0.95)
 
@@ -199,7 +200,7 @@ def plot_reconstruction_mse_vs_alpha(data, output_dir):
             ax.set_ylabel('Mean Squared Error (MSE)', fontsize=13, fontweight='bold')
 
         ax.set_yscale('log')
-        ax.grid(True, alpha=0.3, axis='y')
+        ax
         ax.tick_params(axis='y', which='major', labelsize=11)
         ax.set_ylim(global_min, global_max)
 
@@ -310,7 +311,7 @@ def plot_homomorphic_mse_vs_alpha_kde(data, output_dir):
 
         ax.set_xlabel('Alpha (α)' if idx == n_freqs - 1 else '', fontsize=20, fontweight='bold')
         ax.set_ylabel('MSE (median)', fontsize=20, fontweight='bold')
-        ax.grid(True, alpha=0.3, which='both')
+        ax
         ax.tick_params(axis='both', which='major', labelsize=16)
         if len(alpha_centers) > 0:
             ax.legend(fontsize=16, loc='upper right', framealpha=0.95)
@@ -518,7 +519,7 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies(data, output_dir):
 
     ax.set_xlabel('Alpha (α)', fontsize=22, fontweight='bold')
     ax.set_ylabel('MSE (median)', fontsize=22, fontweight='bold')
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=18)
     ax.set_xlim(-2, 2)
     if global_min != float('inf'):
@@ -638,7 +639,7 @@ def plot_homomorphic_mse_vs_alpha_all_frequencies_with_iqr(data, output_dir):
 
     ax.set_xlabel('Alpha (α)', fontsize=22, fontweight='bold')
     ax.set_ylabel('MSE (median with IQR)', fontsize=22, fontweight='bold')
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=18)
     ax.set_xlim(-2, 2)
     if global_min != float('inf'):
@@ -721,7 +722,7 @@ def plot_homomorphic_mse_vs_alpha(data, output_dir):
             ax.set_ylabel('Homomorphic MSE', fontsize=13, fontweight='bold')
 
         ax.set_yscale('log')
-        ax.grid(True, alpha=0.3, axis='y')
+        ax
         ax.tick_params(axis='y', which='major', labelsize=11)
         ax.set_ylim(global_min, global_max)
 
@@ -768,7 +769,7 @@ def plot_fft_comparison_mse(data, output_dir):
     ax.set_title('FFT Comparison: FRFT(α=1) vs FFT Magnitude Error', fontsize=16, fontweight='bold', pad=20)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.legend(fontsize=10, loc='best', framealpha=0.95, ncol=2)
 
@@ -813,7 +814,7 @@ def plot_fft_comparison_correlation(data, output_dir):
     ax.set_ylabel('Magnitude Spectrum Correlation', fontsize=14, fontweight='bold')
     ax.set_title('FFT Comparison: FRFT(α=1) vs FFT Correlation', fontsize=16, fontweight='bold', pad=20)
     ax.set_xscale('log')
-    ax.grid(True, alpha=0.3, which='both')
+    ax
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.legend(fontsize=10, loc='best', framealpha=0.95, ncol=2)
     ax.set_ylim(0.95, 1.005)
@@ -823,6 +824,1049 @@ def plot_fft_comparison_correlation(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"  → {filename}")
     plt.close()
+
+
+def plot_mss_grid_heatmap(data, freq, output_dir):
+    """
+    Create MSS and MSE heatmaps for grid analysis.
+
+    Args:
+        data: DataFrame with Alpha1, Alpha2, MSS_Homomorphic, MSE_Homomorphic columns
+        freq: Frequency value (None for aggregated)
+        output_dir: Output directory path
+    """
+    # Pivot data to create 2D grids for both MSS and MSE
+    pivot_mss = data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+    pivot_mse = data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+    # Sort indices to ensure proper ordering (ascending for both)
+    pivot_mss = pivot_mss.sort_index(ascending=True)
+    pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+    pivot_mse = pivot_mse.sort_index(ascending=True)
+    pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+    # Get alpha values for labels
+    alpha1_values = pivot_mss.columns.values
+    alpha2_values = pivot_mss.index.values
+
+    print(f"  Data shape: {pivot_mss.shape}")
+    print(f"  α₁ range: [{alpha1_values[0]:.1f}, {alpha1_values[-1]:.1f}]")
+    print(f"  α₂ range: [{alpha2_values[0]:.1f}, {alpha2_values[-1]:.1f}]")
+
+    n_rows, n_cols = pivot_mss.shape
+    tick_every = 4
+
+    # Prepare tick positions
+    x_tick_indices = np.arange(0, n_cols, tick_every)
+    if (n_cols - 1) not in x_tick_indices:
+        x_tick_indices = np.append(x_tick_indices, n_cols - 1)
+    x_tick_labels = [f'{alpha1_values[i]:.1f}' for i in x_tick_indices]
+
+    y_tick_indices = np.arange(0, n_rows, tick_every)
+    if (n_rows - 1) not in y_tick_indices:
+        y_tick_indices = np.append(y_tick_indices, n_rows - 1)
+    y_tick_labels = [f'{alpha2_values[i]:.1f}' for i in y_tick_indices]
+
+    # === MSS HEATMAP ===
+    fig, ax = plt.subplots(figsize=(14, 12))
+    im = ax.imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                   interpolation='nearest', origin='lower')
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(r'MSS($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)',
+                   fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    ax.set_xticks(x_tick_indices)
+    ax.set_xticklabels(x_tick_labels)
+    ax.set_yticks(y_tick_indices)
+    ax.set_yticklabels(y_tick_labels)
+
+    ax.set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    ax.set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
+
+    plt.tight_layout(pad=1.0)
+
+    if freq is None:
+        filename = output_dir / 'heatmap_mss_all_frequencies.png'
+    else:
+        filename = output_dir / f'heatmap_mss_freq_{int(freq)}Hz.png'
+
+    plt.savefig(filename, dpi=300)
+    print(f"  → {filename}")
+    plt.close()
+
+    # === MSE HEATMAP ===
+    fig, ax = plt.subplots(figsize=(14, 12))
+    im = ax.imshow(pivot_mse.values, cmap='viridis', aspect='auto',
+                   interpolation='nearest', origin='lower')
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(r'MSE($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)',
+                   fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    ax.set_xticks(x_tick_indices)
+    ax.set_xticklabels(x_tick_labels)
+    ax.set_yticks(y_tick_indices)
+    ax.set_yticklabels(y_tick_labels)
+
+    ax.set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    ax.set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
+
+    plt.tight_layout(pad=1.0)
+
+    if freq is None:
+        filename = output_dir / 'heatmap_mse_all_frequencies.png'
+    else:
+        filename = output_dir / f'heatmap_mse_freq_{int(freq)}Hz.png'
+
+    plt.savefig(filename, dpi=300)
+    print(f"  → {filename}")
+    plt.close()
+
+
+
+def plot_mss_vs_alpha_wrapped(results_df, output_dir):
+    """Plot MSS and MSE vs wrapped alpha for all frequencies."""
+
+    frequencies = sorted(results_df['Frequency'].unique())
+
+    # === MSS PLOT ===
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for freq in frequencies:
+        freq_data = results_df[results_df['Frequency'] == freq]
+        # Group by alpha and compute mean MSS
+        alpha_grouped = freq_data.groupby('Alpha')['MSS_Homomorphic'].mean().sort_index()
+        ax.plot(alpha_grouped.index, alpha_grouped.values, 'o-',
+                linewidth=2, markersize=4, alpha=0.7, label=f'{int(freq)} Hz')
+
+    ax.set_xlabel(r'$\alpha_1 + \alpha_2$', fontsize=20, fontweight='bold')
+    ax.set_ylabel(r'MSS($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)', fontsize=20, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=16)
+    ax.legend(fontsize=14, ncol=2)
+    ax
+    plt.tight_layout()
+
+    filename = output_dir / 'mss_vs_alpha_wrapped.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename}")
+    plt.close()
+
+    # === MSE PLOT ===
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for freq in frequencies:
+        freq_data = results_df[results_df['Frequency'] == freq]
+        # Group by alpha and compute mean MSE
+        alpha_grouped = freq_data.groupby('Alpha')['MSE_Homomorphic'].mean().sort_index()
+        ax.plot(alpha_grouped.index, alpha_grouped.values, 'o-',
+                linewidth=2, markersize=4, alpha=0.7, label=f'{int(freq)} Hz')
+
+    ax.set_xlabel(r'$\alpha_1 + \alpha_2$', fontsize=20, fontweight='bold')
+    ax.set_ylabel(r'MSE($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)', fontsize=20, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=16)
+    ax.legend(fontsize=14, ncol=2)
+    ax
+    plt.tight_layout()
+
+    filename = output_dir / 'mse_vs_alpha_wrapped.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename}")
+    plt.close()
+
+
+def plot_mss_grid_heatmap_with_alpha_sum_highlights(data, output_dir):
+    """
+    Create MSS and MSE heatmaps with special highlighting for cells where α₁ + α₂ = 0, ±1, ±2, ±3.
+    Only for aggregated data across all frequencies.
+
+    Args:
+        data: DataFrame with Alpha1, Alpha2, MSS_Homomorphic, MSE_Homomorphic columns
+        output_dir: Output directory path
+    """
+    # Pivot data to create 2D grids for both MSS and MSE
+    pivot_mss = data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+    pivot_mse = data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+    # Sort indices to ensure proper ordering (ascending for both)
+    pivot_mss = pivot_mss.sort_index(ascending=True)
+    pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+    pivot_mse = pivot_mse.sort_index(ascending=True)
+    pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+    # Get alpha values for labels
+    alpha1_values = pivot_mss.columns.values
+    alpha2_values = pivot_mss.index.values
+
+    n_rows, n_cols = pivot_mss.shape
+    tick_every = 4
+
+    # Prepare tick positions
+    x_tick_indices = np.arange(0, n_cols, tick_every)
+    if (n_cols - 1) not in x_tick_indices:
+        x_tick_indices = np.append(x_tick_indices, n_cols - 1)
+    x_tick_labels = [f'{alpha1_values[i]:.1f}' for i in x_tick_indices]
+
+    y_tick_indices = np.arange(0, n_rows, tick_every)
+    if (n_rows - 1) not in y_tick_indices:
+        y_tick_indices = np.append(y_tick_indices, n_rows - 1)
+    y_tick_labels = [f'{alpha2_values[i]:.1f}' for i in y_tick_indices]
+
+    # Create masks for each special alpha sum value with different colors
+    # Use a dictionary to store which cells belong to which alpha sum
+    alpha_sum_map = {}
+    for i, a2 in enumerate(alpha2_values):
+        for j, a1 in enumerate(alpha1_values):
+            alpha_sum = a1 + a2
+            # Check each target value
+            for target in [0, 1, -1, 2, -2, 3, -3]:
+                if abs(alpha_sum - target) < 0.05:
+                    alpha_sum_map[(i, j)] = target
+                    break
+
+    # Define colors for each alpha sum value (same color for ± pairs)
+    color_map = {
+        0: 'red',
+        1: 'blue',
+        -1: 'blue',
+        2: 'green',
+        -2: 'green',
+        3: 'orange',
+        -3: 'orange'
+    }
+
+    # === MSS HEATMAP WITH HIGHLIGHTS ===
+    fig, ax = plt.subplots(figsize=(14, 12))
+    im = ax.imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                   interpolation='nearest', origin='lower')
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(r'MSS($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)',
+                   fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    # Overlay highlights on special cells with different colors
+    for (i, j), target in alpha_sum_map.items():
+        color = color_map[target]
+        rect = plt.Rectangle((j-0.5, i-0.5), 1, 1,
+                             fill=False, edgecolor=color, linewidth=2.5)
+        ax.add_patch(rect)
+
+    ax.set_xticks(x_tick_indices)
+    ax.set_xticklabels(x_tick_labels)
+    ax.set_yticks(y_tick_indices)
+    ax.set_yticklabels(y_tick_labels)
+
+    ax.set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    ax.set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
+
+    # Add legend with combined entries for ± pairs
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='none', edgecolor='red', linewidth=2.5, label=r'$\alpha_1 + \alpha_2 = 0$'),
+        Patch(facecolor='none', edgecolor='blue', linewidth=2.5, label=r'$\alpha_1 + \alpha_2 = \pm 1$'),
+        Patch(facecolor='none', edgecolor='green', linewidth=2.5, label=r'$\alpha_1 + \alpha_2 = \pm 2$'),
+        Patch(facecolor='none', edgecolor='orange', linewidth=2.5, label=r'$\alpha_1 + \alpha_2 = \pm 3$'),
+    ]
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=12, framealpha=0.9)
+
+    plt.tight_layout(pad=1.0)
+
+    filename = output_dir / 'heatmap_mss_all_frequencies_highlighted.png'
+    plt.savefig(filename, dpi=300)
+    print(f"  → {filename}")
+    plt.close()
+
+    # === MSE HEATMAP WITH HIGHLIGHTS ===
+    fig, ax = plt.subplots(figsize=(14, 12))
+    im = ax.imshow(pivot_mse.values, cmap='viridis', aspect='auto',
+                   interpolation='nearest', origin='lower')
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(r'MSE($F_{\alpha_1+\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)',
+                   fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    # Overlay highlights on special cells with different colors
+    for (i, j), target in alpha_sum_map.items():
+        color = color_map[target]
+        rect = plt.Rectangle((j-0.5, i-0.5), 1, 1,
+                             fill=False, edgecolor=color, linewidth=2.5)
+        ax.add_patch(rect)
+
+    ax.set_xticks(x_tick_indices)
+    ax.set_xticklabels(x_tick_labels)
+    ax.set_yticks(y_tick_indices)
+    ax.set_yticklabels(y_tick_labels)
+
+    ax.set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    ax.set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
+
+    # Add legend
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=11, framealpha=0.9)
+
+    plt.tight_layout(pad=1.0)
+
+    filename = output_dir / 'heatmap_mse_all_frequencies_highlighted.png'
+    plt.savefig(filename, dpi=300)
+    print(f"  → {filename}")
+    plt.close()
+
+
+def plot_best_worst_case_examples(data, base_dir, output_dir):
+    """
+    Generate waveform comparison plots for worst, medium, and best MSS cases.
+
+    Creates plots showing the direct FRFT vs composed FRFT for:
+    - 20 worst cases (highest MSS)
+    - 20 medium cases (around median MSS)
+    - 20 best cases (lowest MSS, excluding zeros)
+
+    Args:
+        data: DataFrame with all grid results
+        base_dir: Base directory containing WAV files
+        output_dir: Output directory for comparison plots
+    """
+    import scipy.io.wavfile as wavfile
+
+    print("\n  Generating worst/medium/best case comparison plots...")
+
+    # Create subfolder for examples
+    examples_dir = output_dir / 'case_examples'
+    examples_dir.mkdir(exist_ok=True)
+
+    # Sort by MSS to find worst/medium/best cases
+    sorted_data = data.sort_values('MSS_Homomorphic', ascending=False)
+
+    # Get 20 worst cases (highest MSS)
+    worst_cases = sorted_data.head(20)
+
+    # Get 20 medium cases (around median)
+    median_idx = len(sorted_data) // 2
+    medium_cases = sorted_data.iloc[median_idx-10:median_idx+10]
+
+    # Get 20 best cases (lowest non-zero MSS)
+    non_zero = data[data['MSS_Homomorphic'] > 1e-6].sort_values('MSS_Homomorphic', ascending=True)
+    best_cases = non_zero.head(20)
+
+    print(f"    Worst cases:  MSS range [{worst_cases['MSS_Homomorphic'].min():.6f}, {worst_cases['MSS_Homomorphic'].max():.6f}]")
+    print(f"    Medium cases: MSS range [{medium_cases['MSS_Homomorphic'].min():.6f}, {medium_cases['MSS_Homomorphic'].max():.6f}]")
+    print(f"    Best cases:   MSS range [{best_cases['MSS_Homomorphic'].min():.6f}, {best_cases['MSS_Homomorphic'].max():.6f}]")
+
+    # Helper function to format alpha for filename
+    def format_alpha_filename(alpha):
+        return f"{alpha:.1f}".replace('-', 'm').replace('.', 'p')
+
+    # Helper function to load and plot comparison
+    def plot_comparison(case_data, case_name, case_num):
+        freq = case_data['Frequency']
+        a1 = case_data['Alpha1']
+        a2 = case_data['Alpha2']
+        mss = case_data['MSS_Homomorphic']
+        mse = case_data['MSE_Homomorphic']
+        alpha_wrapped = case_data['Alpha']
+
+        # Construct file paths
+        freq_str = f"freq_{int(freq)}"
+        a1_str = format_alpha_filename(a1)
+        a2_str = format_alpha_filename(a2)
+
+        alpha_file = base_dir / freq_str / f"a1_{a1_str}_a2_{a2_str}_alpha.wav"
+        composed_file = base_dir / freq_str / f"a1_{a1_str}_a2_{a2_str}_composed.wav"
+
+        # Check if files exist
+        if not alpha_file.exists() or not composed_file.exists():
+            print(f"    ⚠ Files not found for {case_name} #{case_num}")
+            return False
+
+        # Load audio files
+        sr1, alpha_signal = wavfile.read(alpha_file)
+        sr2, composed_signal = wavfile.read(composed_file)
+
+        # Normalize if needed
+        if alpha_signal.dtype == np.int16:
+            alpha_signal = alpha_signal.astype(np.float32) / 32768.0
+            composed_signal = composed_signal.astype(np.float32) / 32768.0
+        elif alpha_signal.dtype == np.int32:
+            alpha_signal = alpha_signal.astype(np.float32) / 2147483648.0
+            composed_signal = composed_signal.astype(np.float32) / 2147483648.0
+
+        # Create time axis
+        time = np.arange(len(alpha_signal)) / sr1
+
+        # Compute difference
+        diff = alpha_signal - composed_signal
+
+        # Create figure with 3 subplots
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 10))
+
+        # Plot 1: Direct FRFT
+        ax1.plot(time, alpha_signal, 'b-', linewidth=0.5, alpha=0.8)
+        ax1.set_ylabel(r'$F_{\alpha_1+\alpha_2}$', fontsize=14, fontweight='bold')
+        ax1.set_title(f'{case_name} #{case_num}: {freq:.0f} Hz, α₁={a1:.1f}, α₂={a2:.1f}, α={alpha_wrapped:.1f}',
+                      fontsize=16, fontweight='bold')
+        ax1
+        ax1.set_xlim([time[0], time[-1]])
+
+        # Plot 2: Composed FRFT
+        ax2.plot(time, composed_signal, 'g-', linewidth=0.5, alpha=0.8)
+        ax2.set_ylabel(r'$F_{\alpha_2} \cdot F_{\alpha_1}$', fontsize=14, fontweight='bold')
+        ax2
+        ax2.set_xlim([time[0], time[-1]])
+
+        # Plot 3: Difference
+        ax3.plot(time, diff, 'r-', linewidth=0.5, alpha=0.8)
+        ax3.set_ylabel('Difference', fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Time (s)', fontsize=14, fontweight='bold')
+        ax3
+        ax3.set_xlim([time[0], time[-1]])
+
+        # Add metrics text box
+        textstr = f'MSS = {mss:.6f}\nMSE = {mse:.6e}'
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        ax3.text(0.02, 0.98, textstr, transform=ax3.transAxes, fontsize=12,
+                 verticalalignment='top', bbox=props)
+
+        plt.tight_layout()
+
+        # Save figure
+        case_type = case_name.lower().replace(" ", "_")
+        filename = examples_dir / f'{case_type}_{case_num:02d}_freq{int(freq)}_a1_{a1_str}_a2_{a2_str}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        return True
+
+    # Generate plots for all cases
+    plot_count = 0
+
+    print("    Generating worst case plots...")
+    for i, (idx, case) in enumerate(worst_cases.iterrows(), 1):
+        if plot_comparison(case, 'Worst Case', i):
+            plot_count += 1
+
+    print("    Generating medium case plots...")
+    for i, (idx, case) in enumerate(medium_cases.iterrows(), 1):
+        if plot_comparison(case, 'Medium Case', i):
+            plot_count += 1
+
+    print("    Generating best case plots...")
+    for i, (idx, case) in enumerate(best_cases.iterrows(), 1):
+        if plot_comparison(case, 'Best Case', i):
+            plot_count += 1
+
+    print(f"    → Generated {plot_count} case example plots in {examples_dir}/")
+
+    return plot_count
+
+
+def plot_commutativity_histograms(comm_data, output_dir, window_size=None):
+    """
+    Plot histograms for commutativity analysis (MSS and MSE).
+
+    Args:
+        comm_data: DataFrame with MSS_Commutativity and MSE_Commutativity columns
+        output_dir: Output directory path
+        window_size: Window size (for windowed mode) or None
+    """
+    # MSS Histogram
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(comm_data['MSS_Commutativity'], bins=50, edgecolor='black', alpha=0.7)
+    ax.set_xlabel(r'MSS($F_{\alpha_1} \cdot F_{\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Count', fontsize=14, fontweight='bold')
+    ax.axvline(comm_data['MSS_Commutativity'].mean(), color='red', linestyle='--',
+               linewidth=2, label=f'Mean = {comm_data["MSS_Commutativity"].mean():.4f}')
+    ax.axvline(comm_data['MSS_Commutativity'].median(), color='green', linestyle='--',
+               linewidth=2, label=f'Median = {comm_data["MSS_Commutativity"].median():.4f}')
+    ax.legend(fontsize=12)
+    ax
+    ax.tick_params(axis='both', which='major', labelsize=12)
+
+    if window_size:
+        ax.set_title(f'Commutativity MSS Distribution - Window {window_size}', fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+
+    if window_size:
+        mss_hist_file = output_dir / f"commutativity_mss_histogram_win_{window_size}.png"
+    else:
+        mss_hist_file = output_dir / "commutativity_mss_histogram.png"
+    plt.savefig(mss_hist_file, dpi=300)
+    print(f"  → {mss_hist_file}")
+    plt.close()
+
+    # MSE Histogram
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(comm_data['MSE_Commutativity'], bins=50, edgecolor='black', alpha=0.7)
+    ax.set_xlabel(r'MSE($F_{\alpha_1} \cdot F_{\alpha_2}$, $F_{\alpha_2} \cdot F_{\alpha_1}$)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Count', fontsize=14, fontweight='bold')
+    ax.axvline(comm_data['MSE_Commutativity'].mean(), color='red', linestyle='--',
+               linewidth=2, label=f'Mean = {comm_data["MSE_Commutativity"].mean():.4e}')
+    ax.axvline(comm_data['MSE_Commutativity'].median(), color='green', linestyle='--',
+               linewidth=2, label=f'Median = {comm_data["MSE_Commutativity"].median():.4e}')
+    ax.legend(fontsize=12)
+    ax
+    ax.tick_params(axis='both', which='major', labelsize=12)
+
+    if window_size:
+        ax.set_title(f'Commutativity MSE Distribution - Window {window_size}', fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+
+    if window_size:
+        mse_hist_file = output_dir / f"commutativity_mse_histogram_win_{window_size}.png"
+    else:
+        mse_hist_file = output_dir / "commutativity_mse_histogram.png"
+    plt.savefig(mse_hist_file, dpi=300)
+    print(f"  → {mse_hist_file}")
+    plt.close()
+
+
+def plot_window_size_comparison(results_df, output_dir):
+    """Plot comparison of MSS loss across different window sizes."""
+
+    if 'Window' not in results_df.columns:
+        print("  Skipping window comparison (not in windowed mode)")
+        return 0
+
+    window_sizes = sorted(results_df['Window'].unique())
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+
+    plot_count = 0
+    for idx, freq in enumerate(sorted(results_df['Frequency'].unique())):
+        if idx >= 4:
+            break
+
+        ax = axes[idx]
+        freq_data = results_df[results_df['Frequency'] == freq]
+
+        # Plot MSS for each window size
+        for window_size in window_sizes:
+            window_data = freq_data[freq_data['Window'] == window_size]
+
+            # Group by alpha (sum of alpha1 and alpha2) and compute mean
+            alpha_grouped = window_data.groupby('Alpha')['MSS_Homomorphic'].mean().sort_index()
+
+            ax.plot(alpha_grouped.index, alpha_grouped.values,
+                    marker='o', markersize=4, linewidth=2,
+                    label=f'Window {window_size}', alpha=0.8)
+
+        ax.set_xlabel(r'$\alpha$ (wrapped)', fontsize=16, fontweight='bold')
+        ax.set_ylabel('MSS Loss', fontsize=16, fontweight='bold')
+        ax.set_title(f'{int(freq)} Hz', fontsize=18, fontweight='bold')
+        ax
+        ax.legend(fontsize=12, framealpha=0.9)
+        ax.tick_params(axis='both', labelsize=14)
+        ax.set_xlim(-2, 2)
+        plot_count += 1
+
+    plt.suptitle('MSS Loss vs Alpha: Window Size Comparison',
+                 fontsize=20, fontweight='bold', y=1.00)
+    plt.tight_layout()
+
+    filename = output_dir / 'window_size_comparison.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → comparisons/{filename.name}")
+    plt.close()
+
+    return 1
+
+
+def add_alpha_sum_highlights(ax, alpha1_values, alpha2_values, extent):
+    """
+    Overlay box highlights on heatmap for cells where α₁ + α₂ = 0, ±1, ±2, ±3.
+
+    Args:
+        ax: Matplotlib axis
+        alpha1_values: Array of α₁ values (columns)
+        alpha2_values: Array of α₂ values (rows)
+        extent: [left, right, bottom, top] extent used in imshow
+    """
+    # Define the target sums and their visual properties
+    # Group ±1, ±2, ±3 together with same style
+    target_groups = {
+        0: {'color': 'white', 'linewidth': 3.0, 'linestyle': '-', 'label': r'$\alpha_1 + \alpha_2 = 0$'},
+        1: {'color': 'cyan', 'linewidth': 2.5, 'linestyle': '--', 'label': r'$\alpha_1 + \alpha_2 = \pm 1$'},
+        2: {'color': 'lime', 'linewidth': 2.0, 'linestyle': '-.', 'label': r'$\alpha_1 + \alpha_2 = \pm 2$'},
+        3: {'color': 'magenta', 'linewidth': 1.8, 'linestyle': ':', 'label': r'$\alpha_1 + \alpha_2 = \pm 3$'},
+    }
+
+    # Map each target to its group style
+    target_styles = {
+        0: target_groups[0],
+        1: target_groups[1],
+        -1: target_groups[1],  # Same as +1
+        2: target_groups[2],
+        -2: target_groups[2],  # Same as +2
+        3: target_groups[3],
+        -3: target_groups[3],  # Same as +3
+    }
+
+    # Calculate step sizes
+    alpha1_step = alpha1_values[1] - alpha1_values[0] if len(alpha1_values) > 1 else 0.1
+    alpha2_step = alpha2_values[1] - alpha2_values[0] if len(alpha2_values) > 1 else 0.1
+
+    # Track which legend entries we've added
+    added_legend = {}
+
+    # Find and highlight cells for each target sum
+    for target, style in target_styles.items():
+        # Find all cells where α₁ + α₂ ≈ target
+        for a1 in alpha1_values:
+            for a2 in alpha2_values:
+                alpha_sum = a1 + a2
+
+                # Check if this cell matches the target (within tolerance)
+                # Use smaller tolerance for more precise matching
+                tolerance = min(alpha1_step, alpha2_step) * 0.45
+                if abs(alpha_sum - target) < tolerance:
+                    # Calculate cell boundaries centered on alpha values
+                    # These are the actual coordinates in data space
+                    left = a1 - alpha1_step / 2
+                    right = a1 + alpha1_step / 2
+                    bottom = a2 - alpha2_step / 2
+                    top = a2 + alpha2_step / 2
+
+                    width = right - left
+                    height = top - bottom
+
+                    # Draw rectangle around this cell
+                    rect = plt.Rectangle((left, bottom),
+                                         width, height,
+                                         fill=False,
+                                         edgecolor=style['color'],
+                                         linewidth=style['linewidth'],
+                                         linestyle=style['linestyle'],
+                                         alpha=0.95,
+                                         zorder=10,
+                                         transform=ax.transData)  # Use data coordinates
+                    ax.add_patch(rect)
+
+        # Add to legend only once per group (not for each ± pair)
+        group_key = abs(target)  # Use absolute value as key
+        if group_key not in added_legend:
+            # Get the style for the group
+            group_style = target_groups[group_key]
+            added_legend[group_key] = plt.Line2D([0], [0],
+                                                 color=group_style['color'],
+                                                 linewidth=group_style['linewidth'],
+                                                 linestyle=group_style['linestyle'],
+                                                 label=group_style['label'])
+
+    # Add legend with unique entries only - LARGER font
+    if added_legend:
+        legend_handles = [added_legend[k] for k in sorted(added_legend.keys())]
+        ax.legend(handles=legend_handles, loc='upper right',
+                  fontsize=14, framealpha=0.95, edgecolor='white', fancybox=True)
+
+
+def plot_window_size_statistics(results_df, output_dir):
+    """Plot statistics comparing different window sizes."""
+
+    if 'Window' not in results_df.columns:
+        print("  Skipping window statistics (not in windowed mode)")
+        return 0
+
+    window_sizes = sorted(results_df['Window'].unique())
+
+    # Compute statistics for each window size
+    stats = []
+    for window_size in window_sizes:
+        window_data = results_df[results_df['Window'] == window_size]
+        stats.append({
+            'Window': window_size,
+            'Mean_MSS': window_data['MSS_Homomorphic'].mean(),
+            'Median_MSS': window_data['MSS_Homomorphic'].median(),
+            'Std_MSS': window_data['MSS_Homomorphic'].std(),
+            'Mean_MSE': window_data['MSE_Homomorphic'].mean(),
+            'Median_MSE': window_data['MSE_Homomorphic'].median(),
+        })
+
+    stats_df = pd.DataFrame(stats)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # MSS Mean
+    axes[0, 0].bar(range(len(window_sizes)), stats_df['Mean_MSS'], color='steelblue', alpha=0.8)
+    axes[0, 0].set_xlabel('Window Size', fontsize=16, fontweight='bold')
+    axes[0, 0].set_ylabel('Mean MSS Loss', fontsize=16, fontweight='bold')
+    axes[0, 0].set_title('Mean MSS Loss by Window Size', fontsize=18, fontweight='bold')
+    axes[0, 0].set_xticks(range(len(window_sizes)))
+    axes[0, 0].set_xticklabels(window_sizes)
+    axes[0, 0].tick_params(axis='both', labelsize=14)
+    axes[0, 0]
+
+    # MSS Std
+    axes[0, 1].bar(range(len(window_sizes)), stats_df['Std_MSS'], color='coral', alpha=0.8)
+    axes[0, 1].set_xlabel('Window Size', fontsize=16, fontweight='bold')
+    axes[0, 1].set_ylabel('Std MSS Loss', fontsize=16, fontweight='bold')
+    axes[0, 1].set_title('Standard Deviation of MSS Loss', fontsize=18, fontweight='bold')
+    axes[0, 1].set_xticks(range(len(window_sizes)))
+    axes[0, 1].set_xticklabels(window_sizes)
+    axes[0, 1].tick_params(axis='both', labelsize=14)
+    axes[0, 1]
+
+    # MSE Mean
+    axes[1, 0].bar(range(len(window_sizes)), stats_df['Mean_MSE'], color='forestgreen', alpha=0.8)
+    axes[1, 0].set_xlabel('Window Size', fontsize=16, fontweight='bold')
+    axes[1, 0].set_ylabel('Mean MSE Loss', fontsize=16, fontweight='bold')
+    axes[1, 0].set_title('Mean MSE Loss by Window Size', fontsize=18, fontweight='bold')
+    axes[1, 0].set_xticks(range(len(window_sizes)))
+    axes[1, 0].set_xticklabels(window_sizes)
+    axes[1, 0].tick_params(axis='both', labelsize=14)
+    axes[1, 0]
+
+    # Box plot of MSS distribution
+    mss_by_window = [results_df[results_df['Window'] == w]['MSS_Homomorphic'].values
+                     for w in window_sizes]
+    bp = axes[1, 1].boxplot(mss_by_window, tick_labels=window_sizes, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('lightblue')
+        patch.set_alpha(0.7)
+    axes[1, 1].set_xlabel('Window Size', fontsize=16, fontweight='bold')
+    axes[1, 1].set_ylabel('MSS Loss', fontsize=16, fontweight='bold')
+    axes[1, 1].set_title('MSS Loss Distribution by Window Size', fontsize=18, fontweight='bold')
+    axes[1, 1].tick_params(axis='both', labelsize=14)
+    axes[1, 1]
+
+    plt.tight_layout()
+
+    filename = output_dir / 'window_size_statistics.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → comparisons/{filename.name}")
+    plt.close()
+
+    return 1
+
+
+def plot_mixed_all_windows_per_frequency(results_df, output_dir):
+    """
+    Generate heatmaps with all windows mixed for each frequency.
+    Averages MSS/MSE across all window sizes for each (alpha1, alpha2) pair.
+    """
+    if 'Window' not in results_df.columns:
+        return 0
+
+    plot_count = 0
+    frequencies = sorted(results_df['Frequency'].unique())
+
+    for freq in frequencies:
+        freq_data = results_df[results_df['Frequency'] == freq]
+
+        # Average across all windows
+        agg_data = freq_data.groupby(['Alpha1', 'Alpha2']).agg({
+            'MSS_Homomorphic': 'mean',
+            'MSE_Homomorphic': 'mean'
+        }).reset_index()
+
+        pivot_mss = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+        pivot_mse = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+        # Sort to ensure proper ordering
+        pivot_mss = pivot_mss.sort_index(ascending=True)
+        pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+        pivot_mse = pivot_mse.sort_index(ascending=True)
+        pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+        # Get alpha values for proper extent
+        alpha1_values = pivot_mss.columns.values
+        alpha2_values = pivot_mss.index.values
+
+        fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+
+        # Define extent for imshow
+        extent = [alpha1_values[0], alpha1_values[-1],
+                  alpha2_values[0], alpha2_values[-1]]
+
+        # MSS heatmap
+        im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                            interpolation='nearest', origin='lower',
+                            extent=extent)
+        cbar = plt.colorbar(im, ax=axes[0])
+        cbar.set_label('MSS Loss (Avg over all windows)', fontsize=18, fontweight='bold')
+        cbar.ax.tick_params(labelsize=14)
+        axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+        axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+        axes[0].set_title(f'MSS Loss - {int(freq)} Hz - All Windows Mixed',
+                          fontsize=20, fontweight='bold')
+        axes[0].tick_params(axis='both', labelsize=16)
+        axes[0]
+
+        # Add alpha sum highlights
+        add_alpha_sum_highlights(axes[0], alpha1_values, alpha2_values, extent)
+
+        # MSE heatmap
+        im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
+                            interpolation='nearest', origin='lower',
+                            extent=extent)
+        cbar = plt.colorbar(im, ax=axes[1])
+        cbar.set_label('MSE Loss (Avg over all windows)', fontsize=18, fontweight='bold')
+        cbar.ax.tick_params(labelsize=14)
+        axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+        axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+        axes[1].set_title(f'MSE Loss - {int(freq)} Hz - All Windows Mixed',
+                          fontsize=20, fontweight='bold')
+        axes[1].tick_params(axis='both', labelsize=16)
+        axes[1]
+
+        # Add alpha sum highlights
+        add_alpha_sum_highlights(axes[1], alpha1_values, alpha2_values, extent)
+
+        plt.tight_layout()
+        filename = output_dir / f'heatmap_freq_{int(freq)}Hz_all_windows_mixed.png'
+        plt.savefig(filename, dpi=300)
+        print(f"    → per_frequency/{filename.name}")
+        plt.close()
+        plot_count += 1
+
+    return plot_count
+
+
+def plot_mixed_all_frequencies_per_window(results_df, output_dir):
+    """
+    Generate heatmaps with all frequencies mixed for each window size.
+    Averages MSS/MSE across all frequencies for each (alpha1, alpha2) pair.
+    """
+    if 'Window' not in results_df.columns:
+        return 0
+
+    plot_count = 0
+    window_sizes = sorted(results_df['Window'].unique())
+
+    for window_size in window_sizes:
+        window_data = results_df[results_df['Window'] == window_size]
+
+        # Average across all frequencies
+        agg_data = window_data.groupby(['Alpha1', 'Alpha2']).agg({
+            'MSS_Homomorphic': 'mean',
+            'MSE_Homomorphic': 'mean'
+        }).reset_index()
+
+        pivot_mss = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+        pivot_mse = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+        # Sort to ensure proper ordering
+        pivot_mss = pivot_mss.sort_index(ascending=True)
+        pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+        pivot_mse = pivot_mse.sort_index(ascending=True)
+        pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+        # Get alpha values for proper extent
+        alpha1_values = pivot_mss.columns.values
+        alpha2_values = pivot_mss.index.values
+
+        fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+
+        # Define extent for imshow
+        extent = [alpha1_values[0], alpha1_values[-1],
+                  alpha2_values[0], alpha2_values[-1]]
+
+        # MSS heatmap
+        im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                            interpolation='nearest', origin='lower',
+                            extent=extent)
+        cbar = plt.colorbar(im, ax=axes[0])
+        cbar.set_label('MSS Loss (Avg over all frequencies)', fontsize=18, fontweight='bold')
+        cbar.ax.tick_params(labelsize=14)
+
+        # Set ticks to align with cell centers
+        tick_step = 4  # Show every 4th tick
+        x_ticks = alpha1_values[::tick_step]
+        y_ticks = alpha2_values[::tick_step]
+        axes[0].set_xticks(x_ticks)
+        axes[0].set_yticks(y_ticks)
+        axes[0].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+        axes[0].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+        axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+        axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+        axes[0].set_title(f'MSS Loss - Window {window_size} - All Frequencies Mixed',
+                          fontsize=20, fontweight='bold')
+        axes[0].tick_params(axis='both', labelsize=16)
+        axes[0]
+
+        # MSE heatmap
+        im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
+                            interpolation='nearest', origin='lower',
+                            extent=extent)
+        cbar = plt.colorbar(im, ax=axes[1])
+        cbar.set_label('MSE Loss (Avg over all frequencies)', fontsize=18, fontweight='bold')
+        cbar.ax.tick_params(labelsize=14)
+
+        # Set ticks to align with cell centers
+        axes[1].set_xticks(x_ticks)
+        axes[1].set_yticks(y_ticks)
+        axes[1].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+        axes[1].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+        axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+        axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+        axes[1].set_title(f'MSE Loss - Window {window_size} - All Frequencies Mixed',
+                          fontsize=20, fontweight='bold')
+        axes[1].tick_params(axis='both', labelsize=16)
+        axes[1]
+
+        plt.tight_layout()
+        filename = output_dir / f'heatmap_win_{window_size}_all_frequencies_mixed.png'
+        plt.savefig(filename, dpi=300)
+        print(f"    → mixed/{filename.name}")
+        plt.close()
+        plot_count += 1
+
+    return plot_count
+
+
+def plot_mixed_all_windows_and_frequencies(results_df, output_dir):
+    """
+    Generate heatmaps with everything mixed (all windows and all frequencies).
+    Averages MSS/MSE across all windows and frequencies for each (alpha1, alpha2) pair.
+    """
+    if 'Window' not in results_df.columns:
+        return 0
+
+    # Average across ALL windows and ALL frequencies
+    agg_data = results_df.groupby(['Alpha1', 'Alpha2']).agg({
+        'MSS_Homomorphic': 'mean',
+        'MSE_Homomorphic': 'mean'
+    }).reset_index()
+
+    pivot_mss = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+    pivot_mse = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+    # Sort to ensure proper ordering
+    pivot_mss = pivot_mss.sort_index(ascending=True)
+    pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+    pivot_mse = pivot_mse.sort_index(ascending=True)
+    pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+    # Get alpha values for proper extent
+    alpha1_values = pivot_mss.columns.values
+    alpha2_values = pivot_mss.index.values
+
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+
+    # Define extent for imshow
+    extent = [alpha1_values[0], alpha1_values[-1],
+              alpha2_values[0], alpha2_values[-1]]
+
+    # MSS heatmap
+    im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                        interpolation='nearest', origin='lower',
+                        extent=extent)
+    cbar = plt.colorbar(im, ax=axes[0])
+    cbar.set_label('MSS Loss (Avg over all windows & frequencies)', fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    # Set ticks to align with cell centers
+    tick_step = 4  # Show every 4th tick
+    x_ticks = alpha1_values[::tick_step]
+    y_ticks = alpha2_values[::tick_step]
+    axes[0].set_xticks(x_ticks)
+    axes[0].set_yticks(y_ticks)
+    axes[0].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+    axes[0].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+    axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    axes[0].set_title('MSS Loss - All Windows & Frequencies Mixed',
+                      fontsize=20, fontweight='bold')
+    axes[0].tick_params(axis='both', labelsize=16)
+    axes[0]
+
+    # MSE heatmap
+    im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
+                        interpolation='nearest', origin='lower',
+                        extent=extent)
+    cbar = plt.colorbar(im, ax=axes[1])
+    cbar.set_label('MSE Loss (Avg over all windows & frequencies)', fontsize=18, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+
+    # Set ticks to align with cell centers
+    axes[1].set_xticks(x_ticks)
+    axes[1].set_yticks(y_ticks)
+    axes[1].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+    axes[1].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+    axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+    axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+    axes[1].set_title('MSE Loss - All Windows & Frequencies Mixed',
+                      fontsize=20, fontweight='bold')
+    axes[1].tick_params(axis='both', labelsize=16)
+    axes[1]
+
+    plt.tight_layout()
+    filename = output_dir / 'heatmap_all_windows_all_frequencies_mixed.png'
+    plt.savefig(filename, dpi=300)
+    print(f"    → mixed/{filename.name}")
+    plt.close()
+
+    return 1
+
+
+def plot_mixed_commutativity_all_windows(comm_df, output_dir):
+    """
+    Generate commutativity histograms with all windows mixed.
+    """
+    if 'Window' not in comm_df.columns or len(comm_df) == 0:
+        return 0
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # MSS histogram
+    ax = axes[0]
+    ax.hist(comm_df['MSS_Commutativity'], bins=50, color='steelblue', alpha=0.7, edgecolor='black')
+    ax.axvline(comm_df['MSS_Commutativity'].mean(), color='red', linestyle='--',
+               linewidth=2, label=f"Mean: {comm_df['MSS_Commutativity'].mean():.6f}")
+    ax.axvline(comm_df['MSS_Commutativity'].median(), color='green', linestyle='--',
+               linewidth=2, label=f"Median: {comm_df['MSS_Commutativity'].median():.6f}")
+    ax.set_xlabel('MSS Commutativity Loss', fontsize=16, fontweight='bold')
+    ax.set_ylabel('Count', fontsize=16, fontweight='bold')
+    ax.set_title('MSS Commutativity - All Windows Mixed', fontsize=18, fontweight='bold')
+    ax.legend(fontsize=14, framealpha=0.9)
+    ax.tick_params(axis='both', labelsize=14)
+    ax
+
+    # MSE histogram
+    ax = axes[1]
+    ax.hist(comm_df['MSE_Commutativity'], bins=50, color='coral', alpha=0.7, edgecolor='black')
+    ax.axvline(comm_df['MSE_Commutativity'].mean(), color='red', linestyle='--',
+               linewidth=2, label=f"Mean: {comm_df['MSE_Commutativity'].mean():.6e}")
+    ax.axvline(comm_df['MSE_Commutativity'].median(), color='green', linestyle='--',
+               linewidth=2, label=f"Median: {comm_df['MSE_Commutativity'].median():.6e}")
+    ax.set_xlabel('MSE Commutativity Loss', fontsize=16, fontweight='bold')
+    ax.set_ylabel('Count', fontsize=16, fontweight='bold')
+    ax.set_title('MSE Commutativity - All Windows Mixed', fontsize=18, fontweight='bold')
+    ax.legend(fontsize=14, framealpha=0.9)
+    ax.tick_params(axis='both', labelsize=14)
+    ax
+
+    plt.tight_layout()
+    filename = output_dir / 'commutativity_histograms_all_windows_mixed.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → commutativity/{filename.name}")
+    plt.close()
+
+    return 1
 
 
 def main():
@@ -841,12 +1885,14 @@ Examples:
         """
     )
 
-    parser.add_argument('--reconstruction', default='reconstruction_test',
+    parser.add_argument('--reconstruction', default='test_results/reconstruction_test',
                         help='Reconstruction test directory (default: reconstruction_test)')
-    parser.add_argument('--homomorphic', default='homomorphic_test',
+    parser.add_argument('--homomorphic', default='test_results/homomorphic_test',
                         help='Homomorphic test directory (default: homomorphic_test)')
     parser.add_argument('--fft', default='fft_comparison',
                         help='FFT comparison test directory (default: fft_comparison)')
+    parser.add_argument('--mss', default='test_results/homomorphism_mss_grid',
+                        help='MSS grid analysis directory (default: homomorphism_mss_grid)')
 
     args = parser.parse_args()
 
@@ -923,6 +1969,318 @@ Examples:
     else:
         print(f"\n⚠ Skipping FFT comparison test (directory not found: {fft_dir})")
 
+    # Process MSS Grid Analysis
+    mss_dir = Path(args.mss)
+    if mss_dir.exists():
+        print(f"\n[Processing MSS Grid Analysis: {mss_dir}]")
+
+        is_windowed = "windowed" in str(mss_dir)
+        output_dir = mss_dir / 'plots'
+        output_dir.mkdir(exist_ok=True)
+
+        if is_windowed:
+            print("  Detected WINDOWED mode")
+
+            # Find all window-specific result files
+            result_files = sorted(mss_dir.glob("mss_grid_results_win_*.txt"))
+            comm_files = sorted(mss_dir.glob("mss_commutativity_results_win_*.txt"))
+
+            if not result_files:
+                print("  ⚠ No windowed result files found")
+            else:
+                # Create subdirectories for organization
+                per_window_dir = output_dir / 'per_window'
+                per_freq_dir = output_dir / 'per_frequency'
+                mixed_dir = output_dir / 'mixed'
+                comparison_dir = output_dir / 'comparisons'
+                commutativity_dir = output_dir / 'commutativity'
+
+                per_window_dir.mkdir(exist_ok=True)
+                per_freq_dir.mkdir(exist_ok=True)
+                mixed_dir.mkdir(exist_ok=True)
+                comparison_dir.mkdir(exist_ok=True)
+                commutativity_dir.mkdir(exist_ok=True)
+
+                # Load all results
+                all_results = []
+                for result_file in result_files:
+                    data = load_results_data(result_file)
+                    if data is not None:
+                        all_results.append(data)
+
+                if all_results:
+                    results_df = pd.concat(all_results, ignore_index=True)
+                    window_sizes = sorted(results_df['Window'].unique())
+
+                    print(f"  Found {len(window_sizes)} window sizes: {window_sizes}")
+                    print(f"  Organizing plots into subdirectories...")
+
+                    # Generate plots for each window size
+                    for window_size in window_sizes:
+                        print(f"\n  Processing window size {window_size}...")
+                        window_data = results_df[results_df['Window'] == window_size]
+
+                        # Create subdirectory for this window
+                        window_subdir = per_window_dir / f'win_{window_size}'
+                        window_subdir.mkdir(exist_ok=True)
+
+                        # Heatmap for each frequency
+                        frequencies = sorted(window_data['Frequency'].unique())
+                        for freq in frequencies:
+                            freq_data = window_data[window_data['Frequency'] == freq]
+                            pivot_mss = freq_data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+                            pivot_mse = freq_data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+                            # Sort to ensure proper ordering
+                            pivot_mss = pivot_mss.sort_index(ascending=True)
+                            pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+                            pivot_mse = pivot_mse.sort_index(ascending=True)
+                            pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+                            # Get alpha values for proper extent
+                            alpha1_values = pivot_mss.columns.values
+                            alpha2_values = pivot_mss.index.values
+
+                            # Define extent for imshow
+                            extent = [alpha1_values[0], alpha1_values[-1],
+                                      alpha2_values[0], alpha2_values[-1]]
+
+                            # Create custom heatmap for windowed data
+                            fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+
+                            # MSS heatmap
+                            im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                                                interpolation='nearest', origin='lower',
+                                                extent=extent)
+                            cbar = plt.colorbar(im, ax=axes[0])
+                            cbar.set_label('MSS Loss', fontsize=18, fontweight='bold')
+                            cbar.ax.tick_params(labelsize=14)
+                            axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+                            axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+                            axes[0].set_title(f'MSS Loss - {int(freq)} Hz - Window {window_size}',
+                                              fontsize=20, fontweight='bold')
+                            axes[0].tick_params(axis='both', labelsize=16)
+                            axes[0]
+
+                            # Add alpha sum highlights
+                            add_alpha_sum_highlights(axes[0], alpha1_values, alpha2_values, extent)
+
+                            # MSE heatmap
+                            im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
+                                                interpolation='nearest', origin='lower',
+                                                extent=extent)
+                            cbar = plt.colorbar(im, ax=axes[1])
+                            cbar.set_label('MSE Loss', fontsize=18, fontweight='bold')
+                            cbar.ax.tick_params(labelsize=14)
+                            axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+                            axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+                            axes[1].set_title(f'MSE Loss - {int(freq)} Hz - Window {window_size}',
+                                              fontsize=20, fontweight='bold')
+                            axes[1].tick_params(axis='both', labelsize=16)
+                            axes[1]
+
+                            # Add alpha sum highlights
+                            add_alpha_sum_highlights(axes[1], alpha1_values, alpha2_values, extent)
+
+                            plt.tight_layout()
+                            filename = window_subdir / f'heatmap_freq_{int(freq)}Hz.png'
+                            plt.savefig(filename, dpi=300)
+                            print(f"    → per_window/win_{window_size}/{filename.name}")
+                            plt.close()
+                            total_plots += 1
+
+                        # Aggregated heatmap for this window size (all frequencies)
+                        agg_data = window_data.groupby(['Alpha1', 'Alpha2']).agg({
+                            'MSS_Homomorphic': 'mean',
+                            'MSE_Homomorphic': 'mean'
+                        }).reset_index()
+
+                        pivot_mss = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSS_Homomorphic')
+                        pivot_mse = agg_data.pivot(index='Alpha2', columns='Alpha1', values='MSE_Homomorphic')
+
+                        # Sort to ensure proper ordering
+                        pivot_mss = pivot_mss.sort_index(ascending=True)
+                        pivot_mss = pivot_mss[sorted(pivot_mss.columns)]
+                        pivot_mse = pivot_mse.sort_index(ascending=True)
+                        pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
+
+                        # Get alpha values for proper extent
+                        alpha1_values = pivot_mss.columns.values
+                        alpha2_values = pivot_mss.index.values
+
+                        # Define extent for imshow
+                        extent = [alpha1_values[0], alpha1_values[-1],
+                                  alpha2_values[0], alpha2_values[-1]]
+
+                        fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+
+                        im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
+                                            interpolation='nearest', origin='lower',
+                                            extent=extent)
+                        cbar = plt.colorbar(im, ax=axes[0])
+                        cbar.set_label('MSS Loss', fontsize=18, fontweight='bold')
+                        cbar.ax.tick_params(labelsize=14)
+
+                        # Set ticks to align with cell centers
+                        tick_step = 4
+                        x_ticks = alpha1_values[::tick_step]
+                        y_ticks = alpha2_values[::tick_step]
+                        axes[0].set_xticks(x_ticks)
+                        axes[0].set_yticks(y_ticks)
+                        axes[0].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+                        axes[0].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+                        axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+                        axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+                        axes[0].set_title(f'MSS Loss - All Frequencies - Window {window_size}',
+                                          fontsize=20, fontweight='bold')
+                        axes[0].tick_params(axis='both', labelsize=16)
+                        axes[0]
+
+                        im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
+                                            interpolation='nearest', origin='lower',
+                                            extent=extent)
+                        cbar = plt.colorbar(im, ax=axes[1])
+                        cbar.set_label('MSE Loss', fontsize=18, fontweight='bold')
+                        cbar.ax.tick_params(labelsize=14)
+
+                        # Set ticks to align with cell centers
+                        axes[1].set_xticks(x_ticks)
+                        axes[1].set_yticks(y_ticks)
+                        axes[1].set_xticklabels([f'{x:.1f}' for x in x_ticks])
+                        axes[1].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+
+                        axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
+                        axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
+                        axes[1].set_title(f'MSE Loss - All Frequencies - Window {window_size}',
+                                          fontsize=20, fontweight='bold')
+                        axes[1].tick_params(axis='both', labelsize=16)
+                        axes[1]
+
+                        plt.tight_layout()
+                        filename = window_subdir / 'heatmap_all_frequencies.png'
+                        plt.savefig(filename, dpi=300)
+                        print(f"    → per_window/win_{window_size}/{filename.name}")
+                        plt.close()
+                        total_plots += 1
+
+                    # Cross-window comparison plots
+                    print("\n  Generating cross-window comparison plots...")
+                    total_plots += plot_window_size_comparison(results_df, comparison_dir)
+                    total_plots += plot_window_size_statistics(results_df, comparison_dir)
+
+                    # Mixed plots - all windows per frequency
+                    print("\n  Generating mixed plots (all windows per frequency)...")
+                    count = plot_mixed_all_windows_per_frequency(results_df, per_freq_dir)
+                    total_plots += count
+
+                    # Mixed plots - all frequencies per window
+                    print("\n  Generating mixed plots (all frequencies per window)...")
+                    count = plot_mixed_all_frequencies_per_window(results_df, mixed_dir)
+                    total_plots += count
+
+                    # Mixed plots - everything
+                    print("\n  Generating mixed plots (all windows and frequencies)...")
+                    total_plots += plot_mixed_all_windows_and_frequencies(results_df, mixed_dir)
+
+                # Process commutativity results
+                if comm_files:
+                    all_comm = []
+                    for comm_file in comm_files:
+                        data = load_results_data(comm_file)
+                        if data is not None:
+                            all_comm.append(data)
+
+                    if all_comm:
+                        comm_df = pd.concat(all_comm, ignore_index=True)
+
+                        # Generate commutativity histograms for each window
+                        for window_size in sorted(comm_df['Window'].unique()):
+                            window_comm = comm_df[comm_df['Window'] == window_size]
+                            # Save to per_window subdirectory
+                            window_subdir = per_window_dir / f'win_{window_size}'
+                            window_subdir.mkdir(exist_ok=True)
+                            plot_commutativity_histograms(window_comm, window_subdir, window_size=window_size)
+                            total_plots += 2
+
+                        # Generate mixed commutativity plots (all windows)
+                        print("\n  Generating mixed commutativity plots (all windows)...")
+                        total_plots += plot_mixed_commutativity_all_windows(comm_df, commutativity_dir)
+
+        else:
+            # Direct mode (original behavior)
+            print("  Detected DIRECT mode")
+
+            # Create subdirectories for organization
+            per_freq_dir = output_dir / 'per_frequency'
+            aggregated_dir = output_dir / 'aggregated'
+            analysis_dir = output_dir / 'analysis'
+            commutativity_dir = output_dir / 'commutativity'
+            examples_dir = output_dir / 'examples'
+
+            per_freq_dir.mkdir(exist_ok=True)
+            aggregated_dir.mkdir(exist_ok=True)
+            analysis_dir.mkdir(exist_ok=True)
+            commutativity_dir.mkdir(exist_ok=True)
+            examples_dir.mkdir(exist_ok=True)
+
+            results_file = mss_dir / 'mss_grid_results.txt'
+            comm_results_file = mss_dir / 'mss_commutativity_results.txt'
+
+            if results_file.exists():
+                print("  Generating MSS grid heatmaps...")
+                results_data = load_results_data(results_file)
+
+                if results_data is not None:
+                    frequencies = sorted(results_data['Frequency'].unique())
+
+                    # Heatmap for each frequency (MSS + MSE)
+                    print("  Saving per-frequency heatmaps...")
+                    for freq in frequencies:
+                        freq_data = results_data[results_data['Frequency'] == freq]
+                        # Save to per_frequency subdirectory
+                        plot_mss_grid_heatmap(freq_data, freq, per_freq_dir)
+                        total_plots += 2  # Creates both MSS and MSE heatmaps
+
+                    # Aggregated heatmap (average across all frequencies)
+                    print("  Saving aggregated heatmaps...")
+                    agg_mss = results_data.groupby(['Alpha1', 'Alpha2'])['MSS_Homomorphic'].mean().reset_index()
+                    agg_mse = results_data.groupby(['Alpha1', 'Alpha2'])['MSE_Homomorphic'].mean().reset_index()
+                    agg_data = agg_mss.copy()
+                    agg_data['MSE_Homomorphic'] = agg_mse['MSE_Homomorphic']
+                    plot_mss_grid_heatmap(agg_data, None, aggregated_dir)
+                    total_plots += 2  # Creates both MSS and MSE heatmaps
+
+                    # Aggregated heatmap WITH alpha sum highlights
+                    print("  Generating highlighted heatmaps (α₁+α₂ ∈ {0,±1,±2})...")
+                    plot_mss_grid_heatmap_with_alpha_sum_highlights(agg_data, aggregated_dir)
+                    total_plots += 2  # Creates both MSS and MSE highlighted heatmaps
+
+                    # MSS and MSE vs wrapped alpha plots
+                    print("  Generating MSS vs alpha plots...")
+                    plot_mss_vs_alpha_wrapped(results_data, analysis_dir)
+                    total_plots += 2  # Creates both MSS and MSE plots
+
+                    # Best/worst/medium case example comparisons
+                    print("  Generating best/worst case examples...")
+                    example_count = plot_best_worst_case_examples(results_data, mss_dir, examples_dir)
+                    total_plots += example_count  # Creates 60 example plots (20 worst, 20 medium, 20 best)
+            else:
+                print(f"  ⚠ Results file not found: {results_file}")
+
+            # Commutativity histograms
+            if comm_results_file.exists():
+                print("  Generating commutativity histograms...")
+                comm_data = load_results_data(comm_results_file)
+
+                if comm_data is not None:
+                    plot_commutativity_histograms(comm_data, commutativity_dir)
+                    total_plots += 2
+            else:
+                print(f"  ⚠ Commutativity results file not found: {comm_results_file}")
+    else:
+        print(f"\n⚠ Skipping MSS grid analysis (directory not found: {mss_dir})")
+
     # Summary
     print("\n" + "=" * 70)
     print("  Plotting Complete!")
@@ -935,6 +2293,8 @@ Examples:
         print(f"Homomorphic Test plots → {homo_dir / 'analysis_plots'}/")
     if fft_dir.exists():
         print(f"FFT Comparison plots → {fft_dir / 'analysis_plots'}/")
+    if mss_dir.exists():
+        print(f"MSS Grid Analysis plots → {mss_dir / 'plots'}/")
 
     print()
 

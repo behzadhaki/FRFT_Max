@@ -3,6 +3,13 @@
 
 set -e  # Exit on error
 
+# Parse command line arguments
+USE_WINDOWING=0
+if [ "$1" == "--windowed" ] || [ "$1" == "-w" ]; then
+    USE_WINDOWING=1
+    echo "🪟 Windowing mode enabled"
+fi
+
 echo "🔨 Compiling generate_homomorphism_mss_wavfiles..."
 
 # Find FFTW3 paths (Homebrew)
@@ -62,11 +69,22 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🚀 Running WAV file generator..."
     echo "================================================"
-    echo "This will generate ~26,000 WAV files (13 frequencies × 1000 samples × 2 + 13 sources)"
+    if [ $USE_WINDOWING -eq 1 ]; then
+        echo "Mode: WINDOWED (512, 1024, 2048, 4096 samples with 4x overlap)"
+        echo "This will generate WAV files with overlap-add processing"
+    else
+        echo "Mode: DIRECT (full 1-second transform)"
+        echo "This will generate ~26,000 WAV files (13 frequencies × 1000 samples × 2 + 13 sources)"
+    fi
     echo "This may take several minutes..."
     echo "================================================"
     echo ""
-    "$EVAL_DIR/generate_homomorphism_mss_wavfiles"
+
+    if [ $USE_WINDOWING -eq 1 ]; then
+        "$EVAL_DIR/generate_homomorphism_mss_wavfiles" --windowed
+    else
+        "$EVAL_DIR/generate_homomorphism_mss_wavfiles"
+    fi
 
     if [ $? -eq 0 ]; then
         echo ""

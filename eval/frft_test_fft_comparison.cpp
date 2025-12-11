@@ -39,9 +39,9 @@ struct TestConfig {
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
-    std::string output_filename = "fft_comparison/results.txt";
-    std::string detailed_log_filename = "fft_comparison/detailed_log.txt";
-    std::string figures_dir = "fft_comparison/figures";
+    std::string output_filename = "test_results/fft_comparison/results.txt";
+    std::string detailed_log_filename = "test_results/fft_comparison/detailed_log.txt";
+    std::string figures_dir = "test_results/fft_comparison/figures";
 };
 
 // Result for a single FRFT vs FFT comparison test
@@ -520,7 +520,7 @@ void run_test_suite(const TestConfig& config) {
 
     // Create directories
     std::cout << "Creating output directories...\n";
-    create_directories("fft_comparison");
+    create_directories("test_results/fft_comparison");
     create_directories(config.figures_dir);
 
     // Calculate total number of tests
