@@ -115,6 +115,16 @@ test_results/
     └── ...
 ```
 
+### 4. Timing Performance Tests
+
+In this test, we measure the execution time of the FRFT implementation for varying input signal lengths and alpha values. The test generates random input signals, computes the FRFT, and records the time taken for each computation.
+
+```terminal
+chmod +x frft_test_rt_timing_performance.sh
+./frft_test_rt_timing_performance.sh
+```
+
+The results will be saved in 'test_results/rt_timing_performance.txt' file.
 
 ## Generate Plots
 
