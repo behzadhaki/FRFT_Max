@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iomanip>
 #include <string>
+#include <sstream>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstring>
@@ -15,9 +16,20 @@
 #define mkdir(path, mode) _mkdir(path)
 #endif
 
-// Windowing parameters
-const std::vector<int> WINDOW_SIZES = {512, 1024, 2048, 4096};
-const int OVERLAPS_PER_FRAME = 4;
+// Default values
+const int DEFAULT_SAMPLE_RATE = 44100;
+const int DEFAULT_OVERLAPS_PER_FRAME = 4;
+
+// Configurable parameters (will be set from command line)
+double DURATION_SECONDS = 1.0;
+int DURATION_SAMPLES = DEFAULT_SAMPLE_RATE;
+int SAMPLE_RATE = DEFAULT_SAMPLE_RATE;
+int OVERLAPS_PER_FRAME = DEFAULT_OVERLAPS_PER_FRAME;
+std::vector<int> WINDOW_SIZES = {512, 1024, 2048, 4096};
+std::vector<double> frequencies = {100, 200, 300, 440, 500, 1000, 1500, 2000, 3000, 4000, 6000, 8000, 10000};
+double ALPHA_MIN = -2.0;
+double ALPHA_MAX = 2.0;
+double ALPHA_STEP = 0.1;
 
 // Global flag for windowing mode
 bool USE_WINDOWING = false;
@@ -222,7 +234,7 @@ bool apply_composed_windowed_frft(
         }
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
-        // Apply FRFT with alpha1
+        // Apply first FRFT
         bool success = engine.compute(
             real_in.data(), imag_in.data(),
             real_temp.data(), imag_temp.data(),
@@ -233,7 +245,7 @@ bool apply_composed_windowed_frft(
             return false;
         }
 
-        // Apply FRFT with alpha2 to the result
+        // Apply second FRFT
         success = engine.compute(
             real_temp.data(), imag_temp.data(),
             real_out.data(), imag_out.data(),
@@ -260,55 +272,132 @@ bool apply_composed_windowed_frft(
     return true;
 }
 
-// Wrap alpha to [-2, 2] range using modulo 4 (FRFT period is 4)
+// Wrap alpha to [-2, 2] range using modulo 4
 double wrap_alpha(double alpha) {
-    const double EPSILON = 1e-9;
-    while (alpha > 2.0 + EPSILON) alpha -= 4.0;
-    while (alpha < -2.0 - EPSILON) alpha += 4.0;
-    if (alpha > 2.0) alpha = 2.0;
-    if (alpha < -2.0) alpha = -2.0;
+    while (alpha > 2.0) alpha -= 4.0;
+    while (alpha < -2.0) alpha += 4.0;
     return alpha;
+}
+
+// Parse comma-separated list of integers
+std::vector<int> parse_int_list(const std::string& str) {
+    std::vector<int> result;
+    std::stringstream ss(str);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        result.push_back(std::stoi(item));
+    }
+    return result;
+}
+
+// Parse comma-separated list of doubles
+std::vector<double> parse_double_list(const std::string& str) {
+    std::vector<double> result;
+    std::stringstream ss(str);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        result.push_back(std::stod(item));
+    }
+    return result;
+}
+
+void print_usage(const char* prog_name) {
+    std::cout << "Usage: " << prog_name << " [OPTIONS]\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  --dur <seconds>              Duration in seconds (default: 1.0)\n";
+    std::cout << "  --winsizes <sizes>           Comma-separated window sizes or 'single' for direct mode\n";
+    std::cout << "                               Examples: '512,1024,2048,4096' or 'single'\n";
+    std::cout << "                               Default: 512,1024,2048,4096 (windowed)\n";
+    std::cout << "  --freqs <frequencies>        Comma-separated frequencies in Hz\n";
+    std::cout << "                               Default: 100,200,300,440,500,1000,1500,2000,3000,4000,6000,8000,10000\n";
+    std::cout << "  --alpha-min <value>          Minimum alpha value for grid (default: -2.0)\n";
+    std::cout << "  --alpha-max <value>          Maximum alpha value for grid (default: 2.0)\n";
+    std::cout << "  --alpha-step <value>         Step size for alpha grid (default: 0.1)\n";
+    std::cout << "  -h, --help                   Show this help message\n\n";
+    std::cout << "Examples:\n";
+    std::cout << "  Windowed mode (0.5 seconds, custom window sizes and frequencies):\n";
+    std::cout << "    " << prog_name << " --dur 0.5 --winsizes 512,1024,2048,4096 --freqs 100,440,1000,2000,4000,8000\n\n";
+    std::cout << "  Direct mode (non-windowed, 0.5 seconds):\n";
+    std::cout << "    " << prog_name << " --dur 0.5 --winsizes single --freqs 100,440,1000,2000,4000,8000\n\n";
+    std::cout << "  Custom alpha grid (coarser grid for faster generation):\n";
+    std::cout << "    " << prog_name << " --dur 0.5 --winsizes single --freqs 440,1000 --alpha-min -1 --alpha-max 1 --alpha-step 0.5\n\n";
 }
 
 int main(int argc, char* argv[]) {
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--windowed") == 0 || strcmp(argv[i], "-w") == 0) {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help") {
+            print_usage(argv[0]);
+            return 0;
+        }
+        else if (arg == "--dur" && i + 1 < argc) {
+            DURATION_SECONDS = std::stod(argv[++i]);
+            DURATION_SAMPLES = static_cast<int>(DURATION_SECONDS * SAMPLE_RATE);
+        }
+        else if (arg == "--winsizes" && i + 1 < argc) {
+            std::string winsizes_arg = argv[++i];
+            if (winsizes_arg == "single") {
+                USE_WINDOWING = false;
+            } else {
+                USE_WINDOWING = true;
+                WINDOW_SIZES = parse_int_list(winsizes_arg);
+            }
+        }
+        else if (arg == "--freqs" && i + 1 < argc) {
+            frequencies = parse_double_list(argv[++i]);
+        }
+        else if (arg == "--alpha-min" && i + 1 < argc) {
+            ALPHA_MIN = std::stod(argv[++i]);
+        }
+        else if (arg == "--alpha-max" && i + 1 < argc) {
+            ALPHA_MAX = std::stod(argv[++i]);
+        }
+        else if (arg == "--alpha-step" && i + 1 < argc) {
+            ALPHA_STEP = std::stod(argv[++i]);
+        }
+        else if (arg == "--windowed" || arg == "-w") {
             USE_WINDOWING = true;
+        }
+        else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            print_usage(argv[0]);
+            return 1;
         }
     }
 
-    const int SAMPLE_RATE = 44100;
-    const int DURATION_SAMPLES = 44100; // 1 second
+    // Calculate total combinations
+    int steps = static_cast<int>((ALPHA_MAX - ALPHA_MIN) / ALPHA_STEP + 0.5) + 1;
+    int total_combinations = steps * steps;
 
-    const std::vector<double> frequencies = {100.0, 440.0, 1000.0, 2000.0, 4000.0, 8000.0};
+    // Create base directory structure
+    std::string test_results_dir = "./test_results";
+    create_directories(test_results_dir);
 
-    const double ALPHA_MIN = -2.0;
-    const double ALPHA_MAX = 2.0;
-    const double ALPHA_STEP = 0.1;
+    // Create subdirectory based on mode
+    std::string mode_str = USE_WINDOWING ? "windowed" : "direct";
+    std::string base_dir = test_results_dir + "/homomorphism_mss_grid_" + mode_str;
 
-    const std::string base_dir = USE_WINDOWING ? "test_results/homomorphism_mss_grid_windowed" : "test_results/homomorphism_mss_grid";
-
-    std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
-    if (USE_WINDOWING) {
-        std::cout << "║    FRFT Homomorphism MSS Grid Test - WINDOWED Mode           ║\n";
-    } else {
-        std::cout << "║    FRFT Homomorphism MSS Grid Test - DIRECT Mode             ║\n";
-    }
+    std::cout << "\n";
+    std::cout << "╔════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║       FRFT Homomorphism MSS Grid Test - WAV Generator        ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n\n";
 
-    int n_alpha1 = static_cast<int>((ALPHA_MAX - ALPHA_MIN) / ALPHA_STEP) + 1;
-    int n_alpha2 = n_alpha1;
-    int total_combinations = n_alpha1 * n_alpha2;
-
     std::cout << "Configuration:\n";
-    std::cout << "  α₁ range: [" << ALPHA_MIN << ", " << ALPHA_MAX << "] step " << ALPHA_STEP << "\n";
-    std::cout << "  α₂ range: [" << ALPHA_MIN << ", " << ALPHA_MAX << "] step " << ALPHA_STEP << "\n";
-    std::cout << "  Grid size: " << n_alpha1 << " × " << n_alpha2 << " = " << total_combinations << " combinations\n";
-    std::cout << "  Frequencies: " << frequencies.size() << "\n";
+    std::cout << "  Duration: " << DURATION_SECONDS << " seconds (" << DURATION_SAMPLES << " samples)\n";
+    std::cout << "  Sample rate: " << SAMPLE_RATE << " Hz\n";
+    std::cout << "  Frequencies: ";
+    for (size_t i = 0; i < frequencies.size(); ++i) {
+        std::cout << static_cast<int>(frequencies[i]);
+        if (i < frequencies.size() - 1) std::cout << ", ";
+    }
+    std::cout << " Hz\n";
+    std::cout << "  Alpha grid: [" << ALPHA_MIN << ", " << ALPHA_MAX << "] step " << ALPHA_STEP
+              << " (" << total_combinations << " combinations)\n";
 
     if (USE_WINDOWING) {
-        std::cout << "  Processing mode: WINDOWED\n";
+        std::cout << "  Processing mode: WINDOWED (overlap-add)\n";
         std::cout << "  Window sizes: ";
         for (size_t i = 0; i < WINDOW_SIZES.size(); ++i) {
             std::cout << WINDOW_SIZES[i];
@@ -331,9 +420,16 @@ int main(int argc, char* argv[]) {
 
     std::ofstream metadata(base_dir + "/metadata.txt");
     metadata << "# FRFT Homomorphism MSS Grid Test Metadata\n";
+    metadata << "# Duration: " << DURATION_SECONDS << " seconds (" << DURATION_SAMPLES << " samples)\n";
+    metadata << "# Sample rate: " << SAMPLE_RATE << " Hz\n";
     metadata << "# Mode: " << (USE_WINDOWING ? "WINDOWED" : "DIRECT") << "\n";
     if (USE_WINDOWING) {
-        metadata << "# Window sizes: 512, 1024, 2048, 4096\n";
+        metadata << "# Window sizes: ";
+        for (size_t i = 0; i < WINDOW_SIZES.size(); ++i) {
+            metadata << WINDOW_SIZES[i];
+            if (i < WINDOW_SIZES.size() - 1) metadata << ", ";
+        }
+        metadata << "\n";
         metadata << "# Overlaps per frame: " << OVERLAPS_PER_FRAME << "\n";
     }
     metadata << "# Grid: α₁, α₂ ∈ [-2, 2] with step 0.1\n";

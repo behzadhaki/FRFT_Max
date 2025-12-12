@@ -3,12 +3,79 @@
 
 set -e  # Exit on error
 
+# Default values
+DURATION=""
+WINSIZES=""
+FREQS=""
+ALPHA_MIN=""
+ALPHA_MAX=""
+ALPHA_STEP=""
+
 # Parse command line arguments
-USE_WINDOWING=0
-if [ "$1" == "--windowed" ] || [ "$1" == "-w" ]; then
-    USE_WINDOWING=1
-    echo "🪟 Windowing mode enabled"
-fi
+show_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --dur <seconds>              Duration in seconds (default: 1.0)"
+    echo "  --winsizes <sizes>           Comma-separated window sizes or 'single' for direct mode"
+    echo "                               Examples: '512,1024,2048,4096' or 'single'"
+    echo "                               Default: 512,1024,2048,4096 (windowed)"
+    echo "  --freqs <frequencies>        Comma-separated frequencies in Hz"
+    echo "                               Default: 100,200,300,440,500,1000,1500,2000,3000,4000,6000,8000,10000"
+    echo "  --alpha-min <value>          Minimum alpha value for grid (default: -2.0)"
+    echo "  --alpha-max <value>          Maximum alpha value for grid (default: 2.0)"
+    echo "  --alpha-step <value>         Step size for alpha grid (default: 0.1)"
+    echo "  -h, --help                   Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  Windowed mode (0.5 seconds, custom window sizes and frequencies):"
+    echo "    $0 --dur 0.5 --winsizes 512,1024,2048,4096 --freqs 100,440,1000,2000,4000,8000"
+    echo ""
+    echo "  Direct mode (non-windowed, 0.5 seconds):"
+    echo "    $0 --dur 0.5 --winsizes single --freqs 100,440,1000,2000,4000,8000"
+    echo ""
+    echo "  Custom alpha grid (coarser grid for faster generation):"
+    echo "    $0 --dur 0.5 --winsizes single --freqs 440,1000 --alpha-min -1 --alpha-max 1 --alpha-step 0.5"
+    echo ""
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        --dur)
+            DURATION="$2"
+            shift 2
+            ;;
+        --winsizes)
+            WINSIZES="$2"
+            shift 2
+            ;;
+        --freqs)
+            FREQS="$2"
+            shift 2
+            ;;
+        --alpha-min)
+            ALPHA_MIN="$2"
+            shift 2
+            ;;
+        --alpha-max)
+            ALPHA_MAX="$2"
+            shift 2
+            ;;
+        --alpha-step)
+            ALPHA_STEP="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
 
 echo "🔨 Compiling generate_homomorphism_mss_wavfiles..."
 
@@ -69,19 +136,66 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🚀 Running WAV file generator..."
     echo "================================================"
-    if [ $USE_WINDOWING -eq 1 ]; then
-        echo "Mode: WINDOWED (512, 1024, 2048, 4096 samples with 4x overlap)"
-        echo "This will generate WAV files with overlap-add processing"
+
+    # Build command arguments
+    CMD_ARGS=""
+
+    if [ -n "$DURATION" ]; then
+        CMD_ARGS="$CMD_ARGS --dur $DURATION"
+        echo "Duration: $DURATION seconds"
     else
-        echo "Mode: DIRECT (full 1-second transform)"
-        echo "This will generate ~26,000 WAV files (13 frequencies × 1000 samples × 2 + 13 sources)"
+        echo "Duration: 1.0 seconds (default)"
     fi
+
+    if [ -n "$WINSIZES" ]; then
+        CMD_ARGS="$CMD_ARGS --winsizes $WINSIZES"
+        if [ "$WINSIZES" == "single" ]; then
+            echo "Mode: DIRECT (full transform)"
+        else
+            echo "Mode: WINDOWED (overlap-add)"
+            echo "Window sizes: $WINSIZES"
+        fi
+    else
+        echo "Mode: WINDOWED (overlap-add) - default"
+        echo "Window sizes: 512,1024,2048,4096 (default)"
+    fi
+
+    if [ -n "$FREQS" ]; then
+        CMD_ARGS="$CMD_ARGS --freqs $FREQS"
+        echo "Frequencies: $FREQS Hz"
+    else
+        echo "Frequencies: 100,200,300,440,500,1000,1500,2000,3000,4000,6000,8000,10000 Hz (default)"
+    fi
+
+    if [ -n "$ALPHA_MIN" ]; then
+        CMD_ARGS="$CMD_ARGS --alpha-min $ALPHA_MIN"
+        echo "Alpha min: $ALPHA_MIN"
+    else
+        echo "Alpha min: -2.0 (default)"
+    fi
+
+    if [ -n "$ALPHA_MAX" ]; then
+        CMD_ARGS="$CMD_ARGS --alpha-max $ALPHA_MAX"
+        echo "Alpha max: $ALPHA_MAX"
+    else
+        echo "Alpha max: 2.0 (default)"
+    fi
+
+    if [ -n "$ALPHA_STEP" ]; then
+        CMD_ARGS="$CMD_ARGS --alpha-step $ALPHA_STEP"
+        echo "Alpha step: $ALPHA_STEP"
+    else
+        echo "Alpha step: 0.1 (default)"
+    fi
+
+    echo ""
     echo "This may take several minutes..."
     echo "================================================"
     echo ""
 
-    if [ $USE_WINDOWING -eq 1 ]; then
-        "$EVAL_DIR/generate_homomorphism_mss_wavfiles" --windowed
+    # Run the generator with arguments
+    if [ -n "$CMD_ARGS" ]; then
+        "$EVAL_DIR/generate_homomorphism_mss_wavfiles" $CMD_ARGS
     else
         "$EVAL_DIR/generate_homomorphism_mss_wavfiles"
     fi
@@ -95,7 +209,8 @@ if [ $? -eq 0 ]; then
         echo "1. Run the Python analysis:"
         echo "   python3 analyze_homomorphism_mss.py"
         echo ""
-        echo "Output location: ./homomorphism_mss_sources/"
+        echo "Output location: ./test_results/homomorphism_mss_grid_windowed/"
+        echo "            or: ./test_results/homomorphism_mss_grid_direct/"
         echo "================================================"
     else
         echo "❌ WAV file generation failed!"

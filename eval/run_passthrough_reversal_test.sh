@@ -1,9 +1,9 @@
 #!/bin/bash
-# Shell script to compile and run frft_test_reversal (macOS only)
+# Compile and run FRFT pass-through and reversal test (macOS)
 
-set -e  # Exit on error
+set -e
 
-echo "🔨 Compiling frft_test_reversal..."
+echo "🔨 Compiling frft_passthrough_reversal_test..."
 
 # Find FFTW3 paths (Homebrew)
 FFTW3_INCLUDE=""
@@ -31,7 +31,7 @@ echo "✅ Found FFTW3:"
 echo "   Include: $FFTW3_INCLUDE"
 echo "   Library: $FFTW3_LIB"
 
-# Set directories (assumes script is run from eval/ directory)
+# Set directories
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/../src"
 EVAL_DIR="$SCRIPT_DIR"
@@ -41,17 +41,17 @@ clang++ -std=c++17 -O3 -march=native -ffast-math \
     -I"$SRC_DIR" \
     -I"$FFTW3_INCLUDE" \
     "$SRC_DIR/frft_engine.cpp" \
-    "$EVAL_DIR/frft_test_reversal.cpp" \
+    "$EVAL_DIR/frft_passthrough_reversal_test.cpp" \
     "$FFTW3_LIB" \
     -lm \
-    -o "$EVAL_DIR/frft_test_reversal"
+    -o "$EVAL_DIR/frft_passthrough_reversal_test"
 
 if [ $? -eq 0 ]; then
     echo "✅ Compilation successful!"
     echo ""
-    echo "🚀 Running reversal test (alpha = -2)..."
+    echo "🚀 Running tests..."
     echo "================================================"
-    "$EVAL_DIR/frft_test_reversal"
+    "$EVAL_DIR/frft_passthrough_reversal_test"
 else
     echo "❌ Compilation failed!"
     exit 1

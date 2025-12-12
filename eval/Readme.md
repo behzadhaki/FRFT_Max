@@ -7,8 +7,13 @@ In this test, we compare the output of the FRFT implementation with the standard
 
 ```commandline
 chmod +x run_test_*.sh
+# Default (normalized)
 ./run_test_fft_comparison.sh
+
+# Without normalization
+./run_test_fft_comparison.sh --no-normalize-fft
 ```
+
 The results will saved in 'test_results/fft_comparison/' directory containing some text files as well as sample plots.
 
 To generate the plots run:
@@ -17,18 +22,32 @@ To generate the plots run:
 python3 plot_results.py --fft test_results/fft_comparison/
 ```
 
-### 2. Reversal Test (FRFT(alpha=-2) vs. signal reversal)
+### 2. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) )
 
 In this test, we validate the FRFT implementation for alpha=-2 by comparing its output to the expected signal reversal. The test generates random input signals of varying lengths, computes the FRFT with alpha=-2, and compares the result to the reversed input signal.
 
 ```commandline
-chmod +x run_test_*.sh
-./run_test_reversal.sh
+chmod +x run_passthrough_reversal_test.sh
+./run_passthrough_reversal_test.sh
 ```
 
 The results will be stored in 'test_results/reversal_test/' directory containing some text files as well as sample plots.
 
-There are no plotting scripts for this test.
+Then analyze MSS results using:
+
+```commandline
+python3 analyze_passthrough_reversal_mss.py --dir test_results/passthrough_reversal
+```
+then generate the plots:
+
+```commandline
+# Plot pass-through results only (α=0)
+python3 plot_results.py --passthrough test_results/passthrough_reversal/
+
+# Plot reversal results only (α=±2)
+python3 plot_results.py --reversal test_results/passthrough_reversal/
+```
+
 
 ### 3. Homorphism and Commutativity Tests 
 
@@ -46,19 +65,19 @@ That said, the transformation can be done in two ways:
 
 ```commandline
 chmod +x run_test_*.sh
- ./run_test_mss.sh 
+./run_test_mss.sh --dur 0.5 --winsizes single --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
 ```
 
-This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid/' directory.
+This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid_direct/' directory.
 
 ```commandline
-python3 analyze_homomorphism_mss.py --dir test_results/homomorphism_mss_grid
+python3 analyze_homomorphism_mss.py --dir test_results/homomorphism_mss_grid_direct
 ```
 
 To generate the plots run:
 
 ```commandline
-python3 plot_results.py --mss test_results/homomorphism_mss_grid/
+python3 plot_results.py --mss test_results/homomorphism_mss_grid_direct/
 ```
 
 
@@ -66,7 +85,7 @@ python3 plot_results.py --mss test_results/homomorphism_mss_grid/
 
 ```commandline
 chmod +x run_test_*.sh
-./run_test_mss.sh --windowed
+./run_test_mss.sh --dur 0.5 --winsizes 512,1024,2048,4096 --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
 ```
 
 This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid_windowed/' directory.
@@ -81,6 +100,23 @@ To generate the plots run:
 
 ```commandline
 python3 plot_results.py --mss test_results/homomorphism_mss_grid_windowed/
+```
+
+```text
+test_results/
+├── homomorphism_mss_grid_windowed/
+│   ├── metadata.txt
+│   ├── freq_100/
+│   │   ├── win_512/
+│   │   ├── win_1024/
+│   │   └── ...
+│   └── freq_440/
+│       └── ...
+└── homomorphism_mss_grid_direct/
+    ├── metadata.txt
+    ├── freq_100/
+    └── freq_440/
+    └── ...
 ```
 
 

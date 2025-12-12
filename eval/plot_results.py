@@ -38,6 +38,34 @@ def load_results_data(filename):
         return None
 
 
+def load_passthrough_reversal_results(filename):
+    """Load pass-through/reversal MSS analysis results, skipping text headers."""
+    try:
+        # Read the file line by line to find where the CSV table starts
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+
+        # Find the line that contains the column headers (starts with test_type)
+        header_line_idx = None
+        for idx, line in enumerate(lines):
+            if line.startswith('test_type'):
+                header_line_idx = idx
+                break
+
+        if header_line_idx is None:
+            print(f"✗ Could not find CSV header in {filename}")
+            return None
+
+        # Read from header line onwards
+        data = pd.read_csv(filename, sep='\t', skiprows=header_line_idx)
+        print(f"✓ Loaded {len(data)} records from {filename}")
+        return data
+
+    except Exception as e:
+        print(f"✗ Error loading pass-through/reversal results: {e}")
+        return None
+
+
 def plot_processing_time_and_complexity(timing_data, output_dir):
     """Plot processing time with complexity reference lines."""
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -1134,11 +1162,13 @@ def plot_mss_grid_heatmap_with_alpha_sum_highlights(data, output_dir):
 def plot_best_worst_case_examples(data, base_dir, output_dir):
     """
     Generate waveform comparison plots for worst, medium, and best MSS cases.
+    Also creates quartile-based random sampling with WAV file copies.
 
     Creates plots showing the direct FRFT vs composed FRFT for:
     - 20 worst cases (highest MSS)
     - 20 medium cases (around median MSS)
     - 20 best cases (lowest MSS, excluding zeros)
+    - 10 random samples from each quartile (with WAV copies)
 
     Args:
         data: DataFrame with all grid results
@@ -1146,12 +1176,17 @@ def plot_best_worst_case_examples(data, base_dir, output_dir):
         output_dir: Output directory for comparison plots
     """
     import scipy.io.wavfile as wavfile
+    import shutil
 
     print("\n  Generating worst/medium/best case comparison plots...")
 
     # Create subfolder for examples
-    examples_dir = output_dir / 'case_examples'
+    examples_dir = output_dir / 'examples'
     examples_dir.mkdir(exist_ok=True)
+
+    # Create case_examples subfolder for old-style examples
+    case_examples_dir = examples_dir / 'case_examples'
+    case_examples_dir.mkdir(exist_ok=True)
 
     # Sort by MSS to find worst/medium/best cases
     sorted_data = data.sort_values('MSS_Homomorphic', ascending=False)
@@ -1176,7 +1211,7 @@ def plot_best_worst_case_examples(data, base_dir, output_dir):
         return f"{alpha:.1f}".replace('-', 'm').replace('.', 'p')
 
     # Helper function to load and plot comparison
-    def plot_comparison(case_data, case_name, case_num):
+    def plot_comparison(case_data, case_name, case_num, output_subdir):
         freq = case_data['Frequency']
         a1 = case_data['Alpha1']
         a2 = case_data['Alpha2']
@@ -1195,7 +1230,7 @@ def plot_best_worst_case_examples(data, base_dir, output_dir):
         # Check if files exist
         if not alpha_file.exists() or not composed_file.exists():
             print(f"    ⚠ Files not found for {case_name} #{case_num}")
-            return False
+            return False, None, None
 
         # Load audio files
         sr1, alpha_signal = wavfile.read(alpha_file)
@@ -1223,20 +1258,20 @@ def plot_best_worst_case_examples(data, base_dir, output_dir):
         ax1.set_ylabel(r'$F_{\alpha_1+\alpha_2}$', fontsize=14, fontweight='bold')
         ax1.set_title(f'{case_name} #{case_num}: {freq:.0f} Hz, α₁={a1:.1f}, α₂={a2:.1f}, α={alpha_wrapped:.1f}',
                       fontsize=16, fontweight='bold')
-        ax1
+        ax1.grid(True, alpha=0.3)
         ax1.set_xlim([time[0], time[-1]])
 
         # Plot 2: Composed FRFT
         ax2.plot(time, composed_signal, 'g-', linewidth=0.5, alpha=0.8)
         ax2.set_ylabel(r'$F_{\alpha_2} \cdot F_{\alpha_1}$', fontsize=14, fontweight='bold')
-        ax2
+        ax2.grid(True, alpha=0.3)
         ax2.set_xlim([time[0], time[-1]])
 
         # Plot 3: Difference
         ax3.plot(time, diff, 'r-', linewidth=0.5, alpha=0.8)
         ax3.set_ylabel('Difference', fontsize=14, fontweight='bold')
         ax3.set_xlabel('Time (s)', fontsize=14, fontweight='bold')
-        ax3
+        ax3.grid(True, alpha=0.3)
         ax3.set_xlim([time[0], time[-1]])
 
         # Add metrics text box
@@ -1249,31 +1284,318 @@ def plot_best_worst_case_examples(data, base_dir, output_dir):
 
         # Save figure
         case_type = case_name.lower().replace(" ", "_")
-        filename = examples_dir / f'{case_type}_{case_num:02d}_freq{int(freq)}_a1_{a1_str}_a2_{a2_str}.png'
+        filename = output_subdir / f'{case_type}_{case_num:02d}_freq{int(freq)}_a1_{a1_str}_a2_{a2_str}.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
 
-        return True
+        return True, alpha_file, composed_file
 
     # Generate plots for all cases
     plot_count = 0
 
     print("    Generating worst case plots...")
     for i, (idx, case) in enumerate(worst_cases.iterrows(), 1):
-        if plot_comparison(case, 'Worst Case', i):
+        result = plot_comparison(case, 'Worst Case', i, case_examples_dir)
+        if result[0]:
             plot_count += 1
 
     print("    Generating medium case plots...")
     for i, (idx, case) in enumerate(medium_cases.iterrows(), 1):
-        if plot_comparison(case, 'Medium Case', i):
+        result = plot_comparison(case, 'Medium Case', i, case_examples_dir)
+        if result[0]:
             plot_count += 1
 
     print("    Generating best case plots...")
     for i, (idx, case) in enumerate(best_cases.iterrows(), 1):
-        if plot_comparison(case, 'Best Case', i):
+        result = plot_comparison(case, 'Best Case', i, case_examples_dir)
+        if result[0]:
             plot_count += 1
 
-    print(f"    → Generated {plot_count} case example plots in {examples_dir}/")
+    print(f"    → Generated {plot_count} case example plots in {case_examples_dir}/")
+
+    # Now generate quartile-based random samples
+    print("\n  Generating quartile-based random samples...")
+
+    # Sort data by MSS (descending for quartile calculation)
+    sorted_by_mss = data.sort_values('MSS_Homomorphic', ascending=False).reset_index(drop=True)
+    n_total = len(sorted_by_mss)
+
+    # Define quartiles (Q3 = worst 25%, Q2 = next 25%, Q1 = next 25%, Q0 = best 25%)
+    quartile_ranges = {
+        'quartile_3': (0, n_total // 4),  # Worst 25%
+        'quartile_2': (n_total // 4, n_total // 2),  # Second worst 25%
+        'quartile_1': (n_total // 2, 3 * n_total // 4),  # Second best 25%
+        'quartile_0': (3 * n_total // 4, n_total)  # Best 25%
+    }
+
+    # Sample 10 random cases from each quartile
+    np.random.seed(42)  # For reproducibility
+    samples_per_quartile = 10
+
+    for quartile_name, (start_idx, end_idx) in quartile_ranges.items():
+        print(f"    Processing {quartile_name}...")
+
+        # Create quartile directory
+        quartile_dir = examples_dir / quartile_name
+        quartile_dir.mkdir(exist_ok=True)
+
+        # Get data in this quartile
+        quartile_data = sorted_by_mss.iloc[start_idx:end_idx]
+
+        # Randomly sample 10 cases (or all if less than 10)
+        n_samples = min(samples_per_quartile, len(quartile_data))
+        sampled_cases = quartile_data.sample(n=n_samples, random_state=42)
+
+        mss_values = sampled_cases['MSS_Homomorphic'].values
+        print(f"      MSS range: [{mss_values.min():.6f}, {mss_values.max():.6f}]")
+
+        # Generate plots and copy WAV files for each sample
+        for i, (idx, case) in enumerate(sampled_cases.iterrows(), 1):
+            result = plot_comparison(case, f'{quartile_name.replace("_", " ").title()}', i, quartile_dir)
+            if result[0]:
+                # Copy WAV files
+                success, alpha_src, composed_src = result
+                if success and alpha_src is not None:
+                    freq = case['Frequency']
+                    a1 = case['Alpha1']
+                    a2 = case['Alpha2']
+                    a1_str = format_alpha_filename(a1)
+                    a2_str = format_alpha_filename(a2)
+
+                    alpha_dst = quartile_dir / f'sample_{i:02d}_freq{int(freq)}_a1_{a1_str}_a2_{a2_str}_alpha.wav'
+                    composed_dst = quartile_dir / f'sample_{i:02d}_freq{int(freq)}_a1_{a1_str}_a2_{a2_str}_composed.wav'
+
+                    try:
+                        shutil.copy2(alpha_src, alpha_dst)
+                        shutil.copy2(composed_src, composed_dst)
+                    except Exception as e:
+                        print(f"      ⚠ Error copying WAV files: {e}")
+
+                plot_count += 1
+
+        print(f"      → Generated {n_samples} plots with WAV copies in {quartile_dir}/")
+
+    print(f"\n    → Total plots generated: {plot_count}")
+    print(f"    → Examples organized in {examples_dir}/")
+
+    return plot_count
+
+
+def plot_best_worst_case_examples_windowed(data, base_dir, output_dir):
+    """
+    Generate waveform comparison plots for windowed mode.
+    Creates quartile-based random sampling with WAV file copies.
+
+    Args:
+        data: DataFrame with all grid results (includes Window column)
+        base_dir: Base directory containing WAV files (with freq_X/win_Y/ structure)
+        output_dir: Output directory for comparison plots
+    """
+    import scipy.io.wavfile as wavfile
+    import shutil
+
+    print("\n  Generating windowed mode example plots...")
+
+    # Create subfolder for examples
+    examples_dir = output_dir / 'examples'
+    examples_dir.mkdir(exist_ok=True)
+
+    # Create case_examples subfolder
+    case_examples_dir = examples_dir / 'case_examples'
+    case_examples_dir.mkdir(exist_ok=True)
+
+    # Sort by MSS to find worst/medium/best cases
+    sorted_data = data.sort_values('MSS_Homomorphic', ascending=False)
+
+    # Get 20 worst cases (highest MSS)
+    worst_cases = sorted_data.head(20)
+
+    # Get 20 medium cases (around median)
+    median_idx = len(sorted_data) // 2
+    medium_cases = sorted_data.iloc[median_idx-10:median_idx+10]
+
+    # Get 20 best cases (lowest non-zero MSS)
+    non_zero = data[data['MSS_Homomorphic'] > 1e-6].sort_values('MSS_Homomorphic', ascending=True)
+    best_cases = non_zero.head(20)
+
+    print(f"    Worst cases:  MSS range [{worst_cases['MSS_Homomorphic'].min():.6f}, {worst_cases['MSS_Homomorphic'].max():.6f}]")
+    print(f"    Medium cases: MSS range [{medium_cases['MSS_Homomorphic'].min():.6f}, {medium_cases['MSS_Homomorphic'].max():.6f}]")
+    print(f"    Best cases:   MSS range [{best_cases['MSS_Homomorphic'].min():.6f}, {best_cases['MSS_Homomorphic'].max():.6f}]")
+
+    # Helper function to format alpha for filename
+    def format_alpha_filename(alpha):
+        return f"{alpha:.1f}".replace('-', 'm').replace('.', 'p')
+
+    # Helper function to load and plot comparison (windowed version)
+    def plot_comparison(case_data, case_name, case_num, output_subdir):
+        freq = case_data['Frequency']
+        window = case_data['Window']
+        a1 = case_data['Alpha1']
+        a2 = case_data['Alpha2']
+        mss = case_data['MSS_Homomorphic']
+        mse = case_data['MSE_Homomorphic']
+        alpha_wrapped = case_data['Alpha']
+
+        # Construct file paths for windowed mode: freq_X/win_Y/
+        freq_str = f"freq_{int(freq)}"
+        win_str = f"win_{int(window)}"
+        a1_str = format_alpha_filename(a1)
+        a2_str = format_alpha_filename(a2)
+
+        alpha_file = base_dir / freq_str / win_str / f"a1_{a1_str}_a2_{a2_str}_alpha.wav"
+        composed_file = base_dir / freq_str / win_str / f"a1_{a1_str}_a2_{a2_str}_composed.wav"
+
+        # Check if files exist
+        if not alpha_file.exists() or not composed_file.exists():
+            print(f"    ⚠ Files not found for {case_name} #{case_num}")
+            return False, None, None
+
+        # Load audio files
+        sr1, alpha_signal = wavfile.read(alpha_file)
+        sr2, composed_signal = wavfile.read(composed_file)
+
+        # Normalize if needed
+        if alpha_signal.dtype == np.int16:
+            alpha_signal = alpha_signal.astype(np.float32) / 32768.0
+            composed_signal = composed_signal.astype(np.float32) / 32768.0
+        elif alpha_signal.dtype == np.int32:
+            alpha_signal = alpha_signal.astype(np.float32) / 2147483648.0
+            composed_signal = composed_signal.astype(np.float32) / 2147483648.0
+
+        # Create time axis
+        time = np.arange(len(alpha_signal)) / sr1
+
+        # Compute difference
+        diff = alpha_signal - composed_signal
+
+        # Create figure with 3 subplots
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 10))
+
+        # Plot 1: Direct FRFT
+        ax1.plot(time, alpha_signal, 'b-', linewidth=0.5, alpha=0.8)
+        ax1.set_ylabel(r'$F_{\alpha_1+\alpha_2}$', fontsize=14, fontweight='bold')
+        ax1.set_title(f'{case_name} #{case_num}: {freq:.0f} Hz, Win={int(window)}, α₁={a1:.1f}, α₂={a2:.1f}, α={alpha_wrapped:.1f}',
+                      fontsize=16, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.set_xlim([time[0], time[-1]])
+
+        # Plot 2: Composed FRFT
+        ax2.plot(time, composed_signal, 'g-', linewidth=0.5, alpha=0.8)
+        ax2.set_ylabel(r'$F_{\alpha_2} \cdot F_{\alpha_1}$', fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.set_xlim([time[0], time[-1]])
+
+        # Plot 3: Difference
+        ax3.plot(time, diff, 'r-', linewidth=0.5, alpha=0.8)
+        ax3.set_ylabel('Difference', fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Time (s)', fontsize=14, fontweight='bold')
+        ax3.grid(True, alpha=0.3)
+        ax3.set_xlim([time[0], time[-1]])
+
+        # Add metrics text box
+        textstr = f'MSS = {mss:.6f}\nMSE = {mse:.6e}'
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        ax3.text(0.02, 0.98, textstr, transform=ax3.transAxes, fontsize=12,
+                 verticalalignment='top', bbox=props)
+
+        plt.tight_layout()
+
+        # Save figure
+        case_type = case_name.lower().replace(" ", "_")
+        filename = output_subdir / f'{case_type}_{case_num:02d}_freq{int(freq)}_win{int(window)}_a1_{a1_str}_a2_{a2_str}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        return True, alpha_file, composed_file
+
+    # Generate plots for all cases
+    plot_count = 0
+
+    print("    Generating worst case plots...")
+    for i, (idx, case) in enumerate(worst_cases.iterrows(), 1):
+        result = plot_comparison(case, 'Worst Case', i, case_examples_dir)
+        if result[0]:
+            plot_count += 1
+
+    print("    Generating medium case plots...")
+    for i, (idx, case) in enumerate(medium_cases.iterrows(), 1):
+        result = plot_comparison(case, 'Medium Case', i, case_examples_dir)
+        if result[0]:
+            plot_count += 1
+
+    print("    Generating best case plots...")
+    for i, (idx, case) in enumerate(best_cases.iterrows(), 1):
+        result = plot_comparison(case, 'Best Case', i, case_examples_dir)
+        if result[0]:
+            plot_count += 1
+
+    print(f"    → Generated {plot_count} case example plots in {case_examples_dir}/")
+
+    # Now generate quartile-based random samples
+    print("\n  Generating quartile-based random samples (windowed mode)...")
+
+    # Sort data by MSS (descending for quartile calculation)
+    sorted_by_mss = data.sort_values('MSS_Homomorphic', ascending=False).reset_index(drop=True)
+    n_total = len(sorted_by_mss)
+
+    # Define quartiles
+    quartile_ranges = {
+        'quartile_3': (0, n_total // 4),  # Worst 25%
+        'quartile_2': (n_total // 4, n_total // 2),  # Second worst 25%
+        'quartile_1': (n_total // 2, 3 * n_total // 4),  # Second best 25%
+        'quartile_0': (3 * n_total // 4, n_total)  # Best 25%
+    }
+
+    # Sample 10 random cases from each quartile
+    np.random.seed(42)
+    samples_per_quartile = 10
+
+    for quartile_name, (start_idx, end_idx) in quartile_ranges.items():
+        print(f"    Processing {quartile_name}...")
+
+        # Create quartile directory
+        quartile_dir = examples_dir / quartile_name
+        quartile_dir.mkdir(exist_ok=True)
+
+        # Get data in this quartile
+        quartile_data = sorted_by_mss.iloc[start_idx:end_idx]
+
+        # Randomly sample 10 cases
+        n_samples = min(samples_per_quartile, len(quartile_data))
+        sampled_cases = quartile_data.sample(n=n_samples, random_state=42)
+
+        mss_values = sampled_cases['MSS_Homomorphic'].values
+        print(f"      MSS range: [{mss_values.min():.6f}, {mss_values.max():.6f}]")
+
+        # Generate plots and copy WAV files
+        for i, (idx, case) in enumerate(sampled_cases.iterrows(), 1):
+            result = plot_comparison(case, f'{quartile_name.replace("_", " ").title()}', i, quartile_dir)
+            if result[0]:
+                # Copy WAV files
+                success, alpha_src, composed_src = result
+                if success and alpha_src is not None:
+                    freq = case['Frequency']
+                    window = case['Window']
+                    a1 = case['Alpha1']
+                    a2 = case['Alpha2']
+                    a1_str = format_alpha_filename(a1)
+                    a2_str = format_alpha_filename(a2)
+
+                    alpha_dst = quartile_dir / f'sample_{i:02d}_freq{int(freq)}_win{int(window)}_a1_{a1_str}_a2_{a2_str}_alpha.wav'
+                    composed_dst = quartile_dir / f'sample_{i:02d}_freq{int(freq)}_win{int(window)}_a1_{a1_str}_a2_{a2_str}_composed.wav'
+
+                    try:
+                        shutil.copy2(alpha_src, alpha_dst)
+                        shutil.copy2(composed_src, composed_dst)
+                    except Exception as e:
+                        print(f"      ⚠ Error copying WAV files: {e}")
+
+                plot_count += 1
+
+        print(f"      → Generated {n_samples} plots with WAV copies in {quartile_dir}/")
+
+    print(f"\n    → Total plots generated: {plot_count}")
+    print(f"    → Examples organized in {examples_dir}/")
 
     return plot_count
 
@@ -1869,6 +2191,335 @@ def plot_mixed_commutativity_all_windows(comm_df, output_dir):
     return 1
 
 
+# ============================================================================
+# Pass-Through and Reversal Test Plotting Functions
+# ============================================================================
+
+def plot_passthrough_reversal_mss_mse_vs_window_size(data, test_type, output_dir):
+    """Plot MSS and MSE vs window size for a specific test type."""
+    test_data = data[data['test_type'] == test_type].copy()
+
+    if len(test_data) == 0:
+        print(f"  No data found for test type: {test_type}")
+        return 0
+
+    # Group by window size and compute statistics
+    grouped = test_data.groupby('window_size').agg({
+        'mss_loss': ['mean', 'std', 'min', 'max'],
+        'mse_loss': ['mean', 'std', 'min', 'max']
+    }).reset_index()
+
+    # MSS: only use window sizes >= 8096
+    mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+
+    # MSE: use all window sizes
+    mse_grouped = grouped.copy()
+
+    # Create figure with two subplots
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+
+    # Test type name for title
+    if test_type == 'passthrough':
+        test_name = 'Pass-Through (α=0)'
+    elif test_type == 'reversal_fwd':
+        test_name = 'Reversal Forward (α=2)'
+    elif test_type == 'reversal_bwd':
+        test_name = 'Reversal Backward (α=-2)'
+    elif test_type == 'reversal':
+        test_name = 'Reversal (α=±2)'
+    else:
+        test_name = test_type
+
+    color_mean = '#1f77b4'
+
+    # Plot 1: MSS Loss (only window_size >= 8096)
+    ax = axes[0]
+    if len(mss_grouped) > 0:
+        window_sizes_mss = mss_grouped['window_size'].values
+        mss_mean = mss_grouped['mss_loss']['mean'].values
+        mss_std = mss_grouped['mss_loss']['std'].values
+        mss_min = mss_grouped['mss_loss']['min'].values
+        mss_max = mss_grouped['mss_loss']['max'].values
+
+        ax.fill_between(window_sizes_mss, mss_min, mss_max,
+                        alpha=0.2, color=color_mean, label='Min/Max Range')
+        ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
+                    fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=8,
+                    color=color_mean, capsize=5, capthick=2, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('MSS Loss', fontsize=14, fontweight='bold')
+    ax.set_title(f'MSS Loss vs Window Size - {test_name} (window ≥ 8096)',
+                 fontsize=16, fontweight='bold', pad=20)
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both')
+    ax.legend(fontsize=11, loc='best', framealpha=0.95)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+
+    # Plot 2: MSE Loss (all window sizes)
+    ax = axes[1]
+    window_sizes_mse = mse_grouped['window_size'].values
+    mse_mean = mse_grouped['mse_loss']['mean'].values
+    mse_std = mse_grouped['mse_loss']['std'].values
+    mse_min = mse_grouped['mse_loss']['min'].values
+    mse_max = mse_grouped['mse_loss']['max'].values
+
+    ax.fill_between(window_sizes_mse, mse_min, mse_max,
+                    alpha=0.2, color=color_mean, label='Min/Max Range')
+    ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
+                fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=8,
+                color=color_mean, capsize=5, capthick=2, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('MSE Loss', fontsize=14, fontweight='bold')
+    ax.set_title(f'MSE Loss vs Window Size - {test_name} (all windows)',
+                 fontsize=16, fontweight='bold', pad=20)
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both')
+    ax.legend(fontsize=11, loc='best', framealpha=0.95)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+
+    plt.tight_layout()
+    filename = output_dir / f'{test_type}_mss_mse_vs_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename.name}")
+    plt.close()
+
+    return 1
+
+
+def plot_passthrough_reversal_combined_comparison(data, test_types, output_dir):
+    """Plot comparison of all test types on the same axes."""
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+    colors = {
+        'passthrough': '#2ca02c',      # Green
+        'reversal_fwd': '#d62728',     # Red
+        'reversal_bwd': '#ff7f0e'      # Orange
+    }
+
+    labels = {
+        'passthrough': 'Pass-Through (α=0)',
+        'reversal_fwd': 'Reversal Forward (α=2)',
+        'reversal_bwd': 'Reversal Backward (α=-2)'
+    }
+
+    for test_type in test_types:
+        test_data = data[data['test_type'] == test_type].copy()
+
+        if len(test_data) == 0:
+            continue
+
+        # Group by window size
+        grouped = test_data.groupby('window_size').agg({
+            'mss_loss': ['mean', 'std'],
+            'mse_loss': ['mean', 'std']
+        }).reset_index()
+
+        # MSS: only use window sizes >= 8096
+        mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+
+        # MSE: use all window sizes
+        mse_grouped = grouped.copy()
+
+        color = colors.get(test_type, '#1f77b4')
+        label = labels.get(test_type, test_type)
+
+        # Plot MSS (filtered)
+        if len(mss_grouped) > 0:
+            window_sizes_mss = mss_grouped['window_size'].values
+            mss_mean = mss_grouped['mss_loss']['mean'].values
+            mss_std = mss_grouped['mss_loss']['std'].values
+
+            axes[0].errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
+                             fmt='o-', label=label, linewidth=2.5, markersize=8,
+                             color=color, capsize=5, capthick=2, alpha=0.8)
+
+        # Plot MSE (all windows)
+        window_sizes_mse = mse_grouped['window_size'].values
+        mse_mean = mse_grouped['mse_loss']['mean'].values
+        mse_std = mse_grouped['mse_loss']['std'].values
+
+        axes[1].errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
+                         fmt='o-', label=label, linewidth=2.5, markersize=8,
+                         color=color, capsize=5, capthick=2, alpha=0.8)
+
+    # Configure MSS plot
+    axes[0].set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    axes[0].set_ylabel('MSS Loss', fontsize=14, fontweight='bold')
+    axes[0].set_title('MSS Loss Comparison - All Tests (window ≥ 8096)',
+                      fontsize=16, fontweight='bold', pad=20)
+    axes[0].set_xscale('log', base=2)
+    axes[0].grid(True, alpha=0.3, which='both')
+    axes[0].legend(fontsize=12, loc='best', framealpha=0.95)
+    axes[0].tick_params(axis='both', which='major', labelsize=12)
+
+    # Configure MSE plot
+    axes[1].set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    axes[1].set_ylabel('MSE Loss', fontsize=14, fontweight='bold')
+    axes[1].set_title('MSE Loss Comparison - All Tests (all windows)',
+                      fontsize=16, fontweight='bold', pad=20)
+    axes[1].set_xscale('log', base=2)
+    axes[1].grid(True, alpha=0.3, which='both')
+    axes[1].legend(fontsize=12, loc='best', framealpha=0.95)
+    axes[1].tick_params(axis='both', which='major', labelsize=12)
+
+    plt.tight_layout()
+    filename = output_dir / 'comparison_all_tests.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename.name}")
+    plt.close()
+
+    return 1
+
+
+def plot_passthrough_reversal_distributions(data, test_type, output_dir):
+    """Plot distribution of MSS and MSE losses for a specific test type."""
+    test_data = data[data['test_type'] == test_type].copy()
+
+    if len(test_data) == 0:
+        print(f"  No data found for test type: {test_type}")
+        return 0
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Test type name for title
+    if test_type == 'passthrough':
+        test_name = 'Pass-Through (α=0)'
+    elif test_type == 'reversal_fwd':
+        test_name = 'Reversal Forward (α=2)'
+    elif test_type == 'reversal_bwd':
+        test_name = 'Reversal Backward (α=-2)'
+    elif test_type == 'reversal':
+        test_name = 'Reversal (α=±2)'
+    else:
+        test_name = test_type
+
+    color = '#1f77b4'
+
+    # Plot MSS histogram
+    axes[0].hist(test_data['mss_loss'], bins=30, color=color, alpha=0.7, edgecolor='black')
+    axes[0].axvline(test_data['mss_loss'].mean(), color='red', linestyle='--',
+                    linewidth=2, label=f"Mean: {test_data['mss_loss'].mean():.6f}")
+    axes[0].axvline(test_data['mss_loss'].median(), color='orange', linestyle='--',
+                    linewidth=2, label=f"Median: {test_data['mss_loss'].median():.6f}")
+    axes[0].set_xlabel('MSS Loss', fontsize=12, fontweight='bold')
+    axes[0].set_ylabel('Count', fontsize=12, fontweight='bold')
+    axes[0].set_title(f'MSS Loss Distribution - {test_name}', fontsize=14, fontweight='bold')
+    axes[0].legend(fontsize=10)
+    axes[0].grid(True, alpha=0.3)
+
+    # Plot MSE histogram (log scale)
+    axes[1].hist(np.log10(test_data['mse_loss'] + 1e-20), bins=30, color=color,
+                 alpha=0.7, edgecolor='black')
+    axes[1].axvline(np.log10(test_data['mse_loss'].mean() + 1e-20), color='red',
+                    linestyle='--', linewidth=2,
+                    label=f"Mean: {test_data['mse_loss'].mean():.6e}")
+    axes[1].axvline(np.log10(test_data['mse_loss'].median() + 1e-20), color='orange',
+                    linestyle='--', linewidth=2,
+                    label=f"Median: {test_data['mse_loss'].median():.6e}")
+    axes[1].set_xlabel('log₁₀(MSE Loss)', fontsize=12, fontweight='bold')
+    axes[1].set_ylabel('Count', fontsize=12, fontweight='bold')
+    axes[1].set_title(f'MSE Loss Distribution - {test_name}', fontsize=14, fontweight='bold')
+    axes[1].legend(fontsize=10)
+    axes[1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    filename = output_dir / f'{test_type}_loss_distributions.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename.name}")
+    plt.close()
+
+    return 1
+
+
+def plot_passthrough_reversal_per_frame(data, test_type, output_dir):
+    """Plot MSS and MSE for each frame across window sizes."""
+    test_data = data[data['test_type'] == test_type].copy()
+
+    if len(test_data) == 0:
+        print(f"  No data found for test type: {test_type}")
+        return 0
+
+    # Get unique frames
+    frames = sorted(test_data['frame_num'].unique())
+
+    if len(frames) == 0:
+        return 0
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+
+    # Test type name for title
+    if test_type == 'passthrough':
+        test_name = 'Pass-Through (α=0)'
+    elif test_type == 'reversal_fwd':
+        test_name = 'Reversal Forward (α=2)'
+    elif test_type == 'reversal_bwd':
+        test_name = 'Reversal Backward (α=-2)'
+    elif test_type == 'reversal':
+        test_name = 'Reversal (α=±2)'
+    else:
+        test_name = test_type
+
+    # Color map for frames
+    colors = plt.cm.viridis(np.linspace(0, 1, len(frames)))
+
+    for idx, frame in enumerate(frames):
+        frame_data = test_data[test_data['frame_num'] == frame]
+
+        # Sort by window size
+        frame_data = frame_data.sort_values('window_size')
+
+        # MSS: only use window sizes >= 8096
+        mss_frame_data = frame_data[frame_data['window_size'] >= 8096]
+
+        # MSE: use all window sizes
+        mse_frame_data = frame_data
+
+        # Plot MSS (filtered)
+        if len(mss_frame_data) > 0:
+            window_sizes_mss = mss_frame_data['window_size'].values
+            mss = mss_frame_data['mss_loss'].values
+
+            axes[0].plot(window_sizes_mss, mss, 'o-', label=f'Frame {frame}',
+                         linewidth=2, markersize=6, color=colors[idx], alpha=0.8)
+
+        # Plot MSE (all windows)
+        window_sizes_mse = mse_frame_data['window_size'].values
+        mse = mse_frame_data['mse_loss'].values
+
+        axes[1].plot(window_sizes_mse, mse, 'o-', label=f'Frame {frame}',
+                     linewidth=2, markersize=6, color=colors[idx], alpha=0.8)
+
+    # Configure MSS plot
+    axes[0].set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    axes[0].set_ylabel('MSS Loss', fontsize=14, fontweight='bold')
+    axes[0].set_title(f'MSS Loss per Frame - {test_name} (window ≥ 8096)',
+                      fontsize=16, fontweight='bold', pad=20)
+    axes[0].set_xscale('log', base=2)
+    axes[0].grid(True, alpha=0.3, which='both')
+    axes[0].legend(fontsize=10, loc='best', framealpha=0.95, ncol=2)
+    axes[0].tick_params(axis='both', which='major', labelsize=12)
+
+    # Configure MSE plot
+    axes[1].set_xlabel('Window Size (samples)', fontsize=14, fontweight='bold')
+    axes[1].set_ylabel('MSE Loss', fontsize=14, fontweight='bold')
+    axes[1].set_title(f'MSE Loss per Frame - {test_name} (all windows)',
+                      fontsize=16, fontweight='bold', pad=20)
+    axes[1].set_xscale('log', base=2)
+    axes[1].grid(True, alpha=0.3, which='both')
+    axes[1].legend(fontsize=10, loc='best', framealpha=0.95, ncol=2)
+    axes[1].tick_params(axis='both', which='major', labelsize=12)
+
+    plt.tight_layout()
+    filename = output_dir / f'{test_type}_per_frame_analysis.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  → {filename.name}")
+    plt.close()
+
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate FRFT test plots with new folder structure',
@@ -1893,6 +2544,10 @@ Examples:
                         help='FFT comparison test directory (default: fft_comparison)')
     parser.add_argument('--mss', default='test_results/homomorphism_mss_grid',
                         help='MSS grid analysis directory (default: homomorphism_mss_grid)')
+    parser.add_argument('--passthrough', type=str,
+                        help='Pass-through test directory (plots α=0 only)')
+    parser.add_argument('--reversal', type=str,
+                        help='Reversal test directory (plots α=±2 only)')
 
     args = parser.parse_args()
 
@@ -2037,52 +2692,72 @@ Examples:
                             pivot_mse = pivot_mse.sort_index(ascending=True)
                             pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
 
-                            # Get alpha values for proper extent
+                            # Get alpha values for labels
                             alpha1_values = pivot_mss.columns.values
                             alpha2_values = pivot_mss.index.values
 
-                            # Define extent for imshow
-                            extent = [alpha1_values[0], alpha1_values[-1],
-                                      alpha2_values[0], alpha2_values[-1]]
+                            n_rows, n_cols = pivot_mss.shape
+                            tick_every = 4
+
+                            # Prepare tick positions
+                            x_tick_indices = np.arange(0, n_cols, tick_every)
+                            if (n_cols - 1) not in x_tick_indices:
+                                x_tick_indices = np.append(x_tick_indices, n_cols - 1)
+                            x_tick_labels = [f'{alpha1_values[i]:.1f}' for i in x_tick_indices]
+
+                            y_tick_indices = np.arange(0, n_rows, tick_every)
+                            if (n_rows - 1) not in y_tick_indices:
+                                y_tick_indices = np.append(y_tick_indices, n_rows - 1)
+                            y_tick_labels = [f'{alpha2_values[i]:.1f}' for i in y_tick_indices]
 
                             # Create custom heatmap for windowed data
-                            fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+                            fig, axes = plt.subplots(1, 2, figsize=(24, 10))
 
                             # MSS heatmap
                             im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
-                                                interpolation='nearest', origin='lower',
-                                                extent=extent)
+                                                interpolation='nearest', origin='lower')
                             cbar = plt.colorbar(im, ax=axes[0])
                             cbar.set_label('MSS Loss', fontsize=18, fontweight='bold')
                             cbar.ax.tick_params(labelsize=14)
+
+                            axes[0].set_xticks(x_tick_indices)
+                            axes[0].set_xticklabels(x_tick_labels)
+                            axes[0].set_yticks(y_tick_indices)
+                            axes[0].set_yticklabels(y_tick_labels)
+
                             axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
                             axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
                             axes[0].set_title(f'MSS Loss - {int(freq)} Hz - Window {window_size}',
                                               fontsize=20, fontweight='bold')
-                            axes[0].tick_params(axis='both', labelsize=16)
-                            axes[0]
+                            axes[0].tick_params(axis='both', which='major', labelsize=14)
 
-                            # Add alpha sum highlights
-                            add_alpha_sum_highlights(axes[0], alpha1_values, alpha2_values, extent)
+                            axes[0].set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+                            axes[0].set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+                            axes[0].grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
 
                             # MSE heatmap
                             im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
-                                                interpolation='nearest', origin='lower',
-                                                extent=extent)
+                                                interpolation='nearest', origin='lower')
                             cbar = plt.colorbar(im, ax=axes[1])
                             cbar.set_label('MSE Loss', fontsize=18, fontweight='bold')
                             cbar.ax.tick_params(labelsize=14)
+
+                            axes[1].set_xticks(x_tick_indices)
+                            axes[1].set_xticklabels(x_tick_labels)
+                            axes[1].set_yticks(y_tick_indices)
+                            axes[1].set_yticklabels(y_tick_labels)
+
                             axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
                             axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
                             axes[1].set_title(f'MSE Loss - {int(freq)} Hz - Window {window_size}',
                                               fontsize=20, fontweight='bold')
-                            axes[1].tick_params(axis='both', labelsize=16)
-                            axes[1]
+                            axes[1].tick_params(axis='both', which='major', labelsize=14)
 
-                            # Add alpha sum highlights
-                            add_alpha_sum_highlights(axes[1], alpha1_values, alpha2_values, extent)
+                            axes[1].set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+                            axes[1].set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+                            axes[1].grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
 
-                            plt.tight_layout()
+                            plt.tight_layout(pad=1.0)
                             filename = window_subdir / f'heatmap_freq_{int(freq)}Hz.png'
                             plt.savefig(filename, dpi=300)
                             print(f"    → per_window/win_{window_size}/{filename.name}")
@@ -2104,60 +2779,69 @@ Examples:
                         pivot_mse = pivot_mse.sort_index(ascending=True)
                         pivot_mse = pivot_mse[sorted(pivot_mse.columns)]
 
-                        # Get alpha values for proper extent
+                        # Get alpha values for labels
                         alpha1_values = pivot_mss.columns.values
                         alpha2_values = pivot_mss.index.values
 
-                        # Define extent for imshow
-                        extent = [alpha1_values[0], alpha1_values[-1],
-                                  alpha2_values[0], alpha2_values[-1]]
+                        n_rows, n_cols = pivot_mss.shape
+                        tick_every = 4
 
-                        fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+                        # Prepare tick positions
+                        x_tick_indices = np.arange(0, n_cols, tick_every)
+                        if (n_cols - 1) not in x_tick_indices:
+                            x_tick_indices = np.append(x_tick_indices, n_cols - 1)
+                        x_tick_labels = [f'{alpha1_values[i]:.1f}' for i in x_tick_indices]
+
+                        y_tick_indices = np.arange(0, n_rows, tick_every)
+                        if (n_rows - 1) not in y_tick_indices:
+                            y_tick_indices = np.append(y_tick_indices, n_rows - 1)
+                        y_tick_labels = [f'{alpha2_values[i]:.1f}' for i in y_tick_indices]
+
+                        fig, axes = plt.subplots(1, 2, figsize=(24, 10))
 
                         im = axes[0].imshow(pivot_mss.values, cmap='viridis', aspect='auto',
-                                            interpolation='nearest', origin='lower',
-                                            extent=extent)
+                                            interpolation='nearest', origin='lower')
                         cbar = plt.colorbar(im, ax=axes[0])
                         cbar.set_label('MSS Loss', fontsize=18, fontweight='bold')
                         cbar.ax.tick_params(labelsize=14)
 
-                        # Set ticks to align with cell centers
-                        tick_step = 4
-                        x_ticks = alpha1_values[::tick_step]
-                        y_ticks = alpha2_values[::tick_step]
-                        axes[0].set_xticks(x_ticks)
-                        axes[0].set_yticks(y_ticks)
-                        axes[0].set_xticklabels([f'{x:.1f}' for x in x_ticks])
-                        axes[0].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+                        axes[0].set_xticks(x_tick_indices)
+                        axes[0].set_xticklabels(x_tick_labels)
+                        axes[0].set_yticks(y_tick_indices)
+                        axes[0].set_yticklabels(y_tick_labels)
 
                         axes[0].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
                         axes[0].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
                         axes[0].set_title(f'MSS Loss - All Frequencies - Window {window_size}',
                                           fontsize=20, fontweight='bold')
-                        axes[0].tick_params(axis='both', labelsize=16)
-                        axes[0]
+                        axes[0].tick_params(axis='both', which='major', labelsize=14)
+
+                        axes[0].set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+                        axes[0].set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+                        axes[0].grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
 
                         im = axes[1].imshow(pivot_mse.values, cmap='plasma', aspect='auto',
-                                            interpolation='nearest', origin='lower',
-                                            extent=extent)
+                                            interpolation='nearest', origin='lower')
                         cbar = plt.colorbar(im, ax=axes[1])
                         cbar.set_label('MSE Loss', fontsize=18, fontweight='bold')
                         cbar.ax.tick_params(labelsize=14)
 
-                        # Set ticks to align with cell centers
-                        axes[1].set_xticks(x_ticks)
-                        axes[1].set_yticks(y_ticks)
-                        axes[1].set_xticklabels([f'{x:.1f}' for x in x_ticks])
-                        axes[1].set_yticklabels([f'{y:.1f}' for y in y_ticks])
+                        axes[1].set_xticks(x_tick_indices)
+                        axes[1].set_xticklabels(x_tick_labels)
+                        axes[1].set_yticks(y_tick_indices)
+                        axes[1].set_yticklabels(y_tick_labels)
 
                         axes[1].set_xlabel(r'$\alpha_1$', fontsize=24, fontweight='bold')
                         axes[1].set_ylabel(r'$\alpha_2$', fontsize=24, fontweight='bold')
                         axes[1].set_title(f'MSE Loss - All Frequencies - Window {window_size}',
                                           fontsize=20, fontweight='bold')
-                        axes[1].tick_params(axis='both', labelsize=16)
-                        axes[1]
+                        axes[1].tick_params(axis='both', which='major', labelsize=14)
 
-                        plt.tight_layout()
+                        axes[1].set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+                        axes[1].set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+                        axes[1].grid(which='minor', color='white', linestyle='-', linewidth=0.05, alpha=0.1)
+
+                        plt.tight_layout(pad=1.0)
                         filename = window_subdir / 'heatmap_all_frequencies.png'
                         plt.savefig(filename, dpi=300)
                         print(f"    → per_window/win_{window_size}/{filename.name}")
@@ -2207,6 +2891,12 @@ Examples:
                         print("\n  Generating mixed commutativity plots (all windows)...")
                         total_plots += plot_mixed_commutativity_all_windows(comm_df, commutativity_dir)
 
+                # Generate example plots for windowed mode
+                if all_results:
+                    print("\n  Generating best/worst case examples for windowed mode...")
+                    example_count = plot_best_worst_case_examples_windowed(results_df, mss_dir, output_dir)
+                    total_plots += example_count
+
         else:
             # Direct mode (original behavior)
             print("  Detected DIRECT mode")
@@ -2216,13 +2906,11 @@ Examples:
             aggregated_dir = output_dir / 'aggregated'
             analysis_dir = output_dir / 'analysis'
             commutativity_dir = output_dir / 'commutativity'
-            examples_dir = output_dir / 'examples'
 
             per_freq_dir.mkdir(exist_ok=True)
             aggregated_dir.mkdir(exist_ok=True)
             analysis_dir.mkdir(exist_ok=True)
             commutativity_dir.mkdir(exist_ok=True)
-            examples_dir.mkdir(exist_ok=True)
 
             results_file = mss_dir / 'mss_grid_results.txt'
             comm_results_file = mss_dir / 'mss_commutativity_results.txt'
@@ -2261,10 +2949,10 @@ Examples:
                     plot_mss_vs_alpha_wrapped(results_data, analysis_dir)
                     total_plots += 2  # Creates both MSS and MSE plots
 
-                    # Best/worst/medium case example comparisons
+                    # Best/worst/medium case example comparisons + quartile samples
                     print("  Generating best/worst case examples...")
-                    example_count = plot_best_worst_case_examples(results_data, mss_dir, examples_dir)
-                    total_plots += example_count  # Creates 60 example plots (20 worst, 20 medium, 20 best)
+                    example_count = plot_best_worst_case_examples(results_data, mss_dir, output_dir)
+                    total_plots += example_count  # Creates case examples + quartile samples with WAV copies
             else:
                 print(f"  ⚠ Results file not found: {results_file}")
 
@@ -2280,6 +2968,72 @@ Examples:
                 print(f"  ⚠ Commutativity results file not found: {comm_results_file}")
     else:
         print(f"\n⚠ Skipping MSS grid analysis (directory not found: {mss_dir})")
+
+    # Process Pass-Through Test
+    if args.passthrough:
+        passthrough_dir = Path(args.passthrough)
+        if passthrough_dir.exists():
+            print(f"\n[Processing Pass-Through Test: {passthrough_dir}]")
+
+            mss_results_file = passthrough_dir / 'mss_analysis_results.txt'
+            plots_dir = passthrough_dir / 'plots'
+            plots_dir.mkdir(exist_ok=True)
+
+            if mss_results_file.exists():
+                print("  Loading MSS analysis results...")
+                data = load_passthrough_reversal_results(mss_results_file)
+
+                if data is not None:
+                    test_types = ['passthrough']
+
+                    print("  Generating pass-through plots (α=0)...")
+                    for test_type in test_types:
+                        total_plots += plot_passthrough_reversal_mss_mse_vs_window_size(data, test_type, plots_dir)
+                        total_plots += plot_passthrough_reversal_distributions(data, test_type, plots_dir)
+                        total_plots += plot_passthrough_reversal_per_frame(data, test_type, plots_dir)
+
+                    print(f"  ✓ Generated plots in {plots_dir}/")
+            else:
+                print(f"  ⚠ MSS analysis results not found: {mss_results_file}")
+                print("    Run analyze_passthrough_reversal_mss.py first")
+        else:
+            print(f"\n⚠ Pass-through directory not found: {passthrough_dir}")
+
+    # Process Reversal Test
+    if args.reversal:
+        reversal_dir = Path(args.reversal)
+        if reversal_dir.exists():
+            print(f"\n[Processing Reversal Test: {reversal_dir}]")
+
+            mss_results_file = reversal_dir / 'mss_analysis_results.txt'
+            plots_dir = reversal_dir / 'plots'
+            plots_dir.mkdir(exist_ok=True)
+
+            if mss_results_file.exists():
+                print("  Loading MSS analysis results...")
+                data = load_passthrough_reversal_results(mss_results_file)
+
+                if data is not None:
+                    # Aggregate both reversal directions (α=±2) together
+                    reversal_data = data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])].copy()
+
+                    if len(reversal_data) > 0:
+                        # Change test_type to just 'reversal' for aggregated plotting
+                        reversal_data['test_type'] = 'reversal'
+
+                        print("  Generating reversal plots (α=±2 aggregated)...")
+                        total_plots += plot_passthrough_reversal_mss_mse_vs_window_size(reversal_data, 'reversal', plots_dir)
+                        total_plots += plot_passthrough_reversal_distributions(reversal_data, 'reversal', plots_dir)
+                        total_plots += plot_passthrough_reversal_per_frame(reversal_data, 'reversal', plots_dir)
+
+                        print(f"  ✓ Generated plots in {plots_dir}/")
+                    else:
+                        print("  No reversal data found")
+            else:
+                print(f"  ⚠ MSS analysis results not found: {mss_results_file}")
+                print("    Run analyze_passthrough_reversal_mss.py first")
+        else:
+            print(f"\n⚠ Reversal directory not found: {reversal_dir}")
 
     # Summary
     print("\n" + "=" * 70)

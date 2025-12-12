@@ -1,5 +1,18 @@
 #!/bin/bash
 # Shell script to compile and run frft_test_fft_comparison (macOS only)
+#
+# Usage: ./run_test_fft_comparison.sh [options]
+#
+# Options are passed directly to the test program. Common options:
+#   --normalize-fft       Enable FFT normalization (default)
+#   --no-normalize-fft    Disable FFT normalization (use raw values)
+#   --quick              Run quick test with fewer parameters
+#   --help               Show detailed help
+#
+# Examples:
+#   ./run_test_fft_comparison.sh                    # Run with defaults
+#   ./run_test_fft_comparison.sh --no-normalize-fft # Run without normalization
+#   ./run_test_fft_comparison.sh --quick            # Run quick test
 
 set -e  # Exit on error
 
@@ -51,7 +64,8 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🚀 Running test..."
     echo "================================================"
-    "$EVAL_DIR/frft_test_fft_comparison"
+    # Pass all command-line arguments to the test program
+    "$EVAL_DIR/frft_test_fft_comparison" "$@"
 else
     echo "❌ Compilation failed!"
     exit 1
