@@ -39,7 +39,6 @@ struct TestConfig {
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
-    bool normalize_fft = true;  // Normalize FFT magnitude spectra before comparison
     std::string output_filename = "test_results/fft_comparison/results.txt";
     std::string detailed_log_filename = "test_results/fft_comparison/detailed_log.txt";
     std::string figures_dir = "test_results/fft_comparison/figures";
@@ -83,12 +82,11 @@ bool create_directories(const std::string& path) {
     return true;
 }
 
-// Write magnitude spectra to CSV (optionally normalized and in dB)
+// Write magnitude spectra to CSV (normalized and in dB)
 void write_spectra_to_csv(const std::string& filename,
                          const std::vector<double>& frft_mag,
                          const std::vector<double>& fft_mag,
-                         double sample_rate,
-                         bool normalize = true) {
+                         double sample_rate) {
     std::ofstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Error: Cannot open file for writing: " << filename << "\n";
@@ -97,24 +95,19 @@ void write_spectra_to_csv(const std::string& filename,
 
     int n = frft_mag.size();
 
-    double frft_max = 1.0;
-    double fft_max = 1.0;
+    // Find max values for normalization
+    double frft_max = *std::max_element(frft_mag.begin(), frft_mag.end());
+    double fft_max = *std::max_element(fft_mag.begin(), fft_mag.end());
 
-    if (normalize) {
-        // Find max values for normalization
-        frft_max = *std::max_element(frft_mag.begin(), frft_mag.end());
-        fft_max = *std::max_element(fft_mag.begin(), fft_mag.end());
-
-        // Avoid division by zero
-        if (frft_max < 1e-10) frft_max = 1.0;
-        if (fft_max < 1e-10) fft_max = 1.0;
-    }
+    // Avoid division by zero
+    if (frft_max < 1e-10) frft_max = 1.0;
+    if (fft_max < 1e-10) fft_max = 1.0;
 
     file << "bin,frequency,frft_db,fft_db\n";
     for (int i = 0; i < n; ++i) {
         double freq = (i * sample_rate) / n;
 
-        // Normalize to peak (or leave as-is if not normalizing) and convert to dB
+        // Normalize to peak and convert to dB
         double frft_normalized = frft_mag[i] / frft_max;
         double fft_normalized = fft_mag[i] / fft_max;
 
@@ -137,8 +130,7 @@ void generate_plot_script(const std::string& csv_filename,
                          double test_frequency,
                          double sample_rate,
                          double mse,
-                         double correlation,
-                         bool normalized = true) {
+                         double correlation) {
     std::ofstream script("plot_fft_comparison.py");
     if (!script.is_open()) {
         std::cerr << "Error: Cannot create plotting script\n";
@@ -152,12 +144,9 @@ void generate_plot_script(const std::string& csv_filename,
     script << "# Read data\n";
     script << "data = pd.read_csv('" << csv_filename << "')\n\n";
 
-    std::string norm_label = normalized ? "Peak-Normalized" : "Raw Magnitudes";
-    std::string ylabel = normalized ? "Magnitude (dB relative to peak)" : "Magnitude (dB absolute)";
-
     script << "# Create figure with 3 subplots\n";
     script << "fig, axes = plt.subplots(3, 1, figsize=(14, 12))\n";
-    script << "fig.suptitle(f'FRFT(α=1) vs FFT Comparison (" << norm_label << ")\\n";
+    script << "fig.suptitle(f'FRFT(α=1) vs FFT Comparison (Peak-Normalized)\\n";
     script << "Window Size: " << window_size
            << ", Test Frequency: " << test_frequency << " Hz\\n";
     script << "Sample Rate: " << sample_rate << " Hz', fontsize=14, fontweight='bold')\n\n";
@@ -165,7 +154,7 @@ void generate_plot_script(const std::string& csv_filename,
     script << "# Plot 1: Full spectrum comparison (dB scale)\n";
     script << "axes[0].plot(data['frequency'], data['frft_db'], 'b-', linewidth=1.5, alpha=0.7, label='FRFT (α=1)')\n";
     script << "axes[0].plot(data['frequency'], data['fft_db'], 'r--', linewidth=1.5, alpha=0.7, label='FFT')\n";
-    script << "axes[0].set_ylabel('" << ylabel << "', fontsize=11)\n";
+    script << "axes[0].set_ylabel('Magnitude (dB relative to peak)', fontsize=11)\n";
     script << "axes[0].set_title('Full Spectrum: FRFT(α=1) vs FFT', fontsize=12, fontweight='bold')\n";
     script << "axes[0].set_xlim([0, data['frequency'].max() / 2])  # Show up to Nyquist\n";
     script << "axes[0].set_ylim([-100, 5])  # dB range\n";
@@ -180,23 +169,33 @@ void generate_plot_script(const std::string& csv_filename,
     script << "if mask.any():\n";
     script << "    axes[1].plot(data.loc[mask, 'frequency'], data.loc[mask, 'frft_db'], 'b-', linewidth=2, label='FRFT (α=1)')\n";
     script << "    axes[1].plot(data.loc[mask, 'frequency'], data.loc[mask, 'fft_db'], 'r--', linewidth=2, label='FFT')\n";
-    script << "    axes[1].set_ylabel('" << ylabel << "', fontsize=11)\n";
+    script << "    axes[1].set_ylabel('Magnitude (dB relative to peak)', fontsize=11)\n";
     script << "    axes[1].set_title(f'Zoomed View: {test_freq:.0f} Hz ± 20%', fontsize=12, fontweight='bold')\n";
     script << "    axes[1].set_ylim([-60, 5])  # dB range for zoomed view\n";
     script << "    axes[1].grid(True, alpha=0.3)\n";
     script << "    axes[1].legend(loc='upper right', fontsize=10)\n";
     script << "    axes[1].set_xlabel('Frequency (Hz)', fontsize=10)\n\n";
 
-    script << "# Plot 3: Absolute difference in dB\n";
-    script << "diff = np.abs(data['frft_db'] - data['fft_db'])\n";
-    script << "axes[2].plot(data['frequency'], diff, 'g-', linewidth=1.5)\n";
-    script << "axes[2].set_ylabel('Absolute Difference (dB)', fontsize=11)\n";
-    script << "axes[2].set_xlabel('Frequency (Hz)', fontsize=10)\n";
-    script << "axes[2].set_title(f'Absolute dB Difference (MSE: {" << mse
-           << ":.2e}, Correlation: {" << correlation << ":.6f})', fontsize=12, fontweight='bold')\n";
-    script << "axes[2].set_xlim([0, data['frequency'].max() / 2])\n";
-    script << "axes[2].set_ylim([0, max(2.0, diff.max() * 1.1)])  # Auto-scale with minimum range\n";
-    script << "axes[2].grid(True, alpha=0.3)\n\n";
+    script << "# Plot 3: Difference plot (dB scale)\n";
+    script << "difference = data['frft_db'] - data['fft_db']\n";
+    script << "axes[2].plot(data['frequency'], difference, 'g-', linewidth=1, alpha=0.8, label='FRFT - FFT')\n";
+    script << "axes[2].axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)\n";
+    script << "axes[2].set_ylabel('Magnitude Difference (dB)', fontsize=11)\n";
+    script << "axes[2].set_title('Difference: FRFT(α=1) - FFT', fontsize=12, fontweight='bold')\n";
+    script << "axes[2].set_xlim([0, data['frequency'].max() / 2])  # Show up to Nyquist\n";
+    script << "axes[2].grid(True, alpha=0.3)\n";
+    script << "axes[2].legend(loc='upper right', fontsize=10)\n";
+    script << "axes[2].set_xlabel('Frequency (Hz)', fontsize=10)\n\n";
+
+    script << "# Add text box with statistics\n";
+    script << "stats_text = f'MSE (normalized magnitudes): {" << mse << ":.2e}\\n'\n";
+    script << "stats_text += f'Correlation: {" << correlation << ":.6f}'\n";
+    script << "axes[2].text(0.02, 0.98, stats_text,\n";
+    script << "            transform=axes[2].transAxes,\n";
+    script << "            verticalalignment='top',\n";
+    script << "            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),\n";
+    script << "            fontsize=9,\n";
+    script << "            family='monospace')\n\n";
 
     script << "# Adjust layout and save\n";
     script << "plt.tight_layout()\n";
@@ -295,7 +294,7 @@ double calculate_correlation(const std::vector<double>& signal1, const std::vect
     return numerator / std::sqrt(denom1 * denom2);
 }
 
-// Compute standard FFT using FFTW
+// Compute standard FFT using FFTW with sqrt(N) normalization
 void compute_fft(const double* real_in, const double* imag_in, int size,
                  double* real_out, double* imag_out) {
     // Allocate FFTW arrays
@@ -312,10 +311,11 @@ void compute_fft(const double* real_in, const double* imag_in, int size,
     fftw_plan plan = fftw_plan_dft_1d(size, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
-    // Copy output data
+    // Apply sqrt(N) normalization and copy output data
+    double normalization_factor = 1.0 / std::sqrt(static_cast<double>(size));
     for (int i = 0; i < size; ++i) {
-        real_out[i] = out[i][0];
-        imag_out[i] = out[i][1];
+        real_out[i] = out[i][0] * normalization_factor;
+        imag_out[i] = out[i][1] * normalization_factor;
     }
 
     // Cleanup
@@ -331,7 +331,6 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
                                       double frequency,
                                       double sample_rate,
                                       int n_analysis,
-                                      bool normalize_fft,
                                       std::vector<double>& avg_frft_magnitude,
                                       std::vector<double>& avg_fft_magnitude) {
     FFTComparisonResult result;
@@ -400,7 +399,7 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
             return result;
         }
 
-        // Compute standard FFT
+        // Compute standard FFT (with sqrt(N) normalization applied)
         compute_fft(real_in.data(), imag_in.data(), window_size,
                    real_fft.data(), imag_fft.data());
 
@@ -465,32 +464,22 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
         avg_fft_magnitude[i] = fft_magnitude_accum[i] / num_frames;
     }
 
-    // Prepare magnitude spectra for comparison
-    std::vector<double> frft_for_comparison;
-    std::vector<double> fft_for_comparison;
+    // Normalize magnitudes to their peaks for comparison
+    double frft_max = *std::max_element(avg_frft_magnitude.begin(), avg_frft_magnitude.end());
+    double fft_max = *std::max_element(avg_fft_magnitude.begin(), avg_fft_magnitude.end());
 
-    if (normalize_fft) {
-        // Normalize magnitudes to their peaks for fair comparison
-        double frft_max = *std::max_element(avg_frft_magnitude.begin(), avg_frft_magnitude.end());
-        double fft_max = *std::max_element(avg_fft_magnitude.begin(), avg_fft_magnitude.end());
+    if (frft_max < 1e-10) frft_max = 1.0;
+    if (fft_max < 1e-10) fft_max = 1.0;
 
-        if (frft_max < 1e-10) frft_max = 1.0;
-        if (fft_max < 1e-10) fft_max = 1.0;
+    std::vector<double> frft_for_comparison(window_size);
+    std::vector<double> fft_for_comparison(window_size);
 
-        frft_for_comparison.resize(window_size);
-        fft_for_comparison.resize(window_size);
-
-        for (int i = 0; i < window_size; ++i) {
-            frft_for_comparison[i] = avg_frft_magnitude[i] / frft_max;
-            fft_for_comparison[i] = avg_fft_magnitude[i] / fft_max;
-        }
-    } else {
-        // Use raw (unnormalized) magnitudes
-        frft_for_comparison = avg_frft_magnitude;
-        fft_for_comparison = avg_fft_magnitude;
+    for (int i = 0; i < window_size; ++i) {
+        frft_for_comparison[i] = avg_frft_magnitude[i] / frft_max;
+        fft_for_comparison[i] = avg_fft_magnitude[i] / fft_max;
     }
 
-    // Calculate metrics on the chosen magnitude representation
+    // Calculate metrics on the normalized magnitude representation
     double mag_mse = calculate_mse(frft_for_comparison, fft_for_comparison);
     double mag_max_error = calculate_max_error(frft_for_comparison, fft_for_comparison);
     double mag_mean_error = calculate_mean_error(frft_for_comparison, fft_for_comparison);
@@ -537,7 +526,7 @@ void run_test_suite(const TestConfig& config) {
     std::cout << "\n";
     std::cout << "  Sample Rate: " << config.sample_rate << " Hz\n";
     std::cout << "  Frames per Test: " << config.n_analysis << "\n";
-    std::cout << "  FFT Normalization: " << (config.normalize_fft ? "Enabled" : "Disabled") << "\n";
+    std::cout << "  FFT Normalization: sqrt(N) applied to FFTW output\n";
     std::cout << "  Output File: " << config.output_filename << "\n";
     std::cout << "  Figures Directory: " << config.figures_dir << "\n\n";
 
@@ -548,78 +537,46 @@ void run_test_suite(const TestConfig& config) {
 
     // Calculate total number of tests
     int total_tests = config.window_sizes.size() * config.overlap_factors.size() *
-                      config.test_frequencies.size();
+                     config.test_frequencies.size();
 
     std::cout << "Total tests to run: " << total_tests << "\n\n";
 
-    // Open output file
+    // Open output files
     std::ofstream out_file(config.output_filename);
     if (!out_file.is_open()) {
         std::cerr << "Error: Cannot open output file: " << config.output_filename << "\n";
         return;
     }
 
-    // Write header
-    out_file << "# FRFT vs FFT Comparison Test Results (α=1)\n";
-    out_file << "# Testing: FRFT(α=1) ≈ FFT\n";
-    out_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
-    out_file << "# Number of Analysis Frames: " << config.n_analysis << "\n";
-    out_file << "# Processing: Frame-by-frame with Hamming window applied to each frame\n";
-    out_file << "#\n";
-    out_file << "# NOTE: All magnitude metrics are calculated on NORMALIZED spectra\n";
-    out_file << "# (both FRFT and FFT are normalized to their own peak = 1.0)\n";
-    out_file << "# This allows fair comparison regardless of absolute magnitude differences.\n";
-    out_file << "#\n";
-    out_file << "# Columns:\n";
-    out_file << "# 1. Window Size\n";
-    out_file << "# 2. Overlap Factor\n";
-    out_file << "# 3. Hop Size\n";
-    out_file << "# 4. Number of Frames\n";
-    out_file << "# 5. Frequency (Hz)\n";
-    out_file << "# 6. MSE Magnitude (normalized spectra)\n";
-    out_file << "# 7. MSE Phase (between FRFT and FFT phase spectra)\n";
-    out_file << "# 8. MSE Complex (between FRFT and FFT complex values)\n";
-    out_file << "# 9. Correlation Magnitude (normalized spectra)\n";
-    out_file << "# 10. Max Error Magnitude (normalized spectra)\n";
-    out_file << "# 11. Mean Error Magnitude (normalized spectra)\n";
-    out_file << "# 12. Success\n";
-    out_file << "#\n";
-    out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\t"
-             << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\tCorrelation_Mag\t"
-             << "MaxError_Mag\tMeanError_Mag\tSuccess\n";
-
-    // Open detailed log file
     std::ofstream detail_file(config.detailed_log_filename);
     if (!detail_file.is_open()) {
-        std::cerr << "Warning: Cannot open detailed log file: " << config.detailed_log_filename << "\n";
-        std::cerr << "Continuing without detailed logging...\n";
-    } else {
-        detail_file << "# FRFT vs FFT Comparison Test - Detailed Log\n";
-        detail_file << "# Every individual test result is logged here\n";
-        detail_file << "# Sample Rate: " << config.sample_rate << " Hz\n";
-        detail_file << "# All magnitude metrics are on normalized spectra\n";
-        detail_file << "# StartSample and EndSample refer to the first frame (frame 0) position\n";
-        detail_file << "#\n";
-        detail_file << "TestID\tWindowSize\tOverlapFactor\tHopSize\tNumFrames\tStartSample\tEndSample\tFrequency\t"
-                   << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\tCorrelation_Mag\t"
-                   << "MaxError_Mag\tMeanError_Mag\tSuccess\n";
+        std::cerr << "Warning: Cannot open detailed log file\n";
     }
 
-    // Create FRFT engine
+    // Write headers
+    out_file << "WindowSize\tOverlapFactor\tHopSize\tNumFrames\tFrequency\t"
+             << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\t"
+             << "Correlation_Mag\tMaxError_Mag\tMeanError_Mag\tSuccess\n";
+
+    if (detail_file.is_open()) {
+        detail_file << "TestNum\tWindowSize\tOverlapFactor\tHopSize\tNumFrames\t"
+                   << "StartSample\tEndSample\tFrequency\t"
+                   << "MSE_Magnitude\tMSE_Phase\tMSE_Complex\t"
+                   << "Correlation_Mag\tMaxError_Mag\tMeanError_Mag\tSuccess\n";
+    }
+
+    // Initialize engine
     FRFTEngine engine;
 
-    // Progress tracking
+    // Run tests
+    auto start_time = std::chrono::high_resolution_clock::now();
     int test_count = 0;
     int failed_count = 0;
-    auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Run tests
     for (int window_size : config.window_sizes) {
-        std::cout << "\nTesting window size: " << window_size << "\n";
-        std::cout << "─────────────────────────────────────────────────\n";
-
-        // Pre-allocate buffers for this window size
-        engine.prepare(window_size);
+        std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
+        std::cout << "║  Window Size: " << std::setw(6) << window_size << " samples                                ║\n";
+        std::cout << "╚════════════════════════════════════════════════════════════════╝\n\n";
 
         for (int overlap_factor : config.overlap_factors) {
             int hop_size = window_size / overlap_factor;
@@ -636,7 +593,6 @@ void run_test_suite(const TestConfig& config) {
                 FFTComparisonResult result = test_frft_vs_fft(
                     engine, window_size, overlap_factor,
                     frequency, config.sample_rate, config.n_analysis,
-                    config.normalize_fft,
                     avg_frft_mag, avg_fft_mag);
 
                 // Write result to file
@@ -698,10 +654,9 @@ void run_test_suite(const TestConfig& config) {
                                               "_ws" + std::to_string(window_size) + ".png";
 
                     write_spectra_to_csv(csv_filename, avg_frft_mag, avg_fft_mag,
-                                        config.sample_rate, config.normalize_fft);
+                                        config.sample_rate);
                     generate_plot_script(csv_filename, png_filename, window_size, frequency,
-                                       config.sample_rate, result.mse_magnitude, result.correlation_mag,
-                                       config.normalize_fft);
+                                       config.sample_rate, result.mse_magnitude, result.correlation_mag);
 
                     int ret = system("python3 plot_fft_comparison.py 2>/dev/null");
                     if (ret != 0) {
@@ -751,13 +706,12 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
             std::cout << "Tests: FRFT(α=1) ≈ FFT\n\n";
             std::cout << "Usage: " << argv[0] << " [options]\n\n";
             std::cout << "Options:\n";
-            std::cout << "  --output FILE       Output filename (default: frft_vs_fft_results.txt)\n";
+            std::cout << "  --output FILE       Output filename (default: test_results/fft_comparison/results.txt)\n";
             std::cout << "  --sample-rate SR    Sample rate in Hz (default: 44100)\n";
             std::cout << "  --n-analysis N      Number of frames to analyze (default: 20)\n";
-            std::cout << "  --normalize-fft     Normalize FFT magnitudes before comparison (default: true)\n";
-            std::cout << "  --no-normalize-fft  Don't normalize FFT magnitudes (use raw values)\n";
             std::cout << "  --quick            Run quick test (fewer window sizes and frequencies)\n";
-            std::cout << "  --help             Show this help message\n";
+            std::cout << "  --help             Show this help message\n\n";
+            std::cout << "Note: FFT is normalized by sqrt(N) before comparison with FRFT.\n";
             return false;
         }
         else if (arg == "--output" && i + 1 < argc) {
@@ -768,12 +722,6 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
         }
         else if (arg == "--n-analysis" && i + 1 < argc) {
             config.n_analysis = std::stoi(argv[++i]);
-        }
-        else if (arg == "--normalize-fft") {
-            config.normalize_fft = true;
-        }
-        else if (arg == "--no-normalize-fft") {
-            config.normalize_fft = false;
         }
         else if (arg == "--quick") {
             config.window_sizes = {64, 256, 1024};

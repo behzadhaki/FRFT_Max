@@ -4,15 +4,14 @@
 # Usage: ./run_test_fft_comparison.sh [options]
 #
 # Options are passed directly to the test program. Common options:
-#   --normalize-fft       Enable FFT normalization (default)
-#   --no-normalize-fft    Disable FFT normalization (use raw values)
 #   --quick              Run quick test with fewer parameters
 #   --help               Show detailed help
 #
 # Examples:
 #   ./run_test_fft_comparison.sh                    # Run with defaults
-#   ./run_test_fft_comparison.sh --no-normalize-fft # Run without normalization
 #   ./run_test_fft_comparison.sh --quick            # Run quick test
+#
+# Note: FFT is normalized by sqrt(N) before comparison with FRFT
 
 set -e  # Exit on error
 
