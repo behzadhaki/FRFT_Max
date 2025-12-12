@@ -7,11 +7,7 @@ In this test, we compare the output of the FRFT implementation with the standard
 
 ```commandline
 chmod +x run_test_*.sh
-# Default (normalized)
 ./run_test_fft_comparison.sh
-
-# Without normalization
-./run_test_fft_comparison.sh --no-normalize-fft
 ```
 
 The results will saved in 'test_results/fft_comparison/' directory containing some text files as well as sample plots.
