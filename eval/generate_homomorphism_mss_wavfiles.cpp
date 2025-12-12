@@ -18,13 +18,11 @@
 
 // Default values
 const int DEFAULT_SAMPLE_RATE = 44100;
-const int DEFAULT_OVERLAPS_PER_FRAME = 4;
 
 // Configurable parameters (will be set from command line)
 double DURATION_SECONDS = 1.0;
 int DURATION_SAMPLES = DEFAULT_SAMPLE_RATE;
 int SAMPLE_RATE = DEFAULT_SAMPLE_RATE;
-int OVERLAPS_PER_FRAME = DEFAULT_OVERLAPS_PER_FRAME;
 std::vector<int> WINDOW_SIZES = {512, 1024, 2048, 4096};
 std::vector<double> frequencies = {100, 200, 300, 440, 500, 1000, 1500, 2000, 3000, 4000, 6000, 8000, 10000};
 double ALPHA_MIN = -2.0;
@@ -79,21 +77,22 @@ bool write_wav_file(const std::string& filename, const std::vector<double>& samp
 
 // Create directory recursively
 bool create_directories(const std::string& path) {
+    if (path.empty()) return true;
+
     std::string current_path;
     for (size_t i = 0; i < path.length(); ++i) {
+        current_path += path[i];
+
+        // Create directory at each separator or at the end
         if (path[i] == '/' || path[i] == '\\' || i == path.length() - 1) {
-            if (i == path.length() - 1 && path[i] != '/' && path[i] != '\\') {
-                current_path += path[i];
-            } else {
-                current_path += path[i];
+            // Skip if current_path is just a separator
+            if (current_path.length() > 1 || (current_path.length() == 1 && current_path[0] != '/' && current_path[0] != '\\')) {
+                #ifdef _WIN32
+                _mkdir(current_path.c_str());
+                #else
+                mkdir(current_path.c_str(), 0755);
+                #endif
             }
-            #ifdef _WIN32
-            _mkdir(current_path.c_str());
-            #else
-            mkdir(current_path.c_str(), 0755);
-            #endif
-        } else {
-            current_path += path[i];
         }
     }
     return true;
@@ -108,15 +107,7 @@ void generate_sine_wave(std::vector<double>& signal, int size, double frequency,
     }
 }
 
-// Generate Hann window
-void generate_hann_window(std::vector<double>& window, int size) {
-    window.resize(size);
-    for (int i = 0; i < size; ++i) {
-        window[i] = 0.5 * (1.0 - std::cos(2.0 * M_PI * i / (size - 1)));
-    }
-}
-
-// Apply windowed FRFT with overlap-add
+// Apply non-overlapping windowed FRFT (no Hanning, no overlap-add)
 bool apply_windowed_frft(
     FRFTEngine& engine,
     const std::vector<double>& input_signal,
@@ -125,23 +116,11 @@ bool apply_windowed_frft(
     double alpha,
     int sample_rate)
 {
-    int hop_size = window_size / OVERLAPS_PER_FRAME;
     int signal_length = input_signal.size();
 
-    // Initialize output with zeros
-    output_signal.assign(signal_length, 0.0);
-
-    // Generate Hann window
-    std::vector<double> hann_window;
-    generate_hann_window(hann_window, window_size);
-
-    // Normalization factor for overlap-add
-    std::vector<double> norm_factor(signal_length, 0.0);
-    for (int frame_start = 0; frame_start <= signal_length - window_size; frame_start += hop_size) {
-        for (int i = 0; i < window_size; ++i) {
-            norm_factor[frame_start + i] += hann_window[i] * hann_window[i];
-        }
-    }
+    // Initialize output with zeros - need separate real and imaginary accumulators
+    std::vector<double> output_real(signal_length, 0.0);
+    std::vector<double> output_imag(signal_length, 0.0);
 
     // Prepare engine for this window size
     engine.prepare(window_size);
@@ -152,11 +131,11 @@ bool apply_windowed_frft(
     std::vector<double> real_out(window_size);
     std::vector<double> imag_out(window_size);
 
-    // Process each frame
-    for (int frame_start = 0; frame_start <= signal_length - window_size; frame_start += hop_size) {
-        // Extract and window the frame
+    // Process each non-overlapping frame
+    for (int frame_start = 0; frame_start + window_size <= signal_length; frame_start += window_size) {
+        // Extract the frame (no windowing applied)
         for (int i = 0; i < window_size; ++i) {
-            real_in[i] = input_signal[frame_start + i] * hann_window[i];
+            real_in[i] = input_signal[frame_start + i];
         }
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
@@ -171,23 +150,23 @@ bool apply_windowed_frft(
             return false;
         }
 
-        // Overlap-add with window
+        // Copy output directly (no overlap-add, no windowing)
         for (int i = 0; i < window_size; ++i) {
-            output_signal[frame_start + i] += real_out[i] * hann_window[i];
+            output_real[frame_start + i] = real_out[i];
+            output_imag[frame_start + i] = imag_out[i];
         }
     }
 
-    // Normalize by window overlap
+    // Convert to magnitude for final output
+    output_signal.resize(signal_length);
     for (int i = 0; i < signal_length; ++i) {
-        if (norm_factor[i] > 1e-10) {
-            output_signal[i] /= norm_factor[i];
-        }
+        output_signal[i] = std::sqrt(output_real[i] * output_real[i] + output_imag[i] * output_imag[i]);
     }
 
     return true;
 }
 
-// Apply composed windowed FRFT: alpha1 then alpha2 within each frame before overlap-add
+// Apply composed non-overlapping windowed FRFT: alpha1 then alpha2 within each frame
 bool apply_composed_windowed_frft(
     FRFTEngine& engine,
     const std::vector<double>& input_signal,
@@ -197,23 +176,11 @@ bool apply_composed_windowed_frft(
     double alpha2,
     int sample_rate)
 {
-    int hop_size = window_size / OVERLAPS_PER_FRAME;
     int signal_length = input_signal.size();
 
     // Initialize output with zeros
-    output_signal.assign(signal_length, 0.0);
-
-    // Generate Hann window
-    std::vector<double> hann_window;
-    generate_hann_window(hann_window, window_size);
-
-    // Normalization factor for overlap-add
-    std::vector<double> norm_factor(signal_length, 0.0);
-    for (int frame_start = 0; frame_start <= signal_length - window_size; frame_start += hop_size) {
-        for (int i = 0; i < window_size; ++i) {
-            norm_factor[frame_start + i] += hann_window[i] * hann_window[i];
-        }
-    }
+    std::vector<double> output_real(signal_length, 0.0);
+    std::vector<double> output_imag(signal_length, 0.0);
 
     // Prepare engine for this window size
     engine.prepare(window_size);
@@ -226,15 +193,15 @@ bool apply_composed_windowed_frft(
     std::vector<double> real_out(window_size);
     std::vector<double> imag_out(window_size);
 
-    // Process each frame
-    for (int frame_start = 0; frame_start <= signal_length - window_size; frame_start += hop_size) {
-        // Extract and window the frame
+    // Process each non-overlapping frame
+    for (int frame_start = 0; frame_start + window_size <= signal_length; frame_start += window_size) {
+        // Extract the frame (no windowing applied)
         for (int i = 0; i < window_size; ++i) {
-            real_in[i] = input_signal[frame_start + i] * hann_window[i];
+            real_in[i] = input_signal[frame_start + i];
         }
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
-        // Apply first FRFT
+        // Apply first FRFT with alpha1
         bool success = engine.compute(
             real_in.data(), imag_in.data(),
             real_temp.data(), imag_temp.data(),
@@ -245,7 +212,7 @@ bool apply_composed_windowed_frft(
             return false;
         }
 
-        // Apply second FRFT
+        // Apply second FRFT with alpha2
         success = engine.compute(
             real_temp.data(), imag_temp.data(),
             real_out.data(), imag_out.data(),
@@ -256,17 +223,17 @@ bool apply_composed_windowed_frft(
             return false;
         }
 
-        // Overlap-add with window
+        // Copy output directly (no overlap-add, no windowing)
         for (int i = 0; i < window_size; ++i) {
-            output_signal[frame_start + i] += real_out[i] * hann_window[i];
+            output_real[frame_start + i] = real_out[i];
+            output_imag[frame_start + i] = imag_out[i];
         }
     }
 
-    // Normalize by window overlap
+    // Convert to magnitude for final output
+    output_signal.resize(signal_length);
     for (int i = 0; i < signal_length; ++i) {
-        if (norm_factor[i] > 1e-10) {
-            output_signal[i] /= norm_factor[i];
-        }
+        output_signal[i] = std::sqrt(output_real[i] * output_real[i] + output_imag[i] * output_imag[i]);
     }
 
     return true;
@@ -397,32 +364,31 @@ int main(int argc, char* argv[]) {
               << " (" << total_combinations << " combinations)\n";
 
     if (USE_WINDOWING) {
-        std::cout << "  Processing mode: WINDOWED (overlap-add)\n";
+        std::cout << "  Processing mode: WINDOWED (non-overlapping, no Hanning)\n";
         std::cout << "  Window sizes: ";
         for (size_t i = 0; i < WINDOW_SIZES.size(); ++i) {
             std::cout << WINDOW_SIZES[i];
             if (i < WINDOW_SIZES.size() - 1) std::cout << ", ";
         }
         std::cout << "\n";
-        std::cout << "  Overlaps per frame: " << OVERLAPS_PER_FRAME << "\n";
-        std::cout << "  Total WAV files per freq: " << WINDOW_SIZES.size() * (1 + total_combinations * 2) << "\n\n";
     } else {
         std::cout << "  Processing mode: DIRECT (full transform)\n";
-        std::cout << "  Total WAV files per freq: " << (1 + total_combinations * 2) << "\n\n";
     }
+    std::cout << "  Output directory: " << base_dir << "/\n";
+    std::cout << "\n";
 
     create_directories(base_dir);
 
+    // Initialize FRFT engine
     FRFTEngine engine;
-    if (!USE_WINDOWING) {
-        engine.prepare(DURATION_SAMPLES);
-    }
 
+    // Open metadata file
     std::ofstream metadata(base_dir + "/metadata.txt");
-    metadata << "# FRFT Homomorphism MSS Grid Test Metadata\n";
+    metadata << "# FRFT Homomorphism MSS Grid Test Dataset\n";
+    metadata << "# Generated: " << __DATE__ << " " << __TIME__ << "\n";
     metadata << "# Duration: " << DURATION_SECONDS << " seconds (" << DURATION_SAMPLES << " samples)\n";
     metadata << "# Sample rate: " << SAMPLE_RATE << " Hz\n";
-    metadata << "# Mode: " << (USE_WINDOWING ? "WINDOWED" : "DIRECT") << "\n";
+    metadata << "# Processing mode: " << (USE_WINDOWING ? "WINDOWED (non-overlapping, no Hanning)" : "DIRECT") << "\n";
     if (USE_WINDOWING) {
         metadata << "# Window sizes: ";
         for (size_t i = 0; i < WINDOW_SIZES.size(); ++i) {
@@ -430,10 +396,9 @@ int main(int argc, char* argv[]) {
             if (i < WINDOW_SIZES.size() - 1) metadata << ", ";
         }
         metadata << "\n";
-        metadata << "# Overlaps per frame: " << OVERLAPS_PER_FRAME << "\n";
     }
-    metadata << "# Grid: α₁, α₂ ∈ [-2, 2] with step 0.1\n";
-    metadata << "# α = α₁ + α₂ wrapped to [-2, 2] using modulo 4\n";
+    metadata << "# Alpha grid: [" << ALPHA_MIN << ", " << ALPHA_MAX << "] step " << ALPHA_STEP << "\n";
+    metadata << "# Total combinations: " << total_combinations << "\n";
     if (USE_WINDOWING) {
         metadata << "Frequency\tWindow\tAlpha1\tAlpha2\tAlpha\tSource_File\tAlpha_File\tComposed_File\n";
     } else {
@@ -494,7 +459,7 @@ int main(int argc, char* argv[]) {
                     bool success = false;
 
                     if (USE_WINDOWING) {
-                        // Windowed processing
+                        // Windowed processing (no Hanning, no overlap)
                         // Direct path: single FRFT with alpha
                         success = apply_windowed_frft(engine, source_signal, alpha_result, window_size, alpha, SAMPLE_RATE);
                         if (!success) {
@@ -542,8 +507,11 @@ int main(int argc, char* argv[]) {
                             continue;
                         }
 
-                        std::copy(real_direct.begin(), real_direct.end(), alpha_result.begin());
-                        std::copy(real_composed.begin(), real_composed.end(), composed_result.begin());
+                        // Compute magnitude (sqrt(real^2 + imag^2)) for comparison
+                        for (int i = 0; i < DURATION_SAMPLES; ++i) {
+                            alpha_result[i] = std::sqrt(real_direct[i] * real_direct[i] + imag_direct[i] * imag_direct[i]);
+                            composed_result[i] = std::sqrt(real_composed[i] * real_composed[i] + imag_composed[i] * imag_composed[i]);
+                        }
                     }
 
                     // Create filenames
@@ -602,9 +570,9 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "\n";
     }
-    
+
     metadata.close();
-    
+
     std::cout << "\n╔════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                    Generation Complete                        ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════╝\n\n";
@@ -612,7 +580,10 @@ int main(int argc, char* argv[]) {
     std::cout << "  Total files generated: " << total_files << "\n";
     std::cout << "  Failed operations: " << failed_count << "\n";
     std::cout << "  Output directory: " << base_dir << "/\n";
-    std::cout << "  Metadata file: " << base_dir << "/metadata.txt\n\n";
+    std::cout << "  Metadata file: " << base_dir << "/metadata.txt\n";
+    std::cout << "\nNext steps:\n";
+    std::cout << "  Run the Python analysis:\n";
+    std::cout << "    python3 analyze_homomorphism_mss.py\n\n";
     
     return 0;
 }

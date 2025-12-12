@@ -61,7 +61,7 @@ That said, the transformation can be done in two ways:
 
 ```commandline
 chmod +x run_test_*.sh
-./run_test_mss.sh --dur 0.5 --winsizes single --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
+./run_test_mss.sh --dur 1.5 --winsizes single --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
 ```
 
 This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid_direct/' directory.
@@ -81,7 +81,7 @@ python3 plot_results.py --mss test_results/homomorphism_mss_grid_direct/
 
 ```commandline
 chmod +x run_test_*.sh
-./run_test_mss.sh --dur 0.5 --winsizes 512,1024,2048,4096 --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
+./run_test_mss.sh --dur 1.5 --winsizes 512,1024,2048,4096 --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
 ```
 
 This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid_windowed/' directory.
