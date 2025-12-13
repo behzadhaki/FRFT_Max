@@ -103,6 +103,16 @@ void reverse_signal(const std::vector<double>& input, std::vector<double>& outpu
     }
 }
 
+// Rotate signal by moving first sample to the end
+void rotate_signal_first_to_end(std::vector<double>& signal) {
+    if (signal.size() <= 1) return;
+    double first_sample = signal[0];
+    for (size_t i = 0; i < signal.size() - 1; ++i) {
+        signal[i] = signal[i + 1];
+    }
+    signal[signal.size() - 1] = first_sample;
+}
+
 // Write WAV file (16-bit PCM)
 bool write_wav_file(const std::string& filename, const std::vector<double>& signal,
                     double sample_rate) {
@@ -337,6 +347,12 @@ void test_single_frame(FRFTEngine& engine,
     // Get processed output
     std::vector<double> processed_signal(window_size);
     std::copy(real_out.begin(), real_out.end(), processed_signal.begin());
+
+    // For alpha = ±2 (reversal cases), rotate the processed signal
+    // by moving the first sample to the end before comparison
+    if (test_type == REVERSAL_FORWARD || test_type == REVERSAL_BACKWARD) {
+        rotate_signal_first_to_end(processed_signal);
+    }
 
     // Determine expected output based on test type
     std::vector<double> expected_signal;
