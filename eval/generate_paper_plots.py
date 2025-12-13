@@ -683,6 +683,449 @@ def plot_commutativity_boxplot_by_frequency(data, output_dir):
 
 
 # ============================================================================
+# PERFORMANCE TIMING PLOTS
+# ============================================================================
+
+def load_timing_data(filename):
+    """Load timing results from tab-separated file."""
+    try:
+        data = pd.read_csv(filename, sep='\t')
+        print(f"✓ Loaded {len(data)} records from {filename}")
+        return data
+    except Exception as e:
+        print(f"✗ Error loading file {filename}: {e}")
+        return None
+
+
+def compute_complexity_trajectories(window_sizes, base_time_64):
+    """
+    Compute theoretical complexity trajectories starting from the time at window size 64.
+
+    Args:
+        window_sizes: Array of window sizes
+        base_time_64: The measured time at window size 64
+
+    Returns:
+        Dictionary with O(N), O(N log N), and O(N²) trajectories
+    """
+    # Use 64 as reference point
+    N_base = 64
+
+    trajectories = {}
+
+    for N in window_sizes:
+        if N not in trajectories:
+            trajectories[N] = {}
+
+        # O(N) complexity: time scales linearly with N
+        trajectories[N]['O(N)'] = base_time_64 * (N / N_base)
+
+        # O(N log N) complexity: time scales as N * log(N)
+        trajectories[N]['O(NlogN)'] = base_time_64 * (N / N_base) * (np.log2(N) / np.log2(N_base))
+
+        # O(N²) complexity: time scales as N²
+        trajectories[N]['O(N²)'] = base_time_64 * ((N / N_base) ** 2)
+
+    return trajectories
+
+
+def plot_performance_split_alpha(data, output_dir):
+    """
+    Plot performance in a single figure with multiple subplots:
+    - One subplot for each alpha value
+    - X axis: window size (log scale) - starting from 64
+    - Y axis: mean inference time (ms, log scale)
+    - Three complexity trajectories: O(N), O(N log N), O(N²)
+    """
+    print("  Generating performance plots for all alpha values...")
+
+    # Filter data to start from window size 64
+    data = data[data['window_size'] >= 64].copy()
+
+    window_sizes = sorted(data['window_size'].unique())
+    alphas = sorted(data['alpha'].unique())
+
+    # Create subplots - 3 rows x 4 columns for 11 alpha values
+    fig, axes = plt.subplots(3, 4, figsize=(20, 12))
+    axes = axes.flatten()
+
+    # Define colors
+    alpha_colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
+
+    for idx, alpha in enumerate(alphas):
+        ax = axes[idx]
+
+        alpha_data = data[data['alpha'] == alpha]
+        alpha_data = alpha_data.sort_values('window_size')
+
+        # Plot measured data
+        ax.plot(alpha_data['window_size'], alpha_data['mean_time_ms'],
+                marker='o', markersize=5, linewidth=2, alpha=0.8,
+                color=alpha_colors[idx], label=f'Measured')
+
+        # Get base time at window size 64 for complexity trajectories
+        base_data = alpha_data[alpha_data['window_size'] == 64]
+
+        if len(base_data) > 0:
+            base_time_64 = base_data['mean_time_ms'].values[0]
+
+            # Compute complexity trajectories
+            trajectories = compute_complexity_trajectories(window_sizes, base_time_64)
+
+            # Extract trajectory arrays
+            O_N = [trajectories[N]['O(N)'] for N in window_sizes]
+            O_NlogN = [trajectories[N]['O(NlogN)'] for N in window_sizes]
+            O_N2 = [trajectories[N]['O(N²)'] for N in window_sizes]
+
+            # Plot complexity trajectories
+            ax.plot(window_sizes, O_N, '--', linewidth=2, color='green',
+                    label='O(N)', alpha=0.7)
+            ax.plot(window_sizes, O_NlogN, '--', linewidth=2, color='orange',
+                    label='O(N log N)', alpha=0.7)
+            ax.plot(window_sizes, O_N2, '--', linewidth=2, color='red',
+                    label='O(N²)', alpha=0.7)
+
+        # Formatting
+        ax.set_xscale('log', base=2)
+        ax.set_yscale('log')
+        ax.set_title(f'α = {alpha:.1f}', fontweight='bold', fontsize=14)
+        ax.grid(True, alpha=0.3, linestyle='--', which='both')
+        ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
+
+        # Set x-axis ticks (starting from 64)
+        ax.set_xticks([64, 256, 1024, 4096, 16384, 65536])
+        ax.set_xticklabels(['64', '256', '1K', '4K', '16K', '64K'],
+                           rotation=45, ha='right', fontsize=10)
+        ax.tick_params(axis='y', labelsize=10)
+
+        # Only add axis labels to edge subplots
+        if idx >= 8:  # Bottom row
+            ax.set_xlabel('Window Size', fontsize=11, fontweight='bold')
+        if idx % 4 == 0:  # Left column
+            ax.set_ylabel('Time (ms)', fontsize=11, fontweight='bold')
+
+    # Hide unused subplots (we have 11 alphas, so 1 subplot will be unused)
+    for idx in range(len(alphas), len(axes)):
+        axes[idx].set_visible(False)
+
+    # Add overall title
+    fig.suptitle('FRFT Performance by Alpha Value', fontsize=18, fontweight='bold', y=0.995)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
+
+    filename = output_dir / 'performance_by_alpha.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_rtf_split_alpha(data, output_dir):
+    """
+    Plot Real-Time Factor in a single figure with multiple subplots:
+    - One subplot for each alpha value
+    - X axis: window size (log scale) - starting from 64
+    - Y axis: Real-Time Factor (linear scale)
+    - Horizontal line at RTF = 1.0 (real-time threshold)
+    """
+    print("  Generating RTF plots for all alpha values...")
+
+    # Filter data to start from window size 64
+    data = data[data['window_size'] >= 64].copy()
+
+    window_sizes = sorted(data['window_size'].unique())
+    alphas = sorted(data['alpha'].unique())
+
+    # Create subplots - 3 rows x 4 columns for 11 alpha values
+    fig, axes = plt.subplots(3, 4, figsize=(20, 12))
+    axes = axes.flatten()
+
+    # Define colors
+    alpha_colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
+
+    for idx, alpha in enumerate(alphas):
+        ax = axes[idx]
+
+        alpha_data = data[data['alpha'] == alpha]
+        alpha_data = alpha_data.sort_values('window_size')
+
+        # Plot measured data
+        ax.plot(alpha_data['window_size'], alpha_data['mean_rt_factor'],
+                marker='o', markersize=5, linewidth=2, alpha=0.8,
+                color=alpha_colors[idx], label=f'RTF')
+
+        # Add horizontal line at RTF = 1.0
+        ax.axhline(y=1.0, color='red', linestyle='--', linewidth=2,
+                   label='RT Threshold', alpha=0.7)
+
+        # Formatting
+        ax.set_xscale('log', base=2)
+        # NO log scale on y-axis for RTF
+        ax.set_title(f'α = {alpha:.1f}', fontweight='bold', fontsize=14)
+        ax.grid(True, alpha=0.3, linestyle='--', which='both')
+        ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
+
+        # Set x-axis ticks (starting from 64)
+        ax.set_xticks([64, 256, 1024, 4096, 16384, 65536])
+        ax.set_xticklabels(['64', '256', '1K', '4K', '16K', '64K'],
+                           rotation=45, ha='right', fontsize=10)
+        ax.tick_params(axis='y', labelsize=10)
+
+        # Set y-axis to start at 0
+        ax.set_ylim(bottom=0)
+
+        # Only add axis labels to edge subplots
+        if idx >= 8:  # Bottom row
+            ax.set_xlabel('Window Size', fontsize=11, fontweight='bold')
+        if idx % 4 == 0:  # Left column
+            ax.set_ylabel('RTF', fontsize=11, fontweight='bold')
+
+    # Hide unused subplots (we have 11 alphas, so 1 subplot will be unused)
+    for idx in range(len(alphas), len(axes)):
+        axes[idx].set_visible(False)
+
+    # Add overall title
+    # fig.suptitle('FRFT Real-Time Factor by Alpha Value', fontsize=18, fontweight='bold', y=0.995)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
+
+    filename = output_dir / 'rtf_by_alpha.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_performance_by_alpha_heatmap(data, output_dir):
+    """
+    Plot heatmap showing inference time as a function of window size and alpha.
+    Starting from window size 64.
+    """
+    print("  Generating performance heatmap...")
+
+    # Filter data to start from window size 64
+    data = data[data['window_size'] >= 64].copy()
+
+    # Create pivot table
+    pivot_data = data.pivot_table(
+        values='mean_time_ms',
+        index='alpha',
+        columns='window_size',
+        aggfunc='mean'
+    )
+
+    # Sort by alpha (descending for proper display)
+    pivot_data = pivot_data.sort_index(ascending=False)
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    im = ax.imshow(pivot_data.values, cmap='inferno', aspect='auto')
+
+    ax.set_title('Mean Inference Time Heatmap', fontweight='bold', pad=15)
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('Alpha (α)', fontweight='bold')
+
+    # Set ticks
+    ax.set_xticks(range(len(pivot_data.columns)))
+    ax.set_xticklabels([str(w) for w in pivot_data.columns], rotation=45, ha='right')
+
+    ax.set_yticks(range(len(pivot_data.index)))
+    ax.set_yticklabels([f'{a:.1f}' for a in pivot_data.index])
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('Mean Time (ms)', fontweight='bold')
+    cbar.ax.tick_params(labelsize=12)
+
+    plt.tight_layout()
+
+    filename = output_dir / 'performance_heatmap.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_performance_all_alphas_aggregated(data, output_dir):
+    """
+    Plot performance with all alphas aggregated together for each window size.
+    Shows mean, min, max with error bars/shading.
+    Includes O(N), O(N log N), O(N²) complexity trajectories.
+    Starting from window size 64.
+    Second y-axis shows audio buffer duration in ms.
+    """
+    print("  Generating performance plot with all alphas aggregated...")
+
+    # Filter data to start from window size 64
+    data = data[data['window_size'] >= 64].copy()
+
+    window_sizes = sorted(data['window_size'].unique())
+
+    # Aggregate statistics across all alphas for each window size
+    agg_stats = data.groupby('window_size').agg({
+        'mean_time_ms': ['mean', 'min', 'max', 'std']
+    }).reset_index()
+
+    agg_stats.columns = ['window_size', 'mean', 'min', 'max', 'std']
+    agg_stats = agg_stats.sort_values('window_size')
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Plot mean with shaded region for min/max
+    ax.plot(agg_stats['window_size'], agg_stats['mean'],
+            marker='o', markersize=7, linewidth=3,
+            color=COLORS['mss'], label='Mean (all α)', alpha=0.9)
+
+    # Add shaded region for min/max range
+    ax.fill_between(agg_stats['window_size'],
+                    agg_stats['min'],
+                    agg_stats['max'],
+                    alpha=0.3, color=COLORS['mss'],
+                    label='Min-Max Range')
+
+    # Get base time at window size 64 for complexity trajectories
+    base_data = data[(data['window_size'] == 64)]
+    if len(base_data) > 0:
+        base_time_64 = base_data['mean_time_ms'].mean()
+
+        # Compute complexity trajectories
+        trajectories = compute_complexity_trajectories(window_sizes, base_time_64)
+
+        # Extract trajectory arrays
+        O_N = [trajectories[N]['O(N)'] for N in window_sizes]
+        O_NlogN = [trajectories[N]['O(NlogN)'] for N in window_sizes]
+        O_N2 = [trajectories[N]['O(N²)'] for N in window_sizes]
+
+        # Plot complexity trajectories
+        ax.plot(window_sizes, O_N, '--', linewidth=2.5, color='green',
+                label='O(N)', alpha=0.7)
+        ax.plot(window_sizes, O_NlogN, '--', linewidth=2.5, color='orange',
+                label='O(N log N)', alpha=0.7)
+        ax.plot(window_sizes, O_N2, '--', linewidth=2.5, color='red',
+                label='O(N²)', alpha=0.7)
+
+    # Formatting for primary axis
+    ax.set_xscale('log', base=2)
+    ax.set_yscale('log')
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('Mean Inference Time (ms)', fontweight='bold')
+    ax.set_title('FRFT Performance (All α Aggregated)', fontweight='bold', pad=15)
+    # Don't add grid here - we'll add it after setting up the second axis
+    ax.legend(loc='upper left', fontsize=12, framealpha=0.9)
+
+    # Set x-axis ticks to show all window sizes (starting from 64)
+    ax.set_xticks(window_sizes)
+    ax.set_xticklabels([str(w) for w in window_sizes], rotation=45, ha='right')
+
+    # Create second y-axis on the right for audio buffer durations
+    ax2 = ax.twinx()
+
+    # Calculate audio buffer durations in ms for each window size
+    sample_rate = 44100  # Hz
+
+    # Include window size 32 even if not in main data (for right axis)
+    all_io_sizes = [32, 64, 128, 256, 512, 1024, 2048]
+    io_durations_ms = [(w / sample_rate) * 1000 for w in all_io_sizes]
+
+    # Set the same y-limits as the primary axis (in log scale)
+    ax2.set_yscale('log')
+    ax2.set_ylim(ax.get_ylim())
+
+    # Set tick positions for I/O vector sizes (32 to 2048)
+    ax2.set_yticks(io_durations_ms)
+    ax2.set_yticklabels([str(w) for w in all_io_sizes], fontsize=11)
+
+    # Turn off minor ticks on the right axis
+    ax2.minorticks_off()
+
+    # Set the label for the right axis
+    ax2.set_ylabel('Max/MSP Audio Buffer Size\n(Samples at 44.1kHz)',
+                   fontweight='bold', fontsize=14)
+
+    # Add horizontal gridlines ONLY at I/O vector size positions (32-2048)
+    for duration_ms in io_durations_ms:
+        ax.axhline(y=duration_ms, color='gray', linestyle='--', linewidth=0.8, alpha=0.4)
+
+    plt.tight_layout()
+
+    filename = output_dir / 'performance_all_alphas_aggregated.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_rtf_all_alphas_aggregated(data, output_dir):
+    """
+    Plot Real-Time Factor with all alphas aggregated together for each window size.
+    Shows mean, min, max with error bars/shading.
+    Includes horizontal line at RTF = 1.0 (real-time threshold).
+    Starting from window size 64.
+    """
+    print("  Generating RTF plot with all alphas aggregated...")
+
+    # Filter data to start from window size 64
+    data = data[data['window_size'] >= 64].copy()
+
+    window_sizes = sorted(data['window_size'].unique())
+
+    # Aggregate statistics across all alphas for each window size
+    agg_stats = data.groupby('window_size').agg({
+        'mean_rt_factor': ['mean', 'min', 'max', 'std']
+    }).reset_index()
+
+    agg_stats.columns = ['window_size', 'mean', 'min', 'max', 'std']
+    agg_stats = agg_stats.sort_values('window_size')
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Plot mean with shaded region for min/max
+    ax.plot(agg_stats['window_size'], agg_stats['mean'],
+            marker='o', markersize=7, linewidth=3,
+            color=COLORS['mse'], label='Mean RTF (all α)', alpha=0.9)
+
+    # Add shaded region for min/max range
+    ax.fill_between(agg_stats['window_size'],
+                    agg_stats['min'],
+                    agg_stats['max'],
+                    alpha=0.3, color=COLORS['mse'],
+                    label='Min-Max Range')
+
+    # Add horizontal line at RTF = 1.0
+    ax.axhline(y=1.0, color='red', linestyle='--', linewidth=2.5,
+               label='Real-Time Threshold (RTF=1.0)', alpha=0.7)
+
+    # Formatting
+    ax.set_xscale('log', base=2)
+    # NO log scale on y-axis for RTF
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('Real-Time Factor', fontweight='bold')
+    # ax.set_title('FRFT Real-Time Performance (All α Aggregated)', fontweight='bold', pad=15)
+    ax.grid(True, alpha=0.3, linestyle='--', which='both')
+    ax.legend(loc='upper left', fontsize=12, framealpha=0.9)
+
+    # Set y-axis to start at 0
+    ax.set_ylim(bottom=0)
+
+    # Set x-axis ticks to show all window sizes (starting from 64)
+    ax.set_xticks(window_sizes)
+    ax.set_xticklabels([str(w) for w in window_sizes], rotation=45, ha='right')
+
+    plt.tight_layout()
+
+    filename = output_dir / 'rtf_all_alphas_aggregated.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -792,6 +1235,35 @@ def main():
         print(f"  ⚠ No commutativity result files found")
 
     # ========================================================================
+    # PROCESS PERFORMANCE TIMING RESULTS
+    # ========================================================================
+
+    print("\n[Processing Performance Timing Results]")
+
+    timing_file = results_dir / 'rt_timing_performance.txt'
+
+    if timing_file.exists():
+        print(f"  Found timing results file")
+
+        timing_data = load_timing_data(timing_file)
+
+        if timing_data is not None:
+            print(f"  Total timing records: {len(timing_data)}")
+
+            # Create performance output directory
+            perf_output = output_dir / 'performance'
+            perf_output.mkdir(parents=True, exist_ok=True)
+
+            # Generate performance plots
+            total_plots += plot_performance_split_alpha(timing_data, perf_output)
+            total_plots += plot_rtf_split_alpha(timing_data, perf_output)
+            total_plots += plot_performance_by_alpha_heatmap(timing_data, perf_output)
+            total_plots += plot_performance_all_alphas_aggregated(timing_data, perf_output)
+            total_plots += plot_rtf_all_alphas_aggregated(timing_data, perf_output)
+    else:
+        print(f"  ⚠ Timing results file not found: {timing_file}")
+
+    # ========================================================================
     # SUMMARY
     # ========================================================================
 
@@ -802,6 +1274,12 @@ def main():
     print(f"\nOutput locations:")
     print(f"  Homomorphism plots → {homo_output}/")
     print(f"  Commutativity plots → {comm_output}/")
+
+    # Check if performance plots were generated
+    perf_output = output_dir / 'performance'
+    if perf_output.exists():
+        print(f"  Performance plots → {perf_output}/")
+
     print("\nAll plots saved as png files at 300 DPI\n")
 
     return 0
