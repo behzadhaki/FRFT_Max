@@ -17,6 +17,11 @@ To generate the plots run:
 ```commandline
 python3 plot_results.py --fft test_results/fft_comparison/
 ```
+also run following to generate the stats in the terminal:
+
+```commandline
+ python analyze_fft_comparison.py
+```
 
 ### 2. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) )
 
@@ -133,3 +138,10 @@ The results will be saved in 'test_results/rt_timing_performance.txt' file.
 python plot_results.py
 ```
 the plots will be saved in 'test_results/{corresponding_test}/plots/' directories.
+
+
+## Plots used in the Paper
+
+```
+python generate_paper_plots.py
+```

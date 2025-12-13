@@ -34,7 +34,7 @@ void apply_window(std::vector<double>& signal, const std::vector<double>& window
 
 // Test configuration
 struct TestConfig {
-    std::vector<int> window_sizes = {512, 1024, 2048, 4096};  // Focus on these sizes
+    std::vector<int> window_sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1};  // 1=no overlap
     std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
     double sample_rate = 44100.0;
@@ -357,10 +357,6 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
     std::vector<double> real_fft(window_size);
     std::vector<double> imag_fft(window_size);
 
-    // Generate Hamming window for this window size
-    std::vector<double> hamming_window;
-    generate_hamming_window(hamming_window, window_size);
-
     // Accumulators for statistics across all frames
     std::vector<double> frft_magnitude_accum(window_size, 0.0);
     std::vector<double> fft_magnitude_accum(window_size, 0.0);
@@ -381,8 +377,7 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
                   real_in.begin());
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
-        // Apply Hamming window
-        apply_window(real_in, hamming_window);
+        // No windowing applied - testing theoretical accuracy
 
         // Compute FRFT with alpha = 1.0
         bool frft_success = engine.compute(real_in.data(), imag_in.data(),

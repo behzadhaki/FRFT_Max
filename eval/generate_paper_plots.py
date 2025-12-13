@@ -1155,42 +1155,56 @@ def plot_rtf_all_alphas_aggregated(data, output_dir):
 # PASSTHROUGH AND REVERSAL PLOTS
 # ============================================================================
 
-def plot_passthrough_mss_mse_vs_window_size(data, output_dir):
+def plot_passthrough_reversal_combined(data, output_dir):
     """
-    Plot MSS and MSE vs window size for passthrough test (α=0).
+    Plot MSS and MSE vs window size for both passthrough and reversal tests.
     Publication-quality style with no title.
+    2x2 grid: Top row = passthrough (α=0), Bottom row = reversal (α=±2)
+    Left column = MSS, Right column = MSE
     """
-    print("  Generating passthrough MSS/MSE vs window size plot...")
+    print("  Generating combined passthrough/reversal MSS/MSE plot...")
 
-    test_data = data[data['test_type'] == 'passthrough'].copy()
+    # Prepare passthrough data
+    passthrough_data = data[data['test_type'] == 'passthrough'].copy()
 
-    if len(test_data) == 0:
-        print(f"  No data found for passthrough test")
+    if len(passthrough_data) == 0:
+        print(f"  No passthrough data found")
         return 0
 
-    # Group by window size and compute statistics
-    grouped = test_data.groupby('window_size').agg({
+    # Prepare reversal data (aggregate both directions)
+    reversal_data = data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])].copy()
+
+    if len(reversal_data) == 0:
+        print(f"  No reversal data found")
+        return 0
+
+    # Create 2x2 subplot grid
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+
+    # ========================================================================
+    # TOP ROW: PASSTHROUGH (α=0)
+    # ========================================================================
+
+    # Group passthrough data by window size
+    passthrough_grouped = passthrough_data.groupby('window_size').agg({
         'mss_loss': ['mean', 'std', 'min', 'max'],
         'mse_loss': ['mean', 'std', 'min', 'max']
     }).reset_index()
 
     # MSS: only use window sizes >= 8096
-    mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+    passthrough_mss_grouped = passthrough_grouped[passthrough_grouped['window_size'] >= 8096].copy()
 
     # MSE: use all window sizes
-    mse_grouped = grouped.copy()
+    passthrough_mse_grouped = passthrough_grouped.copy()
 
-    # Create figure with two subplots
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
-
-    # Plot 1: MSS Loss (only window_size >= 8096)
-    ax = axes[0]
-    if len(mss_grouped) > 0:
-        window_sizes_mss = mss_grouped['window_size'].values
-        mss_mean = mss_grouped['mss_loss']['mean'].values
-        mss_std = mss_grouped['mss_loss']['std'].values
-        mss_min = mss_grouped['mss_loss']['min'].values
-        mss_max = mss_grouped['mss_loss']['max'].values
+    # TOP LEFT: Passthrough MSS
+    ax = axes[0, 0]
+    if len(passthrough_mss_grouped) > 0:
+        window_sizes_mss = passthrough_mss_grouped['window_size'].values
+        mss_mean = passthrough_mss_grouped['mss_loss']['mean'].values
+        mss_std = passthrough_mss_grouped['mss_loss']['std'].values
+        mss_min = passthrough_mss_grouped['mss_loss']['min'].values
+        mss_max = passthrough_mss_grouped['mss_loss']['max'].values
 
         ax.fill_between(window_sizes_mss, mss_min, mss_max,
                         alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
@@ -1199,18 +1213,20 @@ def plot_passthrough_mss_mse_vs_window_size(data, output_dir):
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
 
     ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSS Loss', fontweight='bold')
-    ax.set_xscale('log', base=2)
+    ax.set_ylabel('MSS Loss (α=0)', fontweight='bold')
+    ax.set_xscale('log')
+    ax.set_xticks(window_sizes_mss)
+    ax.set_xticklabels([str(int(w)) for w in window_sizes_mss], rotation=45, ha='right')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
 
-    # Plot 2: MSE Loss (all window sizes)
-    ax = axes[1]
-    window_sizes_mse = mse_grouped['window_size'].values
-    mse_mean = mse_grouped['mse_loss']['mean'].values
-    mse_std = mse_grouped['mse_loss']['std'].values
-    mse_min = mse_grouped['mse_loss']['min'].values
-    mse_max = mse_grouped['mse_loss']['max'].values
+    # TOP RIGHT: Passthrough MSE
+    ax = axes[0, 1]
+    window_sizes_mse = passthrough_mse_grouped['window_size'].values
+    mse_mean = passthrough_mse_grouped['mse_loss']['mean'].values
+    mse_std = passthrough_mse_grouped['mse_loss']['std'].values
+    mse_min = passthrough_mse_grouped['mse_loss']['min'].values
+    mse_max = passthrough_mse_grouped['mse_loss']['max'].values
 
     ax.fill_between(window_sizes_mse, mse_min, mse_max,
                     alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
@@ -1219,13 +1235,76 @@ def plot_passthrough_mss_mse_vs_window_size(data, output_dir):
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
 
     ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSE Loss', fontweight='bold')
-    ax.set_xscale('log', base=2)
+    ax.set_ylabel('MSE Loss (α=0)', fontweight='bold')
+    ax.set_xscale('log')
+    ax.set_xticks(window_sizes_mse)
+    ax.set_xticklabels([str(int(w)) for w in window_sizes_mse], rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    # ========================================================================
+    # BOTTOM ROW: REVERSAL (α=±2)
+    # ========================================================================
+
+    # Group reversal data by window size
+    reversal_grouped = reversal_data.groupby('window_size').agg({
+        'mss_loss': ['mean', 'std', 'min', 'max'],
+        'mse_loss': ['mean', 'std', 'min', 'max']
+    }).reset_index()
+
+    # MSS: only use window sizes >= 8096
+    reversal_mss_grouped = reversal_grouped[reversal_grouped['window_size'] >= 8096].copy()
+
+    # MSE: use all window sizes
+    reversal_mse_grouped = reversal_grouped.copy()
+
+    # BOTTOM LEFT: Reversal MSS
+    ax = axes[1, 0]
+    if len(reversal_mss_grouped) > 0:
+        window_sizes_mss = reversal_mss_grouped['window_size'].values
+        mss_mean = reversal_mss_grouped['mss_loss']['mean'].values
+        mss_std = reversal_mss_grouped['mss_loss']['std'].values
+        mss_min = reversal_mss_grouped['mss_loss']['min'].values
+        mss_max = reversal_mss_grouped['mss_loss']['max'].values
+
+        ax.fill_between(window_sizes_mss, mss_min, mss_max,
+                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
+        ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
+                    fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                    color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSS Loss (α=±2)', fontweight='bold')
+    ax.set_xscale('log')
+    ax.set_xticks(window_sizes_mss)
+    ax.set_xticklabels([str(int(w)) for w in window_sizes_mss], rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    # BOTTOM RIGHT: Reversal MSE
+    ax = axes[1, 1]
+    window_sizes_mse = reversal_mse_grouped['window_size'].values
+    mse_mean = reversal_mse_grouped['mse_loss']['mean'].values
+    mse_std = reversal_mse_grouped['mse_loss']['std'].values
+    mse_min = reversal_mse_grouped['mse_loss']['min'].values
+    mse_max = reversal_mse_grouped['mse_loss']['max'].values
+
+    ax.fill_between(window_sizes_mse, mse_min, mse_max,
+                    alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
+    ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
+                fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSE Loss (α=±2)', fontweight='bold')
+    ax.set_xscale('log')
+    ax.set_xticks(window_sizes_mse)
+    ax.set_xticklabels([str(int(w)) for w in window_sizes_mse], rotation=45, ha='right')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
 
     plt.tight_layout()
-    filename = output_dir / 'passthrough_mss_mse_vs_window_size.png'
+    filename = output_dir / 'passthrough_reversal_combined.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
@@ -1233,79 +1312,199 @@ def plot_passthrough_mss_mse_vs_window_size(data, output_dir):
     return 1
 
 
-def plot_reversal_mss_mse_vs_window_size(data, output_dir):
+# ============================================================================
+# FFT COMPARISON PLOTS
+# ============================================================================
+
+def plot_fft_comparison_errors(data, output_dir):
     """
-    Plot MSS and MSE vs window size for reversal test (α=±2).
-    Aggregates both forward and backward reversal data.
+    Plot FFT comparison errors vs frequency for magnitude, phase, and complex.
+    Shows errors at specific frequencies: 100, 1000, 2000, ..., 8000 Hz.
     Publication-quality style with no title.
     """
-    print("  Generating reversal MSS/MSE vs window size plot...")
+    print("  Generating FFT comparison error plots...")
 
-    # Aggregate both reversal directions (α=±2)
-    reversal_data = data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])].copy()
+    # Filter data for specific frequencies
+    target_frequencies = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+    data_filtered = data[data['Frequency'].isin(target_frequencies)].copy()
 
-    if len(reversal_data) == 0:
-        print(f"  No data found for reversal test")
+    if len(data_filtered) == 0:
+        print(f"  No data found for target frequencies")
         return 0
 
-    # Group by window size and compute statistics
-    grouped = reversal_data.groupby('window_size').agg({
-        'mss_loss': ['mean', 'std', 'min', 'max'],
-        'mse_loss': ['mean', 'std', 'min', 'max']
+    # Group by frequency and compute statistics
+    grouped = data_filtered.groupby('Frequency').agg({
+        'MSE_Magnitude': ['mean', 'min', 'max'],
+        'MSE_Phase': ['mean', 'min', 'max'],
+        'MSE_Complex': ['mean', 'min', 'max']
     }).reset_index()
 
-    # MSS: only use window sizes >= 8096
-    mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+    # Create 3-subplot figure (vertical layout)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
-    # MSE: use all window sizes
-    mse_grouped = grouped.copy()
+    frequencies = grouped['Frequency'].values
 
-    # Create figure with two subplots
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
-
-    # Plot 1: MSS Loss (only window_size >= 8096)
+    # Plot 1: Magnitude MSE
     ax = axes[0]
-    if len(mss_grouped) > 0:
-        window_sizes_mss = mss_grouped['window_size'].values
-        mss_mean = mss_grouped['mss_loss']['mean'].values
-        mss_std = mss_grouped['mss_loss']['std'].values
-        mss_min = mss_grouped['mss_loss']['min'].values
-        mss_max = mss_grouped['mss_loss']['max'].values
+    mse_mag_mean = grouped['MSE_Magnitude']['mean'].values
+    mse_mag_min = grouped['MSE_Magnitude']['min'].values
+    mse_mag_max = grouped['MSE_Magnitude']['max'].values
 
-        ax.fill_between(window_sizes_mss, mss_min, mss_max,
-                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
-        ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
-                    fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
-                    color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
+    ax.fill_between(frequencies, mse_mag_min, mse_mag_max,
+                    alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
+    ax.plot(frequencies, mse_mag_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['mss'], alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSS Loss', fontweight='bold')
-    ax.set_xscale('log', base=2)
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Magnitude', fontweight='bold')
+    ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
-    # Plot 2: MSE Loss (all window sizes)
+    # Plot 2: Phase MSE
     ax = axes[1]
-    window_sizes_mse = mse_grouped['window_size'].values
-    mse_mean = mse_grouped['mse_loss']['mean'].values
-    mse_std = mse_grouped['mse_loss']['std'].values
-    mse_min = mse_grouped['mse_loss']['min'].values
-    mse_max = mse_grouped['mse_loss']['max'].values
+    mse_phase_mean = grouped['MSE_Phase']['mean'].values
+    mse_phase_min = grouped['MSE_Phase']['min'].values
+    mse_phase_max = grouped['MSE_Phase']['max'].values
 
-    ax.fill_between(window_sizes_mse, mse_min, mse_max,
+    ax.fill_between(frequencies, mse_phase_min, mse_phase_max,
                     alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
-    ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
-                fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
-                color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
+    ax.plot(frequencies, mse_phase_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['mse'], alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSE Loss', fontweight='bold')
-    ax.set_xscale('log', base=2)
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Phase', fontweight='bold')
+    ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    # Plot 3: Complex MSE
+    ax = axes[2]
+    mse_complex_mean = grouped['MSE_Complex']['mean'].values
+    mse_complex_min = grouped['MSE_Complex']['min'].values
+    mse_complex_max = grouped['MSE_Complex']['max'].values
+
+    ax.fill_between(frequencies, mse_complex_min, mse_complex_max,
+                    alpha=0.2, color=COLORS['highlight'], label='Min/Max Range')
+    ax.plot(frequencies, mse_complex_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['highlight'], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
     plt.tight_layout()
-    filename = output_dir / 'reversal_mss_mse_vs_window_size.png'
+    filename = output_dir / 'fft_comparison_errors_vs_frequency.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_fft_comparison_errors_by_window_size(data, output_dir):
+    """
+    Plot FFT comparison errors vs frequency for magnitude, phase, and complex,
+    separated by window size.
+    Shows errors at specific frequencies: 100, 1000, 2000, ..., 8000 Hz.
+    Publication-quality style with no title.
+    """
+    print("  Generating FFT comparison error plots by window size...")
+
+    # Filter data for specific frequencies
+    target_frequencies = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+    data_filtered = data[data['Frequency'].isin(target_frequencies)].copy()
+
+    if len(data_filtered) == 0:
+        print(f"  No data found for target frequencies")
+        return 0
+
+    # Get unique window sizes
+    window_sizes = sorted(data_filtered['WindowSize'].unique())
+
+    # Create color map for different window sizes
+    colors = plt.cm.viridis(np.linspace(0, 0.9, len(window_sizes)))
+
+    # Create 3-subplot figure (vertical layout)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 12))
+
+    # Plot 1: Magnitude MSE by window size
+    ax = axes[0]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Magnitude': 'mean'
+        }).reset_index()
+
+        frequencies = grouped['Frequency'].values
+        mse_mag_mean = grouped['MSE_Magnitude'].values
+
+        ax.plot(frequencies, mse_mag_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Magnitude', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    # Plot 2: Phase MSE by window size
+    ax = axes[1]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Phase': 'mean'
+        }).reset_index()
+
+        frequencies = grouped['Frequency'].values
+        mse_phase_mean = grouped['MSE_Phase'].values
+
+        ax.plot(frequencies, mse_phase_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Phase', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    # Plot 3: Complex MSE by window size
+    ax = axes[2]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Complex': 'mean'
+        }).reset_index()
+
+        frequencies = grouped['Frequency'].values
+        mse_complex_mean = grouped['MSE_Complex'].values
+
+        ax.plot(frequencies, mse_complex_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9, title='Window Size', ncol=2)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    plt.tight_layout()
+    filename = output_dir / 'fft_comparison_errors_by_window_size.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
@@ -1477,26 +1676,53 @@ def main():
             available_types = data['test_type'].unique()
             print(f"  Available test types: {list(available_types)}")
 
-            # Generate passthrough plot (α=0)
-            if 'passthrough' in available_types:
-                passthrough_count = len(data[data['test_type'] == 'passthrough'])
-                print(f"  Generating passthrough plot ({passthrough_count} records)...")
-                total_plots += plot_passthrough_mss_mse_vs_window_size(
-                    data, passthrough_reversal_output)
-            else:
-                print(f"  ⚠ No passthrough data found")
+            # Check if we have both passthrough and reversal data
+            has_passthrough = 'passthrough' in available_types
+            has_reversal = any(t in available_types for t in ['reversal_fwd', 'reversal_bwd'])
 
-            # Generate reversal plot (α=±2, aggregating fwd and bwd)
-            reversal_types = [t for t in available_types if t in ['reversal_fwd', 'reversal_bwd']]
-            if reversal_types:
+            if has_passthrough and has_reversal:
+                # Generate combined 2x2 plot
+                passthrough_count = len(data[data['test_type'] == 'passthrough'])
                 reversal_count = len(data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])])
-                print(f"  Generating reversal plot ({reversal_count} records from {reversal_types})...")
-                total_plots += plot_reversal_mss_mse_vs_window_size(
-                    data, passthrough_reversal_output)
+                print(f"  Generating combined plot ({passthrough_count} passthrough + {reversal_count} reversal records)...")
+                total_plots += plot_passthrough_reversal_combined(data, passthrough_reversal_output)
             else:
-                print(f"  ⚠ No reversal data found")
+                if not has_passthrough:
+                    print(f"  ⚠ No passthrough data found")
+                if not has_reversal:
+                    print(f"  ⚠ No reversal data found")
     else:
         print(f"  ⚠ Results file not found: {mss_results_file}")
+
+    # ========================================================================
+    # PROCESS FFT COMPARISON RESULTS
+    # ========================================================================
+
+    print("\n[Processing FFT Comparison Results]")
+
+    # Create FFT comparison output directory
+    fft_comparison_output = output_dir / 'fft_comparison'
+    fft_comparison_output.mkdir(parents=True, exist_ok=True)
+
+    # Look for FFT comparison results
+    fft_comparison_dir = results_dir / 'fft_comparison'
+    fft_results_file = fft_comparison_dir / 'results.txt'
+
+    if fft_results_file.exists():
+        print(f"  Found FFT comparison results file: {fft_results_file}")
+
+        fft_data = load_results_data(fft_results_file)
+
+        if fft_data is not None:
+            print(f"  Total FFT comparison records: {len(fft_data)}")
+
+            # Generate error plots vs frequency (aggregated across window sizes)
+            total_plots += plot_fft_comparison_errors(fft_data, fft_comparison_output)
+
+            # Generate error plots vs frequency (separated by window size)
+            total_plots += plot_fft_comparison_errors_by_window_size(fft_data, fft_comparison_output)
+    else:
+        print(f"  ⚠ FFT comparison results file not found: {fft_results_file}")
 
     # ========================================================================
     # SUMMARY
@@ -1519,6 +1745,11 @@ def main():
     passthrough_reversal_output = output_dir / 'passthrough_reversal'
     if passthrough_reversal_output.exists():
         print(f"  Passthrough/Reversal plots → {passthrough_reversal_output}/")
+
+    # Check if FFT comparison plots were generated
+    fft_comparison_output = output_dir / 'fft_comparison'
+    if fft_comparison_output.exists():
+        print(f"  FFT Comparison plots → {fft_comparison_output}/")
 
     print("\nAll plots saved as png files at 300 DPI\n")
 
