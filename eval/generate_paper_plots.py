@@ -44,6 +44,34 @@ def load_results_data(filename):
         return None
 
 
+def load_passthrough_reversal_results(filename):
+    """Load pass-through/reversal MSS analysis results, skipping text headers."""
+    try:
+        # Read the file line by line to find where the CSV table starts
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+
+        # Find the line that contains the column headers (starts with test_type)
+        header_line_idx = None
+        for idx, line in enumerate(lines):
+            if line.startswith('test_type'):
+                header_line_idx = idx
+                break
+
+        if header_line_idx is None:
+            print(f"✗ Could not find CSV header in {filename}")
+            return None
+
+        # Read from header line onwards
+        data = pd.read_csv(filename, sep='\t', skiprows=header_line_idx)
+        print(f"✓ Loaded {len(data)} records from {filename}")
+        return data
+
+    except Exception as e:
+        print(f"✗ Error loading pass-through/reversal results: {e}")
+        return None
+
+
 def wrap_alpha(alpha):
     """Wrap alpha to [-2, 2] range."""
     while alpha > 2.0:
@@ -1124,6 +1152,168 @@ def plot_rtf_all_alphas_aggregated(data, output_dir):
 
 
 # ============================================================================
+# PASSTHROUGH AND REVERSAL PLOTS
+# ============================================================================
+
+def plot_passthrough_mss_mse_vs_window_size(data, output_dir):
+    """
+    Plot MSS and MSE vs window size for passthrough test (α=0).
+    Publication-quality style with no title.
+    """
+    print("  Generating passthrough MSS/MSE vs window size plot...")
+
+    test_data = data[data['test_type'] == 'passthrough'].copy()
+
+    if len(test_data) == 0:
+        print(f"  No data found for passthrough test")
+        return 0
+
+    # Group by window size and compute statistics
+    grouped = test_data.groupby('window_size').agg({
+        'mss_loss': ['mean', 'std', 'min', 'max'],
+        'mse_loss': ['mean', 'std', 'min', 'max']
+    }).reset_index()
+
+    # MSS: only use window sizes >= 8096
+    mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+
+    # MSE: use all window sizes
+    mse_grouped = grouped.copy()
+
+    # Create figure with two subplots
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    # Plot 1: MSS Loss (only window_size >= 8096)
+    ax = axes[0]
+    if len(mss_grouped) > 0:
+        window_sizes_mss = mss_grouped['window_size'].values
+        mss_mean = mss_grouped['mss_loss']['mean'].values
+        mss_std = mss_grouped['mss_loss']['std'].values
+        mss_min = mss_grouped['mss_loss']['min'].values
+        mss_max = mss_grouped['mss_loss']['max'].values
+
+        ax.fill_between(window_sizes_mss, mss_min, mss_max,
+                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
+        ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
+                    fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                    color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSS Loss', fontweight='bold')
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    # Plot 2: MSE Loss (all window sizes)
+    ax = axes[1]
+    window_sizes_mse = mse_grouped['window_size'].values
+    mse_mean = mse_grouped['mse_loss']['mean'].values
+    mse_std = mse_grouped['mse_loss']['std'].values
+    mse_min = mse_grouped['mse_loss']['min'].values
+    mse_max = mse_grouped['mse_loss']['max'].values
+
+    ax.fill_between(window_sizes_mse, mse_min, mse_max,
+                    alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
+    ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
+                fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSE Loss', fontweight='bold')
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    plt.tight_layout()
+    filename = output_dir / 'passthrough_mss_mse_vs_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+def plot_reversal_mss_mse_vs_window_size(data, output_dir):
+    """
+    Plot MSS and MSE vs window size for reversal test (α=±2).
+    Aggregates both forward and backward reversal data.
+    Publication-quality style with no title.
+    """
+    print("  Generating reversal MSS/MSE vs window size plot...")
+
+    # Aggregate both reversal directions (α=±2)
+    reversal_data = data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])].copy()
+
+    if len(reversal_data) == 0:
+        print(f"  No data found for reversal test")
+        return 0
+
+    # Group by window size and compute statistics
+    grouped = reversal_data.groupby('window_size').agg({
+        'mss_loss': ['mean', 'std', 'min', 'max'],
+        'mse_loss': ['mean', 'std', 'min', 'max']
+    }).reset_index()
+
+    # MSS: only use window sizes >= 8096
+    mss_grouped = grouped[grouped['window_size'] >= 8096].copy()
+
+    # MSE: use all window sizes
+    mse_grouped = grouped.copy()
+
+    # Create figure with two subplots
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    # Plot 1: MSS Loss (only window_size >= 8096)
+    ax = axes[0]
+    if len(mss_grouped) > 0:
+        window_sizes_mss = mss_grouped['window_size'].values
+        mss_mean = mss_grouped['mss_loss']['mean'].values
+        mss_std = mss_grouped['mss_loss']['std'].values
+        mss_min = mss_grouped['mss_loss']['min'].values
+        mss_max = mss_grouped['mss_loss']['max'].values
+
+        ax.fill_between(window_sizes_mss, mss_min, mss_max,
+                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
+        ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
+                    fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                    color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSS Loss', fontweight='bold')
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    # Plot 2: MSE Loss (all window sizes)
+    ax = axes[1]
+    window_sizes_mse = mse_grouped['window_size'].values
+    mse_mean = mse_grouped['mse_loss']['mean'].values
+    mse_std = mse_grouped['mse_loss']['std'].values
+    mse_min = mse_grouped['mse_loss']['min'].values
+    mse_max = mse_grouped['mse_loss']['max'].values
+
+    ax.fill_between(window_sizes_mse, mse_min, mse_max,
+                    alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
+    ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
+                fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
+                color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
+
+    ax.set_xlabel('Window Size (samples)', fontweight='bold')
+    ax.set_ylabel('MSE Loss', fontweight='bold')
+    ax.set_xscale('log', base=2)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    plt.tight_layout()
+    filename = output_dir / 'reversal_mss_mse_vs_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    return 1
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -1262,6 +1452,53 @@ def main():
         print(f"  ⚠ Timing results file not found: {timing_file}")
 
     # ========================================================================
+    # PROCESS PASSTHROUGH AND REVERSAL RESULTS
+    # ========================================================================
+
+    print("\n[Processing Passthrough and Reversal Results]")
+
+    # Create passthrough/reversal output directory
+    passthrough_reversal_output = output_dir / 'passthrough_reversal'
+    passthrough_reversal_output.mkdir(parents=True, exist_ok=True)
+
+    # Look for the passthrough_reversal directory (contains all test types)
+    passthrough_reversal_dir = results_dir / 'passthrough_reversal'
+    mss_results_file = passthrough_reversal_dir / 'mss_analysis_results.txt'
+
+    if mss_results_file.exists():
+        print(f"  Found passthrough/reversal results file: {mss_results_file}")
+
+        data = load_passthrough_reversal_results(mss_results_file)
+
+        if data is not None:
+            print(f"  Total records loaded: {len(data)}")
+
+            # Check what test types are available
+            available_types = data['test_type'].unique()
+            print(f"  Available test types: {list(available_types)}")
+
+            # Generate passthrough plot (α=0)
+            if 'passthrough' in available_types:
+                passthrough_count = len(data[data['test_type'] == 'passthrough'])
+                print(f"  Generating passthrough plot ({passthrough_count} records)...")
+                total_plots += plot_passthrough_mss_mse_vs_window_size(
+                    data, passthrough_reversal_output)
+            else:
+                print(f"  ⚠ No passthrough data found")
+
+            # Generate reversal plot (α=±2, aggregating fwd and bwd)
+            reversal_types = [t for t in available_types if t in ['reversal_fwd', 'reversal_bwd']]
+            if reversal_types:
+                reversal_count = len(data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])])
+                print(f"  Generating reversal plot ({reversal_count} records from {reversal_types})...")
+                total_plots += plot_reversal_mss_mse_vs_window_size(
+                    data, passthrough_reversal_output)
+            else:
+                print(f"  ⚠ No reversal data found")
+    else:
+        print(f"  ⚠ Results file not found: {mss_results_file}")
+
+    # ========================================================================
     # SUMMARY
     # ========================================================================
 
@@ -1277,6 +1514,11 @@ def main():
     perf_output = output_dir / 'performance'
     if perf_output.exists():
         print(f"  Performance plots → {perf_output}/")
+
+    # Check if passthrough/reversal plots were generated
+    passthrough_reversal_output = output_dir / 'passthrough_reversal'
+    if passthrough_reversal_output.exists():
+        print(f"  Passthrough/Reversal plots → {passthrough_reversal_output}/")
 
     print("\nAll plots saved as png files at 300 DPI\n")
 
