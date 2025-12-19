@@ -131,6 +131,15 @@ chmod +x frft_test_rt_timing_performance.sh
 
 The results will be saved in 'test_results/rt_timing_performance.txt' file.
 
+To generate the latex table for the paper, run:
+
+```terminal
+python generate_rtf_table.py --input test_results/rt_timing_performance_detailed.txt --output rtf_table.tex
+```
+
+--------
+
+
 ## Generate Plots
 
 

@@ -12,16 +12,127 @@ import seaborn as sns
 from matplotlib.patches import Rectangle
 import argparse
 
-# Set publication-quality plot defaults
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.size'] = 14
-plt.rcParams['axes.labelsize'] = 16
-plt.rcParams['axes.titlesize'] = 18
-plt.rcParams['xtick.labelsize'] = 13
-plt.rcParams['ytick.labelsize'] = 13
-plt.rcParams['legend.fontsize'] = 12
-plt.rcParams['figure.dpi'] = 300
-plt.rcParams['savefig.dpi'] = 300
+# ============================================================================
+# PLOT SETTINGS - CUSTOMIZE FONT SIZES HERE
+# ============================================================================
+
+# Global default settings (applied to all plots unless overridden)
+GLOBAL_SETTINGS = {
+    'font_family': 'serif',
+    'base_font_size': 20,
+    'axes_labelsize': 20,
+    'axes_titlesize': 20,
+    'xtick_labelsize': 20,
+    'ytick_labelsize': 20,
+    'legend_fontsize': 14,
+    'figure_dpi': 300,
+}
+
+# Homomorphism plots (heatmaps, bar plots, box plots)
+HOMOMORPHISM_SETTINGS = {
+    'heatmap': {
+        'title_fontsize': 22,
+        'xlabel_fontsize': 22,
+        'ylabel_fontsize': 22,
+        'tick_labelsize': 22,
+        'colorbar_labelsize': 18,
+    },
+    'barplot': {
+        'title_fontsize': 22,
+        'xlabel_fontsize': 22,
+        'ylabel_fontsize': 22,
+        'tick_labelsize': 22,
+        'legend_fontsize': 22,
+    },
+    'boxplot': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 13,
+        'legend_fontsize': 12,
+    },
+}
+
+# Commutativity plots (heatmaps, bar plots, box plots)
+COMMUTATIVITY_SETTINGS = {
+    'heatmap': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 15,
+        'colorbar_labelsize': 12,
+    },
+    'barplot': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 14,
+        'legend_fontsize': 12,
+    },
+    'boxplot': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 13,
+        'legend_fontsize': 12,
+    },
+}
+
+# Performance/timing plots
+PERFORMANCE_SETTINGS = {
+    'split_alpha': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 13,
+        'legend_fontsize': 11,
+    },
+    'heatmap': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 13,
+        'colorbar_labelsize': 12,
+    },
+    'aggregated': {
+        'title_fontsize': 18,
+        'xlabel_fontsize': 16,
+        'ylabel_fontsize': 16,
+        'tick_labelsize': 13,
+        'legend_fontsize': 12,
+    },
+}
+
+# Passthrough/Reversal plots
+PASSTHROUGH_REVERSAL_SETTINGS = {
+    'title_fontsize': 34,
+    'xlabel_fontsize': 34,
+    'ylabel_fontsize': 34,
+    'tick_labelsize': 34,
+    'legend_fontsize': 34,
+}
+
+# FFT Comparison plots
+FFT_COMPARISON_SETTINGS = {
+    'title_fontsize': 18,
+    'xlabel_fontsize': 16,
+    'ylabel_fontsize': 16,
+    'tick_labelsize': 13,
+    'legend_fontsize': 11,
+}
+
+# ============================================================================
+
+# Set global publication-quality plot defaults
+plt.rcParams['font.family'] = GLOBAL_SETTINGS['font_family']
+plt.rcParams['font.size'] = GLOBAL_SETTINGS['base_font_size']
+plt.rcParams['axes.labelsize'] = GLOBAL_SETTINGS['axes_labelsize']
+plt.rcParams['axes.titlesize'] = GLOBAL_SETTINGS['axes_titlesize']
+plt.rcParams['xtick.labelsize'] = GLOBAL_SETTINGS['xtick_labelsize']
+plt.rcParams['ytick.labelsize'] = GLOBAL_SETTINGS['ytick_labelsize']
+plt.rcParams['legend.fontsize'] = GLOBAL_SETTINGS['legend_fontsize']
+plt.rcParams['figure.dpi'] = GLOBAL_SETTINGS['figure_dpi']
+plt.rcParams['savefig.dpi'] = GLOBAL_SETTINGS['figure_dpi']
 plt.rcParams['savefig.bbox'] = 'tight'
 
 # Color scheme for consistency
@@ -98,6 +209,9 @@ def plot_homomorphism_heatmaps_combined(data, output_dir):
     """
     print("  Generating homomorphism combined heatmap...")
 
+    # Get font size settings for this plot type
+    settings = HOMOMORPHISM_SETTINGS['heatmap']
+
     # Aggregate over all frequencies and windows using MEDIAN
     agg_data = data.groupby(['Alpha1', 'Alpha2']).agg({
         'MSS_Homomorphic': 'median',
@@ -129,35 +243,35 @@ def plot_homomorphism_heatmaps_combined(data, output_dir):
     # MSS heatmap
     im1 = axes[0].imshow(mss_pivot.values, cmap='inferno', aspect='auto',
                          vmin=0, vmax=np.nanmax(mss_pivot.values))
-    axes[0].set_title('MSS (Median)', fontweight='bold', pad=15)
-    axes[0].set_xlabel('α₁', fontsize=16, fontweight='bold')
-    axes[0].set_ylabel('α₂', fontsize=16, fontweight='bold')
+    axes[0].set_title('MSS (Median)', fontweight='bold', fontsize=settings['title_fontsize'], pad=15)
+    axes[0].set_xlabel('α₁', fontsize=settings['xlabel_fontsize'], fontweight='bold')
+    axes[0].set_ylabel('α₂', fontsize=settings['ylabel_fontsize'], fontweight='bold')
 
     # Set tick positions and labels
     n_ticks = 5
     tick_positions = np.linspace(0, len(mss_pivot.columns) - 1, n_ticks, dtype=int)
     tick_labels = [f"{mss_pivot.columns[i]:.1f}" for i in tick_positions]
     axes[0].set_xticks(tick_positions)
-    axes[0].set_xticklabels(tick_labels, fontsize=15)
+    axes[0].set_xticklabels(tick_labels, fontsize=settings['tick_labelsize'])
     axes[0].set_yticks(tick_positions)
-    axes[0].set_yticklabels([f"{mss_pivot.index[i]:.1f}" for i in tick_positions], fontsize=15)
+    axes[0].set_yticklabels([f"{mss_pivot.index[i]:.1f}" for i in tick_positions], fontsize=settings['tick_labelsize'])
 
     cbar1 = plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
-    cbar1.ax.tick_params(labelsize=12)
+    cbar1.ax.tick_params(labelsize=settings['colorbar_labelsize'])
 
     # MSE heatmap
     im2 = axes[1].imshow(mse_pivot.values, cmap='inferno', aspect='auto',
                          vmin=0, vmax=np.nanmax(mse_pivot.values))
-    axes[1].set_title('MSE (Median)', fontweight='bold', pad=15)
-    axes[1].set_xlabel('α₁', fontsize=16, fontweight='bold')
-    axes[1].set_ylabel('α₂', fontsize=16, fontweight='bold')
+    axes[1].set_title('MSE (Median)', fontweight='bold', fontsize=settings['title_fontsize'], pad=15)
+    axes[1].set_xlabel('α₁', fontsize=settings['xlabel_fontsize'], fontweight='bold')
+    axes[1].set_ylabel('α₂', fontsize=settings['ylabel_fontsize'], fontweight='bold')
     axes[1].set_xticks(tick_positions)
-    axes[1].set_xticklabels(tick_labels, fontsize=15)
+    axes[1].set_xticklabels(tick_labels, fontsize=settings['tick_labelsize'])
     axes[1].set_yticks(tick_positions)
-    axes[1].set_yticklabels([f"{mse_pivot.index[i]:.1f}" for i in tick_positions], fontsize=15)
+    axes[1].set_yticklabels([f"{mse_pivot.index[i]:.1f}" for i in tick_positions], fontsize=settings['tick_labelsize'])
 
     cbar2 = plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
-    cbar2.ax.tick_params(labelsize=12)
+    cbar2.ax.tick_params(labelsize=settings['colorbar_labelsize'])
 
     plt.tight_layout()
 
@@ -202,20 +316,20 @@ def plot_homomorphism_vs_alpha_sum_barplot(data, output_dir):
     axes[0].bar(agg_data['AlphaSum'], agg_data['MSS_median'],
                 yerr=agg_data['MSS_std'], capsize=3, width=0.15,
                 color=COLORS['mss'], alpha=0.7, edgecolor='black', linewidth=0.8)
-    axes[0].set_xlabel('α₁ + α₂ (wrapped)', fontsize=16, fontweight='bold')
-    axes[0].set_ylabel('MSS', fontsize=16)
+    axes[0].set_xlabel('α₁ + α₂ (wrapped)', fontsize=22, fontweight='bold')
+    axes[0].set_ylabel('MSS', fontsize=22, fontweight='bold')
     axes[0].grid(axis='y', alpha=0.3, linestyle='--')
-    axes[0].tick_params(labelsize=11)
+    axes[0].tick_params(labelsize=22)
     axes[0].set_ylim(bottom=0)
 
     # MSE barplot - narrower bars
     axes[1].bar(agg_data['AlphaSum'], agg_data['MSE_median'],
                 yerr=agg_data['MSE_std'], capsize=3, width=0.15,
                 color=COLORS['mse'], alpha=0.7, edgecolor='black', linewidth=0.8)
-    axes[1].set_xlabel('α₁ + α₂ (wrapped)', fontsize=16, fontweight='bold')
-    axes[1].set_ylabel('MSE', fontsize=16)
+    axes[1].set_xlabel('α₁ + α₂ (wrapped)', fontsize=22, fontweight='bold')
+    axes[1].set_ylabel('MSE', fontsize=22, fontweight='bold')
     axes[1].grid(axis='y', alpha=0.3, linestyle='--')
-    axes[1].tick_params(labelsize=11)
+    axes[1].tick_params(labelsize=22)
     axes[1].set_ylim(bottom=0)
 
     plt.tight_layout()
@@ -233,7 +347,7 @@ def plot_homomorphism_boxplot_by_window(data, output_dir):
     Plot 3: MSS and MSE vs alpha_sum, grouped by window size
     Boxplots for each window size side-by-side for each alpha_sum
     Only showing 0 to 2 due to symmetric nature
-    Only showing window sizes >= 2048
+    Only showing window sizes >= 64
     """
     print("  Generating homomorphism boxplot grouped by window...")
 
@@ -245,10 +359,10 @@ def plot_homomorphism_boxplot_by_window(data, output_dir):
     # Filter to only 0 to 2 range (symmetric nature)
     data = data[(data['AlphaSum_rounded'] >= 0) & (data['AlphaSum_rounded'] <= 2.0)]
 
-    # Filter to only window sizes >= 2048
-    data = data[data['Window'] >= 2048]
+    # Filter to only window sizes >= 64
+    data = data[data['Window'] >= 64]
 
-    window_sizes = sorted(data['Window'].unique())
+    window_sizes = sorted(data['Window'].unique())[::2]
     alpha_sums = sorted(data['AlphaSum_rounded'].unique())
 
     print(f"  Using window sizes: {window_sizes}")
@@ -291,12 +405,12 @@ def plot_homomorphism_boxplot_by_window(data, output_dir):
 
         metric_name = 'MSS' if metric == 'MSS_Homomorphic' else 'MSE'
         #ax.set_ylabel(metric_name, fontsize=16)
-        ax.set_xlabel('α₁ + α₂ (wrapped)', fontsize=16, fontweight='bold')
-        ax.set_title(f'{metric_name}', fontweight='bold', pad=15, fontsize=18)
+        ax.set_xlabel('α₁ + α₂ (wrapped)', fontsize=22, fontweight='bold')
+        ax.set_title(f'{metric_name}', fontweight='bold', pad=15, fontsize=22)
         ax.set_xticks(positions_base)
-        ax.set_xticklabels([f'{a:.1f}' for a in alpha_sums], rotation=0, fontsize=15)
+        ax.set_xticklabels([f'{a:.1f}' for a in alpha_sums], rotation=0, fontsize=22)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
-        ax.tick_params(axis='y', labelsize=13)
+        ax.tick_params(axis='y', labelsize=22)
         ax.set_ylim(bottom=0, top= ax.get_ylim()[1]*1.2)
         ax.set_xlim(-0.5, len(alpha_sums) - 0.5)
 
@@ -304,8 +418,8 @@ def plot_homomorphism_boxplot_by_window(data, output_dir):
         legend_handles = [plt.Rectangle((0,0),1,1, facecolor=cmap[i], alpha=0.7, edgecolor='black')
                           for i in range(len(window_sizes))]
         ax.legend(legend_handles, [f'{w}' for w in window_sizes],
-                  title='Window Size', title_fontsize=15,
-                  loc='upper right', ncol=len(window_sizes), fontsize=11, framealpha=0.5)
+                  title='Window Size', title_fontsize=16,
+                  loc='upper right', ncol=len(window_sizes), fontsize=22, framealpha=0.5)
 
     plt.tight_layout()
 
@@ -373,13 +487,13 @@ def plot_homomorphism_boxplot_by_frequency(data, output_dir):
             patch.set_edgecolor('black')
 
         metric_name = 'MSS' if metric == 'MSS_Homomorphic' else 'MSE'
-        ax.set_ylabel(metric_name, fontsize=16)
-        ax.set_xlabel('α₁ + α₂ (wrapped)', fontsize=16, fontweight='bold')
-        ax.set_title(metric_name, fontweight='bold', pad=15, fontsize=18)
+        # ax.set_ylabel(metric_name, fontsize=16)
+        ax.set_xlabel('α₁ + α₂ (wrapped)', fontsize=22, fontweight='bold')
+        ax.set_title(metric_name, fontweight='bold', pad=15, fontsize=22)
         ax.set_xticks(positions_base)
-        ax.set_xticklabels([f'{a:.1f}' for a in alpha_sums], rotation=0, fontsize=15)
+        ax.set_xticklabels([f'{a:.1f}' for a in alpha_sums], rotation=0, fontsize=22)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
-        ax.tick_params(axis='y', labelsize=13)
+        ax.tick_params(axis='y', labelsize=22)
         ax.set_ylim(bottom=0, top= ax.get_ylim()[1]*1.2)
         ax.set_xlim(-0.5, len(alpha_sums) - 0.5)
 
@@ -388,7 +502,7 @@ def plot_homomorphism_boxplot_by_frequency(data, output_dir):
                           for i in range(len(frequencies))]
         ax.legend(legend_handles, [f'{int(f)} Hz' for f in frequencies],
                   title='Frequency', title_fontsize=15,
-                  loc='upper right', ncol=min(7, len(frequencies)), fontsize=15, framealpha=0.5)
+                  loc='upper right', ncol=min(7, len(frequencies)), fontsize=16, framealpha=0.5)
 
     plt.tight_layout()
 
@@ -452,7 +566,7 @@ def plot_commutativity_heatmaps_combined(data, output_dir):
     # MSS heatmap
     im1 = axes[0].imshow(mss_masked, cmap='inferno', aspect='auto',
                          vmin=0, vmax=mss_vmax)
-    axes[0].set_title('MSS (Median)', fontweight='bold', pad=15)
+    axes[0].set_title('MSS (Median)', fontweight='bold', pad=22)
     axes[0].set_xlabel('α₁', fontsize=16, fontweight='bold')
     axes[0].set_ylabel('α₂', fontsize=16, fontweight='bold')
 
@@ -461,9 +575,9 @@ def plot_commutativity_heatmaps_combined(data, output_dir):
     tick_positions = np.linspace(0, len(mss_pivot.columns) - 1, n_ticks, dtype=int)
     tick_labels = [f"{mss_pivot.columns[i]:.1f}" for i in tick_positions]
     axes[0].set_xticks(tick_positions)
-    axes[0].set_xticklabels(tick_labels, fontsize=15)
+    axes[0].set_xticklabels(tick_labels, fontsize=22)
     axes[0].set_yticks(tick_positions)
-    axes[0].set_yticklabels([f"{mss_pivot.index[i]:.1f}" for i in tick_positions], fontsize=15)
+    axes[0].set_yticklabels([f"{mss_pivot.index[i]:.1f}" for i in tick_positions], fontsize=22)
 
     cbar1 = plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
     cbar1.ax.tick_params(labelsize=12)
@@ -475,9 +589,9 @@ def plot_commutativity_heatmaps_combined(data, output_dir):
     axes[1].set_xlabel('α₁', fontsize=16, fontweight='bold')
     axes[1].set_ylabel('α₂', fontsize=16, fontweight='bold')
     axes[1].set_xticks(tick_positions)
-    axes[1].set_xticklabels(tick_labels, fontsize=15)
+    axes[1].set_xticklabels(tick_labels, fontsize=22)
     axes[1].set_yticks(tick_positions)
-    axes[1].set_yticklabels([f"{mse_pivot.index[i]:.1f}" for i in tick_positions], fontsize=15)
+    axes[1].set_yticklabels([f"{mse_pivot.index[i]:.1f}" for i in tick_positions], fontsize=22)
 
     cbar2 = plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
     cbar2.ax.tick_params(labelsize=12)
@@ -554,7 +668,7 @@ def plot_commutativity_boxplot_by_window(data, output_dir):
     """
     Plot 3: MSS and MSE commutativity vs alpha_sum, grouped by window size
     Only showing 0 to 2 due to symmetric nature
-    Only showing window sizes >= 2048
+    Only showing window sizes >= 64
     """
     print("  Generating commutativity boxplot grouped by window...")
 
@@ -564,8 +678,8 @@ def plot_commutativity_boxplot_by_window(data, output_dir):
     # Filter to only 0 to 2 range (symmetric nature)
     data = data[(data['AlphaSum_rounded'] >= 0) & (data['AlphaSum_rounded'] <= 2.0)]
 
-    # Filter to only window sizes >= 2048
-    data = data[data['Window'] >= 2048]
+    # Filter to only window sizes >= 64
+    data = data[data['Window'] >= 64]
 
     window_sizes = sorted(data['Window'].unique())
     alpha_sums = sorted(data['AlphaSum_rounded'].unique())
@@ -1038,7 +1152,7 @@ def plot_performance_all_alphas_aggregated(data, output_dir):
     ax.set_yscale('log')
     ax.set_xlabel('Window Size (samples)', fontweight='bold')
     ax.set_ylabel('Mean Inference Time (ms)', fontweight='bold')
-    ax.set_title('FRFT Performance (All α Aggregated)', fontweight='bold', pad=15)
+    # ax.set_title('FRFT Performance (All α Aggregated)', fontweight='bold', pad=15)
     # Don't add grid here - we'll add it after setting up the second axis
     ax.legend(loc='upper left', fontsize=12, framealpha=0.9)
 
@@ -1161,6 +1275,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
     Publication-quality style with no title.
     2x2 grid: Top row = passthrough (α=0), Bottom row = reversal (α=±2)
     Left column = MSS, Right column = MSE
+    MSS plots start from window size 8192, MSE plots start from 64.
     """
     print("  Generating combined passthrough/reversal MSS/MSE plot...")
 
@@ -1178,7 +1293,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
         print(f"  No reversal data found")
         return 0
 
-    # Create 2x2 subplot grid
+    # Create 2x2 subplot grid with reduced height (5 instead of 10)
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
 
     # ========================================================================
@@ -1187,15 +1302,14 @@ def plot_passthrough_reversal_combined(data, output_dir):
 
     # Group passthrough data by window size
     passthrough_grouped = passthrough_data.groupby('window_size').agg({
-        'mss_loss': ['mean', 'std', 'min', 'max'],
-        'mse_loss': ['mean', 'std', 'min', 'max']
+        'mss_loss': ['mean', 'std'],
+        'mse_loss': ['mean', 'std']
     }).reset_index()
 
-    # MSS: only use window sizes >= 8096
-    passthrough_mss_grouped = passthrough_grouped[passthrough_grouped['window_size'] >= 8096].copy()
-
-    # MSE: use all window sizes
-    passthrough_mse_grouped = passthrough_grouped.copy()
+    # MSS: Filter to window sizes >= 8192
+    passthrough_mss_grouped = passthrough_grouped[passthrough_grouped['window_size'] >= 8192].copy()
+    # MSE: Filter to window sizes >= 64
+    passthrough_mse_grouped = passthrough_grouped[passthrough_grouped['window_size'] >= 64].copy()
 
     # TOP LEFT: Passthrough MSS
     ax = axes[0, 0]
@@ -1203,11 +1317,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
         window_sizes_mss = passthrough_mss_grouped['window_size'].values
         mss_mean = passthrough_mss_grouped['mss_loss']['mean'].values
         mss_std = passthrough_mss_grouped['mss_loss']['std'].values
-        mss_min = passthrough_mss_grouped['mss_loss']['min'].values
-        mss_max = passthrough_mss_grouped['mss_loss']['max'].values
 
-        ax.fill_between(window_sizes_mss, mss_min, mss_max,
-                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
         ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
                     fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
@@ -1225,11 +1335,9 @@ def plot_passthrough_reversal_combined(data, output_dir):
     window_sizes_mse = passthrough_mse_grouped['window_size'].values
     mse_mean = passthrough_mse_grouped['mse_loss']['mean'].values
     mse_std = passthrough_mse_grouped['mse_loss']['std'].values
-    mse_min = passthrough_mse_grouped['mse_loss']['min'].values
-    mse_max = passthrough_mse_grouped['mse_loss']['max'].values
+    # mse_min = passthrough_mse_grouped['mse_loss']['min'].values
+    # mse_max = passthrough_mse_grouped['mse_loss']['max'].values
 
-    ax.fill_between(window_sizes_mse, mse_min, mse_max,
-                    alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
     ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
                 fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
@@ -1248,15 +1356,14 @@ def plot_passthrough_reversal_combined(data, output_dir):
 
     # Group reversal data by window size
     reversal_grouped = reversal_data.groupby('window_size').agg({
-        'mss_loss': ['mean', 'std', 'min', 'max'],
-        'mse_loss': ['mean', 'std', 'min', 'max']
+        'mss_loss': ['mean', 'std'],
+        'mse_loss': ['mean', 'std']
     }).reset_index()
 
-    # MSS: only use window sizes >= 8096
-    reversal_mss_grouped = reversal_grouped[reversal_grouped['window_size'] >= 8096].copy()
-
-    # MSE: use all window sizes
-    reversal_mse_grouped = reversal_grouped.copy()
+    # MSS: Filter to window sizes >= 8192
+    reversal_mss_grouped = reversal_grouped[reversal_grouped['window_size'] >= 8192].copy()
+    # MSE: Filter to window sizes >= 64
+    reversal_mse_grouped = reversal_grouped[reversal_grouped['window_size'] >= 64].copy()
 
     # BOTTOM LEFT: Reversal MSS
     ax = axes[1, 0]
@@ -1264,11 +1371,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
         window_sizes_mss = reversal_mss_grouped['window_size'].values
         mss_mean = reversal_mss_grouped['mss_loss']['mean'].values
         mss_std = reversal_mss_grouped['mss_loss']['std'].values
-        mss_min = reversal_mss_grouped['mss_loss']['min'].values
-        mss_max = reversal_mss_grouped['mss_loss']['max'].values
 
-        ax.fill_between(window_sizes_mss, mss_min, mss_max,
-                        alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
         ax.errorbar(window_sizes_mss, mss_mean, yerr=mss_std,
                     fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
@@ -1286,11 +1389,11 @@ def plot_passthrough_reversal_combined(data, output_dir):
     window_sizes_mse = reversal_mse_grouped['window_size'].values
     mse_mean = reversal_mse_grouped['mse_loss']['mean'].values
     mse_std = reversal_mse_grouped['mse_loss']['std'].values
-    mse_min = reversal_mse_grouped['mse_loss']['min'].values
-    mse_max = reversal_mse_grouped['mse_loss']['max'].values
-
-    ax.fill_between(window_sizes_mse, mse_min, mse_max,
-                    alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
+    # mse_min = reversal_mse_grouped['mse_loss']['min'].values
+    # mse_max = reversal_mse_grouped['mse_loss']['max'].values
+    #
+    # ax.fill_between(window_sizes_mse, mse_min, mse_max,
+    #                 alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
     ax.errorbar(window_sizes_mse, mse_mean, yerr=mse_std,
                 fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
@@ -1308,6 +1411,112 @@ def plot_passthrough_reversal_combined(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ========================================================================
+    # GENERATE LATEX TABLE
+    # ========================================================================
+
+    # Collect all data for table (using >= 64 for all metrics)
+    passthrough_all = passthrough_grouped[passthrough_grouped['window_size'] >= 64].copy()
+    reversal_grouped = reversal_data.groupby('window_size').agg({
+        'mss_loss': ['mean', 'std'],
+        'mse_loss': ['mean', 'std']
+    }).reset_index()
+    reversal_all = reversal_grouped[reversal_grouped['window_size'] >= 64].copy()
+
+    # Determine MSS threshold (MSS only valid for window_size >= 8192)
+    mss_threshold = 8192
+
+    # Create LaTeX table (ROWS = window sizes, COLUMNS = metrics)
+    tex_filename = output_dir / 'passthrough_reversal_table.tex'
+
+    with open(tex_filename, 'w') as f:
+        f.write("% Passthrough/Reversal Test Results\n")
+        f.write("% Rows: Window Size (as power of 2)\n")
+        f.write("% Columns: MSE (α=0), MSS (α=0), MSE (α=±2), MSS (α=±2)\n\n")
+
+        f.write("\\begin{table}[htbp]\n")
+        f.write("\\centering\n")
+        f.write(f"\\caption{{Passthrough and Reversal Test Results: Mean $\\pm$ Std. ")
+        f.write(f"MSS requires window sizes $\\geq {mss_threshold}$ and is marked N/A where not applicable.}}\n")
+        f.write("\\label{tab:passthrough_reversal}\n")
+        f.write("\\small\n")
+
+        # Get window sizes (union of both datasets)
+        all_window_sizes = sorted(set(passthrough_all['window_size'].values) |
+                                  set(reversal_all['window_size'].values))
+
+        # Write table header (4 metrics as columns)
+        f.write("\\begin{tabular}{lcccc}\n")
+        f.write("\\hline\\hline\n")
+
+        # Column headers (metrics)
+        header = "Window Size & MSE ($\\alpha=0$) & MSS ($\\alpha=0$) & MSE ($\\alpha=\\pm 2$) & MSS ($\\alpha=\\pm 2$) \\\\\n"
+        f.write(header)
+        f.write("\\hline\n")
+
+        # Data rows (one per window size)
+        for ws in all_window_sizes:
+            # Format window size as power of 2
+            f.write(f"$2^{{{int(np.log2(ws))}}}$ & ")
+
+            values = []
+
+            # Column 1: MSE (α=0) - Passthrough
+            match = passthrough_all[passthrough_all['window_size'] == ws]
+            if len(match) > 0:
+                mean = match['mse_loss']['mean'].values[0]
+                std = match['mse_loss']['std'].values[0]
+                if np.isnan(mean) or np.isnan(std):
+                    values.append("N/A")
+                else:
+                    values.append(f"{mean:.2e} $\\pm$ {std:.2e}")
+            else:
+                values.append("---")
+
+            # Column 2: MSS (α=0) - Passthrough
+            match = passthrough_all[passthrough_all['window_size'] == ws]
+            if len(match) > 0 and ws >= mss_threshold:
+                mean = match['mss_loss']['mean'].values[0]
+                std = match['mss_loss']['std'].values[0]
+                if np.isnan(mean) or np.isnan(std):
+                    values.append("N/A")
+                else:
+                    values.append(f"{mean:.2e} $\\pm$ {std:.2e}")
+            else:
+                values.append("N/A")
+
+            # Column 3: MSE (α=±2) - Reversal
+            match = reversal_all[reversal_all['window_size'] == ws]
+            if len(match) > 0:
+                mean = match['mse_loss']['mean'].values[0]
+                std = match['mse_loss']['std'].values[0]
+                if np.isnan(mean) or np.isnan(std):
+                    values.append("N/A")
+                else:
+                    values.append(f"{mean:.2e} $\\pm$ {std:.2e}")
+            else:
+                values.append("---")
+
+            # Column 4: MSS (α=±2) - Reversal
+            match = reversal_all[reversal_all['window_size'] == ws]
+            if len(match) > 0 and ws >= mss_threshold:
+                mean = match['mss_loss']['mean'].values[0]
+                std = match['mss_loss']['std'].values[0]
+                if np.isnan(mean) or np.isnan(std):
+                    values.append("N/A")
+                else:
+                    values.append(f"{mean:.2e} $\\pm$ {std:.2e}")
+            else:
+                values.append("N/A")
+
+            f.write(" & ".join(values) + " \\\\\n")
+
+        f.write("\\hline\\hline\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{table}\n")
+
+    print(f"    → {tex_filename}")
 
     return 1
 
@@ -1416,12 +1625,16 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
     separated by window size.
     Shows errors at specific frequencies: 100, 1000, 2000, ..., 8000 Hz.
     Publication-quality style with no title.
+    Only showing window sizes >= 64.
     """
     print("  Generating FFT comparison error plots by window size...")
 
     # Filter data for specific frequencies
     target_frequencies = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
     data_filtered = data[data['Frequency'].isin(target_frequencies)].copy()
+
+    # Filter to only window sizes >= 64
+    data_filtered = data_filtered[data_filtered['WindowSize'] >= 64]
 
     if len(data_filtered) == 0:
         print(f"  No data found for target frequencies")
@@ -1452,7 +1665,7 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
                 color=colors[idx], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-    ax.set_ylabel('MSE Magnitude', fontweight='bold')
+    ax.set_ylabel('MSE\nMagnitude', fontweight='bold')
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.set_xlim([0, 8500])
@@ -1474,7 +1687,7 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
                 color=colors[idx], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-    ax.set_ylabel('MSE Phase', fontweight='bold')
+    ax.set_ylabel('MSE\nPhase', fontweight='bold')
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.set_xlim([0, 8500])
@@ -1496,7 +1709,7 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
                 color=colors[idx], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_ylabel('MSE\nComplex', fontweight='bold')
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9, title='Window Size', ncol=2)
@@ -1508,6 +1721,79 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ========================================================================
+    # GENERATE LATEX TABLES (3 tables: Magnitude, Phase, Complex)
+    # ========================================================================
+
+    # Prepare data for tables
+    # Group by window size and frequency
+    table_data = data_filtered.groupby(['WindowSize', 'Frequency']).agg({
+        'MSE_Magnitude': 'mean',
+        'MSE_Phase': 'mean',
+        'MSE_Complex': 'mean'
+    }).reset_index()
+
+    # Function to write a single table
+    def write_fft_table(f, metric_name, metric_column, window_sizes, frequencies):
+        f.write(f"% FFT Comparison: {metric_name}\n")
+        f.write(f"% Rows: Window Size (as power of 2)\n")
+        f.write(f"% Columns: Frequency (Hz)\n\n")
+
+        f.write("\\begin{table}[htbp]\n")
+        f.write("\\centering\n")
+        f.write(f"\\caption{{FFT vs FRFT Comparison: {metric_name}}}\n")
+        f.write(f"\\label{{tab:fft_comparison_{metric_column.lower()}}}\n")
+        f.write("\\small\n")
+
+        # Write table header
+        num_cols = len(frequencies)
+        f.write(f"\\begin{{tabular}}{{l{'c' * num_cols}}}\n")
+        f.write("\\hline\\hline\n")
+
+        # Column headers (frequencies)
+        header = "Window Size & " + " & ".join([f"{int(freq)} Hz" for freq in frequencies]) + " \\\\\n"
+        f.write(header)
+        f.write("\\hline\n")
+
+        # Data rows (one per window size)
+        for ws in window_sizes:
+            # Format as power of 2
+            f.write(f"$2^{{{int(np.log2(ws))}}}$ & ")
+
+            values = []
+            for freq in frequencies:
+                match = table_data[(table_data['WindowSize'] == ws) &
+                                   (table_data['Frequency'] == freq)]
+                if len(match) > 0:
+                    val = match[metric_column].values[0]
+                    values.append(f"{val:.2e}")
+                else:
+                    values.append("---")
+
+            f.write(" & ".join(values) + " \\\\\n")
+
+        f.write("\\hline\\hline\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{table}\n\n")
+
+    # Write all three tables to a single file
+    tex_filename = output_dir / 'fft_comparison_tables.tex'
+
+    with open(tex_filename, 'w') as f:
+        f.write("% FFT vs FRFT Comparison Tables\n")
+        f.write("% Three tables: Magnitude MSE, Phase MSE, Complex MSE\n\n")
+
+        # Table 1: Magnitude MSE
+        write_fft_table(f, "Magnitude MSE", "MSE_Magnitude", window_sizes, target_frequencies)
+
+        # Table 2: Phase MSE
+        write_fft_table(f, "Phase MSE", "MSE_Phase", window_sizes, target_frequencies)
+
+        # Table 3: Complex MSE
+        write_fft_table(f, "Complex MSE", "MSE_Complex", window_sizes, target_frequencies)
+
+    print(f"    → {tex_filename}")
 
     return 1
 
