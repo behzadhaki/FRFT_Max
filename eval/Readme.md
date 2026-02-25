@@ -23,7 +23,7 @@ also run following to generate the stats in the terminal:
  python analyze_fft_comparison.py
 ```
 
-### 2. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) )
+### 2. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) ) (Using Sawtooth Waves)
 
 In this test, we validate the FRFT implementation for alpha=-2 by comparing its output to the expected signal reversal. The test generates random input signals of varying lengths, computes the FRFT with alpha=-2, and compares the result to the reversed input signal.
 
@@ -47,6 +47,31 @@ python3 plot_results.py --passthrough test_results/passthrough_reversal/
 
 # Plot reversal results only (α=±2)
 python3 plot_results.py --reversal test_results/passthrough_reversal/
+```
+
+### 2b. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) ) (Using Sinusoids instead of Sawtooth Waves)
+
+Same as test 2, but using sinusoids instead of sawtooth waves. This is to check if the results are consistent across different types of input signals.
+
+```commandline
+chmod +x run_passthrough_reversal_test_with_sine.sh
+./run_passthrough_reversal_test_with_sine.sh
+```
+
+The results will be stored in 'test_results/passthrough_reversal_with_sine/' directory containing some text files as well as sample plots.
+
+Then analyze MSS results using:
+
+```commandline
+python3 analyze_passthrough_reversal_mss.py --dir test_results/passthrough_reversal_with_sine
+```
+then generate the plots:
+
+```commandline
+# Plot pass-through results only (α=0)
+python3 plot_results.py --passthrough test_results/passthrough_reversal_with_sine/
+# Plot reversal results only (α=±2)
+python3 plot_results.py --reversal test_results/passthrough_reversal_with_sine/
 ```
 
 

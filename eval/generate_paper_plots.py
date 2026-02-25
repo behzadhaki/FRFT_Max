@@ -1981,6 +1981,46 @@ def main():
         print(f"  ⚠ Results file not found: {mss_results_file}")
 
     # ========================================================================
+    # PROCESS PASSTHROUGH AND REVERSAL RESULTS (SINE)
+    # ========================================================================
+
+    print("\n[Processing Passthrough and Reversal Results (Sine)]")
+
+    # Create passthrough/reversal (sine) output directory
+    passthrough_reversal_sine_output = output_dir / 'passthrough_reversal_with_sine'
+    passthrough_reversal_sine_output.mkdir(parents=True, exist_ok=True)
+
+    passthrough_reversal_sine_dir = results_dir / 'passthrough_reversal_with_sine'
+    mss_results_sine_file = passthrough_reversal_sine_dir / 'mss_analysis_results.txt'
+
+    if mss_results_sine_file.exists():
+        print(f"  Found passthrough/reversal (sine) results file: {mss_results_sine_file}")
+
+        data = load_passthrough_reversal_results(mss_results_sine_file)
+
+        if data is not None:
+            print(f"  Total records loaded: {len(data)}")
+
+            available_types = data['test_type'].unique()
+            print(f"  Available test types: {list(available_types)}")
+
+            has_passthrough = 'passthrough' in available_types
+            has_reversal = any(t in available_types for t in ['reversal_fwd', 'reversal_bwd'])
+
+            if has_passthrough and has_reversal:
+                passthrough_count = len(data[data['test_type'] == 'passthrough'])
+                reversal_count = len(data[data['test_type'].isin(['reversal_fwd', 'reversal_bwd'])])
+                print(f"  Generating combined plot ({passthrough_count} passthrough + {reversal_count} reversal records)...")
+                total_plots += plot_passthrough_reversal_combined(data, passthrough_reversal_sine_output)
+            else:
+                if not has_passthrough:
+                    print(f"  ⚠ No passthrough data found")
+                if not has_reversal:
+                    print(f"  ⚠ No reversal data found")
+    else:
+        print(f"  ⚠ Results file not found: {mss_results_sine_file}")
+
+    # ========================================================================
     # PROCESS FFT COMPARISON RESULTS
     # ========================================================================
 
@@ -2031,6 +2071,11 @@ def main():
     passthrough_reversal_output = output_dir / 'passthrough_reversal'
     if passthrough_reversal_output.exists():
         print(f"  Passthrough/Reversal plots → {passthrough_reversal_output}/")
+
+    # Check if passthrough/reversal plots were generated (with Sines)
+    passthrough_reversal_sine_output = output_dir / 'passthrough_reversal_with_sine'
+    if passthrough_reversal_sine_output.exists():
+        print(f"  Passthrough/Reversal (Sine) plots → {passthrough_reversal_sine_output}/")
 
     # Check if FFT comparison plots were generated
     fft_comparison_output = output_dir / 'fft_comparison'
