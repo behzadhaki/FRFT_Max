@@ -32,13 +32,26 @@ void apply_window(std::vector<double>& signal, const std::vector<double>& window
     }
 }
 
+// Generate k frequencies log-uniformly sampled from f_min to f_max (inclusive)
+static std::vector<double> make_uniform_frequencies(int k, double f_min, double f_max) {
+    std::vector<double> freqs(k);
+    double log_min = std::log(f_min);
+    double log_max = std::log(f_max);
+    for (int i = 0; i < k; ++i) {
+        freqs[i] = std::exp(log_min + i * (log_max - log_min) / (k - 1));
+    }
+    return freqs;
+}
+
 // Test configuration
 struct TestConfig {
     std::vector<int> window_sizes = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     std::vector<int> overlap_factors = {1};  // 1=no overlap
-    std::vector<double> test_frequencies = {100.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000., 9000., 10000.0};
+    // 1000 frequencies uniformly sampled from 100 Hz to 10000 Hz
+    std::vector<double> test_frequencies = make_uniform_frequencies(1000, 100.0, 10000.0);
     double sample_rate = 44100.0;
     int n_analysis = 20;  // Number of frames to analyze
+    bool ignore_plots = true;  // Skip plot generation by default
     std::string output_filename = "test_results/fft_comparison/results.txt";
     std::string detailed_log_filename = "test_results/fft_comparison/detailed_log.txt";
     std::string figures_dir = "test_results/fft_comparison/figures";
@@ -642,25 +655,27 @@ void run_test_suite(const TestConfig& config) {
                               << ", Corr: " << std::fixed << std::setprecision(4)
                               << result.correlation_mag << "\n";
 
-                    // Generate plot for this test
-                    std::string csv_filename = "temp_fft_comparison.csv";
-                    std::string png_filename = config.figures_dir + "/freq" +
-                                              std::to_string(static_cast<int>(frequency)) +
-                                              "_ws" + std::to_string(window_size) + ".png";
+                    // Only generate plot when enabled and correlation is not perfectly 1
+                    if (!config.ignore_plots && result.correlation_mag < 1.0) {
+                        std::string csv_filename = "temp_fft_comparison.csv";
+                        std::string png_filename = config.figures_dir + "/freq" +
+                                                  std::to_string(static_cast<int>(frequency)) +
+                                                  "_ws" + std::to_string(window_size) + ".png";
 
-                    write_spectra_to_csv(csv_filename, avg_frft_mag, avg_fft_mag,
-                                        config.sample_rate);
-                    generate_plot_script(csv_filename, png_filename, window_size, frequency,
-                                       config.sample_rate, result.mse_magnitude, result.correlation_mag);
+                        write_spectra_to_csv(csv_filename, avg_frft_mag, avg_fft_mag,
+                                            config.sample_rate);
+                        generate_plot_script(csv_filename, png_filename, window_size, frequency,
+                                           config.sample_rate, result.mse_magnitude, result.correlation_mag);
 
-                    int ret = system("python3 plot_fft_comparison.py 2>/dev/null");
-                    if (ret != 0) {
-                        std::cerr << "    Warning: Failed to generate plot\n";
+                        int ret = system("python3 plot_fft_comparison.py 2>/dev/null");
+                        if (ret != 0) {
+                            std::cerr << "    Warning: Failed to generate plot\n";
+                        }
+
+                        // Clean up temporary files
+                        remove(csv_filename.c_str());
+                        remove("plot_fft_comparison.py");
                     }
-
-                    // Clean up temporary files
-                    remove(csv_filename.c_str());
-                    remove("plot_fft_comparison.py");
                 }
             }
         }
@@ -704,6 +719,8 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
             std::cout << "  --output FILE       Output filename (default: test_results/fft_comparison/results.txt)\n";
             std::cout << "  --sample-rate SR    Sample rate in Hz (default: 44100)\n";
             std::cout << "  --n-analysis N      Number of frames to analyze (default: 20)\n";
+            std::cout << "  --plots            Enable plot generation (only saved where correlation < 1)\n";
+            std::cout << "  --no-plots         Disable plot generation (default)\n";
             std::cout << "  --quick            Run quick test (fewer window sizes and frequencies)\n";
             std::cout << "  --help             Show this help message\n\n";
             std::cout << "Note: FFT is normalized by sqrt(N) before comparison with FRFT.\n";
@@ -718,9 +735,15 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
         else if (arg == "--n-analysis" && i + 1 < argc) {
             config.n_analysis = std::stoi(argv[++i]);
         }
+        else if (arg == "--plots") {
+            config.ignore_plots = false;
+        }
+        else if (arg == "--no-plots") {
+            config.ignore_plots = true;
+        }
         else if (arg == "--quick") {
             config.window_sizes = {64, 256, 1024};
-            config.test_frequencies = {440.0, 1000.0};
+            config.test_frequencies = make_uniform_frequencies(10, 100.0, 10000.0);
             config.overlap_factors = {1, 2, 4};
         }
     }

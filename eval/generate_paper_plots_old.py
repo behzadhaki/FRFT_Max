@@ -1528,92 +1528,87 @@ def plot_passthrough_reversal_combined(data, output_dir):
 def plot_fft_comparison_errors(data, output_dir):
     """
     Plot FFT comparison errors vs frequency for magnitude, phase, and complex.
-    Uses all available frequencies (continuous log-sampled from 100–10000 Hz).
-    X-axis is log-scaled to match the log-uniform sampling of test frequencies.
-    Aggregates across all window sizes: mean line + min/max shaded band.
+    Shows errors at specific frequencies: 100, 1000, 2000, ..., 8000 Hz.
     Publication-quality style with no title.
     """
     print("  Generating FFT comparison error plots...")
 
-    if len(data) == 0:
-        print(f"  No data found")
+    # Filter data for specific frequencies
+    target_frequencies = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+    data_filtered = data[data['Frequency'].isin(target_frequencies)].copy()
+
+    if len(data_filtered) == 0:
+        print(f"  No data found for target frequencies")
         return 0
 
-    # Group by frequency and compute statistics across all window sizes
-    grouped = data.groupby('Frequency').agg({
+    # Group by frequency and compute statistics
+    grouped = data_filtered.groupby('Frequency').agg({
         'MSE_Magnitude': ['mean', 'min', 'max'],
         'MSE_Phase': ['mean', 'min', 'max'],
         'MSE_Complex': ['mean', 'min', 'max']
     }).reset_index()
-    grouped = grouped.sort_values('Frequency')
-
-    frequencies = grouped['Frequency'].values
-
-    tick_freqs  = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
-    tick_labels = ['100', '1k', '2k', '3k', '4k', '5k', '6k', '7k', '8k', '9k', '10k']
 
     # Create 3-subplot figure (vertical layout)
     fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
+    frequencies = grouped['Frequency'].values
+
     # Plot 1: Magnitude MSE
     ax = axes[0]
     mse_mag_mean = grouped['MSE_Magnitude']['mean'].values
-    mse_mag_min  = grouped['MSE_Magnitude']['min'].values
-    mse_mag_max  = grouped['MSE_Magnitude']['max'].values
+    mse_mag_min = grouped['MSE_Magnitude']['min'].values
+    mse_mag_max = grouped['MSE_Magnitude']['max'].values
 
     ax.fill_between(frequencies, mse_mag_min, mse_mag_max,
                     alpha=0.2, color=COLORS['mss'], label='Min/Max Range')
-    ax.plot(frequencies, mse_mag_mean, '-', label='Mean',
-            linewidth=2, color=COLORS['mss'], alpha=0.9)
+    ax.plot(frequencies, mse_mag_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['mss'], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
     ax.set_ylabel('MSE Magnitude', fontweight='bold')
     ax.set_yscale('log')
-    ax.set_xlim([100, 10000])
-    ax.set_xticks(tick_freqs)
-    ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
     # Plot 2: Phase MSE
     ax = axes[1]
     mse_phase_mean = grouped['MSE_Phase']['mean'].values
-    mse_phase_min  = grouped['MSE_Phase']['min'].values
-    mse_phase_max  = grouped['MSE_Phase']['max'].values
+    mse_phase_min = grouped['MSE_Phase']['min'].values
+    mse_phase_max = grouped['MSE_Phase']['max'].values
 
     ax.fill_between(frequencies, mse_phase_min, mse_phase_max,
                     alpha=0.2, color=COLORS['mse'], label='Min/Max Range')
-    ax.plot(frequencies, mse_phase_mean, '-', label='Mean',
-            linewidth=2, color=COLORS['mse'], alpha=0.9)
+    ax.plot(frequencies, mse_phase_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['mse'], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
     ax.set_ylabel('MSE Phase', fontweight='bold')
     ax.set_yscale('log')
-    ax.set_xlim([100, 10000])
-    ax.set_xticks(tick_freqs)
-    ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
     # Plot 3: Complex MSE
     ax = axes[2]
     mse_complex_mean = grouped['MSE_Complex']['mean'].values
-    mse_complex_min  = grouped['MSE_Complex']['min'].values
-    mse_complex_max  = grouped['MSE_Complex']['max'].values
+    mse_complex_min = grouped['MSE_Complex']['min'].values
+    mse_complex_max = grouped['MSE_Complex']['max'].values
 
     ax.fill_between(frequencies, mse_complex_min, mse_complex_max,
                     alpha=0.2, color=COLORS['highlight'], label='Min/Max Range')
-    ax.plot(frequencies, mse_complex_mean, '-', label='Mean',
-            linewidth=2, color=COLORS['highlight'], alpha=0.9)
+    ax.plot(frequencies, mse_complex_mean, 'o-', label='Mean',
+            linewidth=2.5, markersize=7, color=COLORS['highlight'], alpha=0.8)
 
     ax.set_xlabel('Frequency (Hz)', fontweight='bold')
     ax.set_ylabel('MSE Complex', fontweight='bold')
     ax.set_yscale('log')
-    ax.set_xlim([100, 10000])
-    ax.set_xticks(tick_freqs)
-    ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
     plt.tight_layout()
     filename = output_dir / 'fft_comparison_errors_vs_frequency.png'
@@ -1628,57 +1623,98 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
     """
     Plot FFT comparison errors vs frequency for magnitude, phase, and complex,
     separated by window size.
-    Uses all available frequencies (continuous log-sampled from 100–10000 Hz).
-    X-axis is log-scaled to match the log-uniform sampling of test frequencies.
-    Only shows window sizes >= 64.
+    Shows errors at specific frequencies: 100, 1000, 2000, ..., 8000 Hz.
     Publication-quality style with no title.
+    Only showing window sizes >= 64.
     """
     print("  Generating FFT comparison error plots by window size...")
 
+    # Filter data for specific frequencies
+    target_frequencies = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+    data_filtered = data[data['Frequency'].isin(target_frequencies)].copy()
+
     # Filter to only window sizes >= 64
-    data_filtered = data[data['WindowSize'] >= 64].copy()
+    data_filtered = data_filtered[data_filtered['WindowSize'] >= 64]
 
     if len(data_filtered) == 0:
-        print(f"  No data found")
+        print(f"  No data found for target frequencies")
         return 0
 
-    # Get unique window sizes and build a colour map
+    # Get unique window sizes
     window_sizes = sorted(data_filtered['WindowSize'].unique())
+
+    # Create color map for different window sizes
     colors = plt.cm.viridis(np.linspace(0, 0.9, len(window_sizes)))
-
-    freq_min = data_filtered['Frequency'].min()
-    freq_max = data_filtered['Frequency'].max()
-
-    tick_freqs  = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
-    tick_labels = ['100', '1k', '2k', '3k', '4k', '5k', '6k', '7k', '8k', '9k', '10k']
 
     # Create 3-subplot figure (vertical layout)
     fig, axes = plt.subplots(3, 1, figsize=(12, 12))
 
-    for metric, ax, ylabel in [
-        ('MSE_Magnitude', axes[0], 'MSE\nMagnitude'),
-        ('MSE_Phase',     axes[1], 'MSE\nPhase'),
-        ('MSE_Complex',   axes[2], 'MSE\nComplex'),
-    ]:
-        for idx, ws in enumerate(window_sizes):
-            ws_data = data_filtered[data_filtered['WindowSize'] == ws]
-            grouped = ws_data.groupby('Frequency').agg(
-                {metric: 'mean'}
-            ).reset_index().sort_values('Frequency')
+    # Plot 1: Magnitude MSE by window size
+    ax = axes[0]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Magnitude': 'mean'
+        }).reset_index()
 
-            ax.plot(grouped['Frequency'].values, grouped[metric].values, '-',
-                    label=str(ws), linewidth=1.5, color=colors[idx], alpha=0.85)
+        frequencies = grouped['Frequency'].values
+        mse_mag_mean = grouped['MSE_Magnitude'].values
 
-        ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-        ax.set_ylabel(ylabel, fontweight='bold')
-        ax.set_yscale('log')
-        ax.set_xlim([100, 10000])
-        ax.set_xticks(tick_freqs)
-        ax.set_xticklabels(tick_labels)
-        ax.grid(True, alpha=0.3, which='both', linestyle='--')
+        ax.plot(frequencies, mse_mag_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
 
-    # Single shared legend on the bottom subplot
-    axes[2].legend(loc='best', framealpha=0.9, title='Window Size', ncol=2)
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE\nMagnitude', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    # Plot 2: Phase MSE by window size
+    ax = axes[1]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Phase': 'mean'
+        }).reset_index()
+
+        frequencies = grouped['Frequency'].values
+        mse_phase_mean = grouped['MSE_Phase'].values
+
+        ax.plot(frequencies, mse_phase_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE\nPhase', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
+
+    # Plot 3: Complex MSE by window size
+    ax = axes[2]
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg({
+            'MSE_Complex': 'mean'
+        }).reset_index()
+
+        frequencies = grouped['Frequency'].values
+        mse_complex_mean = grouped['MSE_Complex'].values
+
+        ax.plot(frequencies, mse_complex_mean, 'o-',
+                label=f'{ws}', linewidth=2, markersize=6,
+                color=colors[idx], alpha=0.8)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE\nComplex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9, title='Window Size', ncol=2)
+    ax.set_xlim([0, 8500])
+    ax.set_xticks(target_frequencies)
 
     plt.tight_layout()
     filename = output_dir / 'fft_comparison_errors_by_window_size.png'
@@ -1686,61 +1722,85 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ========================================================================
+    # GENERATE LATEX TABLES (3 tables: Magnitude, Phase, Complex)
+    # ========================================================================
+
+    # Prepare data for tables
+    # Group by window size and frequency
+    table_data = data_filtered.groupby(['WindowSize', 'Frequency']).agg({
+        'MSE_Magnitude': 'mean',
+        'MSE_Phase': 'mean',
+        'MSE_Complex': 'mean'
+    }).reset_index()
+
+    # Function to write a single table
+    def write_fft_table(f, metric_name, metric_column, window_sizes, frequencies):
+        f.write(f"% FFT Comparison: {metric_name}\n")
+        f.write(f"% Rows: Window Size (as power of 2)\n")
+        f.write(f"% Columns: Frequency (Hz)\n\n")
+
+        f.write("\\begin{table}[htbp]\n")
+        f.write("\\centering\n")
+        f.write(f"\\caption{{FFT vs FRFT Comparison: {metric_name}}}\n")
+        f.write(f"\\label{{tab:fft_comparison_{metric_column.lower()}}}\n")
+        f.write("\\small\n")
+
+        # Write table header
+        num_cols = len(frequencies)
+        f.write(f"\\begin{{tabular}}{{l{'c' * num_cols}}}\n")
+        f.write("\\hline\\hline\n")
+
+        # Column headers (frequencies)
+        header = "Window Size & " + " & ".join([f"{int(freq)} Hz" for freq in frequencies]) + " \\\\\n"
+        f.write(header)
+        f.write("\\hline\n")
+
+        # Data rows (one per window size)
+        for ws in window_sizes:
+            # Format as power of 2
+            f.write(f"$2^{{{int(np.log2(ws))}}}$ & ")
+
+            values = []
+            for freq in frequencies:
+                match = table_data[(table_data['WindowSize'] == ws) &
+                                   (table_data['Frequency'] == freq)]
+                if len(match) > 0:
+                    val = match[metric_column].values[0]
+                    values.append(f"{val:.2e}")
+                else:
+                    values.append("---")
+
+            f.write(" & ".join(values) + " \\\\\n")
+
+        f.write("\\hline\\hline\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{table}\n\n")
+
+    # Write all three tables to a single file
+    tex_filename = output_dir / 'fft_comparison_tables.tex'
+
+    with open(tex_filename, 'w') as f:
+        f.write("% FFT vs FRFT Comparison Tables\n")
+        f.write("% Three tables: Magnitude MSE, Phase MSE, Complex MSE\n\n")
+
+        # Table 1: Magnitude MSE
+        write_fft_table(f, "Magnitude MSE", "MSE_Magnitude", window_sizes, target_frequencies)
+
+        # Table 2: Phase MSE
+        write_fft_table(f, "Phase MSE", "MSE_Phase", window_sizes, target_frequencies)
+
+        # Table 3: Complex MSE
+        write_fft_table(f, "Complex MSE", "MSE_Complex", window_sizes, target_frequencies)
+
+    print(f"    → {tex_filename}")
+
     return 1
 
 
-def plot_fft_comparison_complex_mse_by_window_size(data, output_dir):
-    """
-    Plot complex MSE vs frequency separated by window size — standalone figure.
-    Legend placed outside the plot area to the right.
-    Only shows window sizes >= 64.
-    Publication-quality style with no title.
-    """
-    print("  Generating FFT comparison complex MSE plot (standalone)...")
-
-    data_filtered = data[data['WindowSize'] >= 64].copy()
-
-    if len(data_filtered) == 0:
-        print(f"  No data found")
-        return 0
-
-    window_sizes = sorted(data_filtered['WindowSize'].unique())
-    colors = plt.cm.viridis(np.linspace(0, 0.9, len(window_sizes)))
-
-    tick_freqs  = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
-    tick_labels = ['100', '1k', '2k', '3k', '4k', '5k', '6k', '7k', '8k', '9k', '10k']
-
-    fig, ax = plt.subplots(1, 1, figsize=(12, 5))
-
-    for idx, ws in enumerate(window_sizes):
-        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
-        grouped = ws_data.groupby('Frequency').agg(
-            {'MSE_Complex': 'mean'}
-        ).reset_index().sort_values('Frequency')
-
-        ax.plot(grouped['Frequency'].values, grouped['MSE_Complex'].values, '-',
-                label=str(ws), linewidth=1.5, color=colors[idx], alpha=0.85)
-
-    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-    ax.set_ylabel('MSE Complex', fontweight='bold')
-    ax.set_yscale('log')
-    ax.set_xlim([100, 10000])
-    ax.set_xticks(tick_freqs)
-    ax.set_xticklabels(tick_labels)
-    ax.grid(True, alpha=0.3, which='both', linestyle='--')
-
-    # Legend outside to the right
-    ax.legend(title='Window Size', loc='upper left',
-              bbox_to_anchor=(1.03, 1), borderaxespad=0,
-              framealpha=0.9, ncol=1)
-
-    plt.tight_layout()
-    filename = output_dir / 'fft_comparison_complex_mse_by_window_size.png'
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    print(f"    → {filename}")
-    plt.close()
-
-    return 1
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1987,9 +2047,6 @@ def main():
 
             # Generate error plots vs frequency (separated by window size)
             total_plots += plot_fft_comparison_errors_by_window_size(fft_data, fft_comparison_output)
-
-            # Generate standalone complex MSE plot with legend outside
-            total_plots += plot_fft_comparison_complex_mse_by_window_size(fft_data, fft_comparison_output)
     else:
         print(f"  ⚠ FFT comparison results file not found: {fft_results_file}")
 
