@@ -1,7 +1,7 @@
 
 ## FRFT Evaluation Test Suite
 
-### 1. FFT vs FRFT(alpha=1) Comparison
+### 1.a FFT vs FRFT(alpha=1) Comparison 
 
 In this test, we compare the output of the FRFT implementation with the standard FFT implementation for alpha=1. The test generates random input signals of varying lengths, computes both the FFT and FRFT, and measures the difference between the two outputs.
 
@@ -22,6 +22,33 @@ also run following to generate the stats in the terminal:
 ```commandline
  python analyze_fft_comparison.py
 ```
+
+### 1.b FFT vs FRFT(alpha=1) — Extra Analysis (Leakage-Free + Impulse)
+
+Two additional targeted tests are provided to further isolate sources of numerical error in the FRFT implementation:
+
+- **Exact-bin sine waves**: test frequencies are constrained to fall exactly on FFT bin centres, eliminating spectral leakage asymmetry between the two transforms. For window sizes with fewer than 1000 available bin frequencies in the 100–10000 Hz range, all bins are used; otherwise 1000 are selected log-uniformly, each snapped to its nearest bin.
+
+- **Impulse response**: a unit delta (1 at sample 0) is used as input. Since the analytical FFT of a unit impulse is exactly 1/√N at every bin, this test measures absolute FRFT numerical error directly against a known ground truth without relying on FFTW at all.
+
+```commandline
+./run_test_fft_comparison_extra_analysis.sh
+```
+
+Pass `--exact-bin-only` or `--impulse-only` to run a single test type. Use `--quick` for a fast smoke test over a small set of window sizes.
+
+Results are saved under `test_results/fft_comparison_extra_analysis/` in two sub-directories: `exact_bin/` and `impulse/`. The impulse directory additionally contains `analytical_error.txt` with per-window-size error against the ground truth.
+
+To analyse the results run:
+
+```commandline
+python3 analyze_fft_comparison_extra_analysis.py
+```
+
+
+
+
+
 
 ### 2. Pass Through (FRFT(alpha=0))and Reversal Test (FRFT(alpha=±2) ) (Using Sawtooth Waves)
 

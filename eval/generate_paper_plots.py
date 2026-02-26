@@ -1742,6 +1742,263 @@ def plot_fft_comparison_complex_mse_by_window_size(data, output_dir):
 
     return 1
 
+# ============================================================================
+# EXTRA ANALYSIS PLOTS — Exact-Bin Sine Frequencies
+# ============================================================================
+
+def plot_extra_exact_bin_complex_mse(data, output_dir):
+    """
+    Plot complex MSE vs frequency for exact-bin sine tests.
+    Aggregated across all window sizes: mean line + min/max shaded band.
+    X-axis linear (Hz), y-axis log. No leakage in these results.
+    """
+    print("  Generating exact-bin complex MSE vs frequency (aggregated)...")
+
+    if len(data) == 0:
+        print("  No data found")
+        return 0
+
+    grouped = data.groupby('Frequency').agg(
+        mse_mean=('MSE_Complex', 'mean'),
+        mse_min =('MSE_Complex', 'min'),
+        mse_max =('MSE_Complex', 'max'),
+    ).reset_index().sort_values('Frequency')
+
+    tick_freqs  = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
+    tick_labels = ['100', '1k', '2k', '3k', '4k', '5k', '6k', '7k', '8k', '9k', '10k']
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    ax.fill_between(grouped['Frequency'], grouped['mse_min'], grouped['mse_max'],
+                    alpha=0.2, color=COLORS['highlight'], label='Min/Max Range')
+    ax.plot(grouped['Frequency'], grouped['mse_mean'], '-',
+            linewidth=2, color=COLORS['highlight'], alpha=0.9, label='Mean')
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_xlim([100, 10000])
+    ax.set_xticks(tick_freqs)
+    ax.set_xticklabels(tick_labels)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    plt.tight_layout()
+    filename = output_dir / 'exact_bin_complex_mse_vs_frequency.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+    return 1
+
+
+def plot_extra_exact_bin_complex_mse_by_window_size(data, output_dir):
+    """
+    Plot complex MSE vs frequency for exact-bin sine tests, one line per window size.
+    Legend placed outside to the right.
+    """
+    print("  Generating exact-bin complex MSE vs frequency by window size...")
+
+    data_filtered = data[data['WindowSize'] >= 64].copy()
+    if len(data_filtered) == 0:
+        print("  No data found")
+        return 0
+
+    window_sizes = sorted(data_filtered['WindowSize'].unique())
+    colors = plt.cm.viridis(np.linspace(0, 0.9, len(window_sizes)))
+
+    tick_freqs  = [100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
+    tick_labels = ['100', '1k', '2k', '3k', '4k', '5k', '6k', '7k', '8k', '9k', '10k']
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    for idx, ws in enumerate(window_sizes):
+        ws_data = data_filtered[data_filtered['WindowSize'] == ws]
+        grouped = ws_data.groupby('Frequency').agg(
+            mse_mean=('MSE_Complex', 'mean')
+        ).reset_index().sort_values('Frequency')
+
+        ax.plot(grouped['Frequency'], grouped['mse_mean'], '-',
+                label=str(ws), linewidth=1.5, color=colors[idx], alpha=0.85)
+
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
+    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_xlim([100, 10000])
+    ax.set_xticks(tick_freqs)
+    ax.set_xticklabels(tick_labels)
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(title='Window Size', loc='upper left',
+              bbox_to_anchor=(1.01, 1), borderaxespad=0,
+              framealpha=0.9, ncol=1)
+
+    plt.tight_layout()
+    filename = output_dir / 'exact_bin_complex_mse_by_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+    return 1
+
+
+# ============================================================================
+# EXTRA ANALYSIS PLOTS — Impulse Response
+# ============================================================================
+
+def plot_extra_impulse_complex_mse_by_window_size(data, output_dir):
+    """
+    Plot complex MSE (FRFT vs FFT) per window size for the impulse test.
+    Single bar/line chart — one value per window size (single frame, no frequency axis).
+    """
+    print("  Generating impulse complex MSE vs window size...")
+
+    if len(data) == 0:
+        print("  No data found")
+        return 0
+
+    # For the impulse test each (window_size, overlap_factor) row is one measurement.
+    # Focus on overlap_factor == 1 for the cleanest view.
+    d = data[data['OverlapFactor'] == 1].copy() if 'OverlapFactor' in data.columns else data.copy()
+    d = d.sort_values('WindowSize')
+
+    if len(d) == 0:
+        print("  No overlap=1 rows found, using all rows")
+        d = data.sort_values('WindowSize')
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    ws   = d['WindowSize'].values
+    mse  = d['MSE_Complex'].values
+    x    = np.arange(len(ws))
+
+    ax.bar(x, mse, color=COLORS['highlight'], alpha=0.8, edgecolor='black', linewidth=0.5)
+
+    ax.set_xlabel('Window Size (N)', fontweight='bold')
+    ax.set_ylabel('MSE Complex\n(FRFT vs FFT)', fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in ws], rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--', axis='y')
+
+    plt.tight_layout()
+    filename = output_dir / 'impulse_complex_mse_by_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+    return 1
+
+
+def plot_extra_impulse_analytical_error(anal_data, output_dir):
+    """
+    Plot FRFT absolute error vs the analytical ground truth (1/sqrt(N)) per window size.
+    Shows MSE, Max Error, and Mean Error on a single log-y axis.
+    This is the cleanest measure of raw FRFT numerical accuracy.
+    """
+    print("  Generating impulse analytical error vs window size...")
+
+    if anal_data is None or len(anal_data) == 0:
+        print("  No analytical error data found")
+        return 0
+
+    anal_data = anal_data.sort_values('WindowSize')
+    ws  = anal_data['WindowSize'].values
+    x   = np.arange(len(ws))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    ax.plot(x, anal_data['MSE_Complex_vs_Analytical'].values,  'o-',
+            linewidth=2, markersize=6, color=COLORS['highlight'], label='MSE Complex')
+    ax.plot(x, anal_data['MaxError_vs_Analytical'].values,     's--',
+            linewidth=2, markersize=6, color=COLORS['mse'],       label='Max Error')
+    ax.plot(x, anal_data['MeanError_vs_Analytical'].values,    '^:',
+            linewidth=2, markersize=6, color=COLORS['mss'],       label='Mean Error')
+
+    ax.set_xlabel('Window Size (N)', fontweight='bold')
+    ax.set_ylabel('Error vs Analytical\nGround Truth (1/√N)', fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in ws], rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    # Annotate log-log slope if enough points
+    if len(ws) > 2:
+        log_ws  = np.log2(ws)
+        log_mse = np.log10(anal_data['MSE_Complex_vs_Analytical'].values)
+        valid   = np.isfinite(log_mse)
+        if valid.sum() > 2:
+            slope, _ = np.polyfit(log_ws[valid], log_mse[valid], 1)
+            ax.annotate(f'log-log slope: {slope:.2f}',
+                        xy=(0.02, 0.05), xycoords='axes fraction',
+                        fontsize=11, color='dimgray',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='wheat', alpha=0.6))
+
+    plt.tight_layout()
+    filename = output_dir / 'impulse_analytical_error_vs_window_size.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+    return 1
+
+
+def plot_extra_impulse_analytical_error_comparison(fft_data, anal_data, output_dir):
+    """
+    Side-by-side comparison: FRFT vs FFT complex MSE (impulse) alongside
+    FRFT vs analytical ground truth, both plotted vs window size.
+    Lets the reader see how much of the FRFT-vs-FFT error is shared with FFT's
+    own numerical error vs. how much is unique to the FRFT.
+    """
+    print("  Generating impulse FRFT-vs-FFT vs analytical comparison...")
+
+    if fft_data is None or len(fft_data) == 0:
+        print("  No FFT data found")
+        return 0
+    if anal_data is None or len(anal_data) == 0:
+        print("  No analytical error data found")
+        return 0
+
+    fft_d  = fft_data[fft_data.get('OverlapFactor', fft_data.iloc[:, 1]) == 1].sort_values('WindowSize') \
+        if 'OverlapFactor' in fft_data.columns else fft_data.sort_values('WindowSize')
+    anal_d = anal_data.sort_values('WindowSize')
+
+    # Merge on WindowSize so both series share the same x-positions
+    merged = pd.merge(
+        fft_d[['WindowSize', 'MSE_Complex']].rename(columns={'MSE_Complex': 'mse_vs_fft'}),
+        anal_d[['WindowSize', 'MSE_Complex_vs_Analytical']].rename(
+            columns={'MSE_Complex_vs_Analytical': 'mse_vs_analytical'}),
+        on='WindowSize', how='inner'
+    ).sort_values('WindowSize')
+
+    if len(merged) == 0:
+        print("  No overlapping window sizes between FFT and analytical data")
+        return 0
+
+    ws = merged['WindowSize'].values
+    x  = np.arange(len(ws))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    ax.plot(x, merged['mse_vs_fft'].values,         'o-',
+            linewidth=2, markersize=6, color=COLORS['mss'],
+            label='FRFT vs FFT (both have FP noise)')
+    ax.plot(x, merged['mse_vs_analytical'].values,  's--',
+            linewidth=2, markersize=6, color=COLORS['highlight'],
+            label='FRFT vs Analytical (1/√N)')
+
+    ax.set_xlabel('Window Size (N)', fontweight='bold')
+    ax.set_ylabel('MSE Complex', fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in ws], rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, which='both', linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    plt.tight_layout()
+    filename = output_dir / 'impulse_frft_vs_fft_vs_analytical.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate publication-quality plots for AES journal paper'
@@ -1994,8 +2251,49 @@ def main():
         print(f"  ⚠ FFT comparison results file not found: {fft_results_file}")
 
     # ========================================================================
-    # SUMMARY
+    # PROCESS FFT EXTRA ANALYSIS RESULTS (exact-bin + impulse)
     # ========================================================================
+
+    print("\n[Processing FFT Extra Analysis Results]")
+
+    extra_analysis_dir = results_dir / 'fft_comparison_extra_analysis'
+
+    # --- Exact-bin sine ---
+    exact_bin_output = output_dir / 'fft_comparison_extra_analysis' / 'exact_bin'
+    exact_bin_output.mkdir(parents=True, exist_ok=True)
+    exact_bin_file = extra_analysis_dir / 'exact_bin' / 'results.txt'
+
+    if exact_bin_file.exists():
+        print(f"  Found exact-bin results: {exact_bin_file}")
+        exact_bin_data = load_results_data(exact_bin_file)
+        if exact_bin_data is not None:
+            print(f"  Total exact-bin records: {len(exact_bin_data)}")
+            total_plots += plot_extra_exact_bin_complex_mse(exact_bin_data, exact_bin_output)
+            total_plots += plot_extra_exact_bin_complex_mse_by_window_size(exact_bin_data, exact_bin_output)
+    else:
+        print(f"  ⚠ Exact-bin results not found: {exact_bin_file}")
+
+    # --- Impulse response ---
+    impulse_output = output_dir / 'fft_comparison_extra_analysis' / 'impulse'
+    impulse_output.mkdir(parents=True, exist_ok=True)
+    impulse_file   = extra_analysis_dir / 'impulse' / 'results.txt'
+    analytical_file = extra_analysis_dir / 'impulse' / 'analytical_error.txt'
+
+    if impulse_file.exists():
+        print(f"  Found impulse results: {impulse_file}")
+        impulse_data = load_results_data(impulse_file)
+        anal_data    = load_results_data(analytical_file) if analytical_file.exists() else None
+
+        if impulse_data is not None:
+            print(f"  Total impulse records: {len(impulse_data)}")
+            total_plots += plot_extra_impulse_complex_mse_by_window_size(impulse_data, impulse_output)
+
+        if anal_data is not None:
+            print(f"  Total analytical error records: {len(anal_data)}")
+            total_plots += plot_extra_impulse_analytical_error(anal_data, impulse_output)
+            total_plots += plot_extra_impulse_analytical_error_comparison(impulse_data, anal_data, impulse_output)
+    else:
+        print(f"  ⚠ Impulse results not found: {impulse_file}")
 
     print("\n" + "=" * 70)
     print("  Plot Generation Complete!")
@@ -2024,6 +2322,11 @@ def main():
     fft_comparison_output = output_dir / 'fft_comparison'
     if fft_comparison_output.exists():
         print(f"  FFT Comparison plots → {fft_comparison_output}/")
+
+    # Check if extra analysis plots were generated
+    extra_analysis_output = output_dir / 'fft_comparison_extra_analysis'
+    if extra_analysis_output.exists():
+        print(f"  FFT Extra Analysis plots → {extra_analysis_output}/")
 
     print("\nAll plots saved as png files at 300 DPI\n")
 

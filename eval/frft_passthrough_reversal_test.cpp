@@ -23,7 +23,7 @@ struct TestConfig {
     double sample_rate = 44100.0;
     // Sawtooth frequency range for random generation
     double sawtooth_f_min = 100.0;   // Minimum frequency (Hz)
-    double sawtooth_f_max = 8000.0;  // Maximum frequency (Hz)
+    double sawtooth_f_max = 10000.0;  // Maximum frequency (Hz)
     int num_test_frames = 1000;        // Number of frames to test
     int num_saved_pngs = 0;          // Only save 3 random PNGs
     std::string base_dir = "test_results/passthrough_reversal";
