@@ -144,6 +144,19 @@ COLORS = {
 }
 
 
+def write_sample_analysis(filepath, lines):
+    """
+    Write a plain-text sample-analysis report alongside a plot.
+
+    Args:
+        filepath : pathlib.Path  – destination .txt file path
+        lines    : list[str]     – lines to write (newline added automatically)
+    """
+    with open(filepath, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    print(f"    → {filepath}")
+
+
 def load_results_data(filename):
     """Load test results from tab-separated file."""
     try:
@@ -280,6 +293,50 @@ def plot_homomorphism_heatmaps_combined(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_records     = len(data)
+    n_alpha_pairs     = len(agg_data)
+    grid_cells        = len(full_alpha_range) ** 2          # 21 × 21
+    filled_cells      = int(mss_pivot.notna().values.sum()) # same for MSS and MSE
+    records_per_pair  = total_records / n_alpha_pairs if n_alpha_pairs > 0 else float('nan')
+    n_windows         = data['Window'].nunique()    if 'Window'    in data.columns else 'N/A'
+    n_frequencies     = data['Frequency'].nunique() if 'Frequency' in data.columns else 'N/A'
+
+    txt_lines = [
+        "=" * 70,
+        "SAMPLE ANALYSIS: Homomorphism Combined Heatmap",
+        "File: heatmap_combined_all.png",
+        "=" * 70,
+        "",
+        "INPUT DATA",
+        f"  Total records (rows) in homo_df            : {total_records}",
+        f"  Unique window sizes                        : {n_windows}",
+        f"  Unique frequencies                         : {n_frequencies}",
+        "",
+        "AGGREGATION STEP",
+        "  Data is grouped by (Alpha1, Alpha2) and the MEDIAN of",
+        "  MSS_Homomorphic and MSE_Homomorphic is computed per cell.",
+        f"  Unique (Alpha1, Alpha2) pairs found        : {n_alpha_pairs}",
+        f"  Avg records contributing to each cell      : {records_per_pair:.1f}",
+        "  (each record contributes to exactly one cell)",
+        "",
+        "HEATMAP GRID",
+        f"  Alpha range                                : -2.0 to +2.0, step 0.2",
+        f"  Grid dimensions                            : 21 x 21 = {grid_cells} cells",
+        f"  Cells with data (non-NaN)                  : {filled_cells}",
+        f"  Empty cells (NaN / missing alpha pairs)    : {grid_cells - filled_cells}",
+        "",
+        "CALCULATION SUMMARY",
+        f"  {total_records} rows  →  grouped into {n_alpha_pairs} (Alpha1, Alpha2) pairs",
+        f"  →  each pair yields 1 median MSS value and 1 median MSE value",
+        f"  →  pivoted onto a 21×21 grid ({grid_cells} cells, {filled_cells} filled)",
+        "",
+        "METRICS DISPLAYED",
+        "  MSS_Homomorphic (median per alpha pair) — left heatmap",
+        "  MSE_Homomorphic (median per alpha pair) — right heatmap",
+        ]
+    write_sample_analysis(output_dir / 'heatmap_combined_all_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -338,6 +395,36 @@ def plot_homomorphism_vs_alpha_sum_barplot(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records  = len(data)
+    n_alpha_sums   = len(agg_data)
+    counts_by_sum  = data.groupby('AlphaSum_rounded').size().to_dict()
+    detail_lines   = [f"    AlphaSum={k:.1f}  →  {v:4d} samples" for k, v in sorted(counts_by_sum.items())]
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Homomorphism Bar Plot vs Alpha Sum",
+                    "File: barplot_vs_alpha_sum_all.png",
+                    "=" * 70,
+                    "",
+                    "INPUT DATA",
+                    f"  Total records in homo_df                   : {total_records}",
+                    "",
+                    "AGGREGATION",
+                    "  AlphaSum = wrap(α₁+α₂) rounded to 1 decimal place.",
+                    "  Grouped by AlphaSum_rounded → median and std of MSS_Homomorphic",
+                    "  and MSE_Homomorphic. No window or frequency filtering applied.",
+                    f"  Unique AlphaSum groups                     : {n_alpha_sums}",
+                    "",
+                    "SAMPLES PER BAR  (each bar = median over all rows with that AlphaSum)",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Left  : MSS_Homomorphic (median ± std per AlphaSum)",
+                    "  Right : MSE_Homomorphic (median ± std per AlphaSum)",
+                ]
+    write_sample_analysis(output_dir / 'barplot_vs_alpha_sum_all_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -428,6 +515,83 @@ def plot_homomorphism_boxplot_by_window(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    all_windows_ge64  = sorted(data['Window'].unique())   # already filtered >= 64
+    n_frequencies     = data['Frequency'].nunique() if 'Frequency' in data.columns else 0
+    total_filtered    = len(data)
+
+    # For the math breakdown: count how many (Alpha1,Alpha2) pairs map to each AlphaSum
+    alpha_pair_counts = {}
+    for alpha_sum in alpha_sums:
+        pairs = data[abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05]
+        if 'Alpha1' in data.columns and 'Alpha2' in data.columns:
+            alpha_pair_counts[alpha_sum] = pairs.groupby(['Alpha1','Alpha2']).ngroups
+        else:
+            alpha_pair_counts[alpha_sum] = 'N/A'
+
+    detail_lines = []
+    for alpha_sum in alpha_sums:
+        n_pairs = alpha_pair_counts[alpha_sum]
+        detail_lines.append(f"  AlphaSum = {alpha_sum:.1f}  "
+                            f"[{n_pairs} (α₁,α₂) pairs × {n_frequencies} frequencies]")
+        alpha_total = 0
+        for window in window_sizes:
+            subset = data[(data['Window'] == window) &
+                          (abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05)]
+            n = len(subset)
+            alpha_total += n
+            n_pairs_w = subset.groupby(['Alpha1','Alpha2']).ngroups if 'Alpha1' in data.columns else '?'
+            n_freqs_w = subset['Frequency'].nunique() if 'Frequency' in data.columns else '?'
+            detail_lines.append(
+                f"    BOX  Window={window:6d} samples, AlphaSum={alpha_sum:.1f}"
+                f"  →  N = {n:4d}  "
+                f"({n_pairs_w} (α₁,α₂) pairs × {n_freqs_w} frequencies)"
+            )
+        detail_lines.append(f"    TOTAL across all windows for AlphaSum={alpha_sum:.1f}  →  {alpha_total:4d} samples")
+        detail_lines.append("")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Homomorphism Boxplot by Window Size",
+                    "File: boxplot_by_window.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  1. AlphaSum (wrapped α₁+α₂) restricted to [0.0, 2.0]  (symmetric half)",
+                    "  2. Window size restricted to >= 64",
+                    "  3. Window sizes further sub-sampled with [::2] (every other value)",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records remaining                    : {total_filtered}",
+                    f"  Window sizes available (>= 64, all)        : {all_windows_ge64}",
+                    f"  Window sizes actually plotted ([::2])       : {window_sizes}",
+                    f"  AlphaSum values plotted                    : {[round(a,1) for a in alpha_sums]}",
+                    f"  Unique frequencies in dataset              : {n_frequencies} frequencies",
+                    "",
+                    "HOW N IS CALCULATED PER BOX",
+                    "  Each row in the dataset is one measurement for a specific",
+                    "  (α₁, α₂, Window, Frequency) combination.",
+                    "",
+                    "  For a box at (Window = W, AlphaSum = s):",
+                    "    N = #{(α₁,α₂) pairs with wrap(α₁+α₂) ≈ s}  ×  #{frequencies}",
+                    "      = [α-pair count]  ×  [frequency count]",
+                    "  (window size is fixed for the box, so it does not multiply in)",
+                    "",
+                    "SAMPLE COUNT PER BOX  (N = [α-pair count] × [frequency count])",
+                    "",
+                    ] + detail_lines + [
+                    "CALCULATION SUMMARY",
+                    f"  {total_filtered} filtered rows  →  split into",
+                    f"  {len(window_sizes)} windows × {len(alpha_sums)} AlphaSum groups",
+                    f"  = up to {len(window_sizes) * len(alpha_sums)} boxes (fewer if any combo has 0 samples)",
+                    "  Each box shows IQR + whiskers (outliers hidden with showfliers=False).",
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Top subplot   : MSS_Homomorphic",
+                    "  Bottom subplot: MSE_Homomorphic",
+                ]
+    write_sample_analysis(output_dir / 'boxplot_by_window_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -510,6 +674,80 @@ def plot_homomorphism_boxplot_by_frequency(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_filtered = len(data)
+    n_windows      = data['Window'].nunique() if 'Window' in data.columns else 0
+
+    # For the math breakdown: count how many (Alpha1,Alpha2) pairs map to each AlphaSum
+    alpha_pair_counts = {}
+    for alpha_sum in alpha_sums:
+        pairs = data[abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05]
+        if 'Alpha1' in data.columns and 'Alpha2' in data.columns:
+            alpha_pair_counts[alpha_sum] = pairs.groupby(['Alpha1','Alpha2']).ngroups
+        else:
+            alpha_pair_counts[alpha_sum] = 'N/A'
+
+    detail_lines = []
+    for alpha_sum in alpha_sums:
+        n_pairs = alpha_pair_counts[alpha_sum]
+        detail_lines.append(f"  AlphaSum = {alpha_sum:.1f}  "
+                            f"[{n_pairs} (α₁,α₂) pairs × {n_windows} windows]")
+        alpha_total = 0
+        for freq in frequencies:
+            subset = data[(data['Frequency'] == freq) &
+                          (abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05)]
+            n = len(subset)
+            alpha_total += n
+            n_pairs_f = subset.groupby(['Alpha1','Alpha2']).ngroups if 'Alpha1' in data.columns else '?'
+            n_wins_f  = subset['Window'].nunique() if 'Window' in data.columns else '?'
+            detail_lines.append(
+                f"    BOX  Freq={int(freq):6d} Hz, AlphaSum={alpha_sum:.1f}"
+                f"  →  N = {n:4d}  "
+                f"({n_pairs_f} (α₁,α₂) pairs × {n_wins_f} windows)"
+            )
+        detail_lines.append(f"    TOTAL across all frequencies for AlphaSum={alpha_sum:.1f}  →  {alpha_total:4d} samples")
+        detail_lines.append("")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Homomorphism Boxplot by Frequency",
+                    "File: boxplot_by_frequency.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  1. AlphaSum (wrapped α₁+α₂) restricted to [0.0, 2.0]  (symmetric half)",
+                    "  (No window size filter — all window sizes included)",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records remaining                    : {total_filtered}",
+                    f"  Unique frequencies plotted                 : {len(frequencies)}  →  {[int(f) for f in frequencies]} Hz",
+                    f"  AlphaSum values plotted                    : {[round(a,1) for a in alpha_sums]}",
+                    f"  Unique window sizes in dataset             : {n_windows} windows",
+                    "",
+                    "HOW N IS CALCULATED PER BOX",
+                    "  Each row in the dataset is one measurement for a specific",
+                    "  (α₁, α₂, Window, Frequency) combination.",
+                    "",
+                    "  For a box at (Frequency = f, AlphaSum = s):",
+                    "    N = #{(α₁,α₂) pairs with wrap(α₁+α₂) ≈ s}  ×  #{windows}",
+                    "      = [α-pair count]  ×  [window count]",
+                    "  (frequency is fixed for the box, so it does not multiply in)",
+                    "",
+                    "SAMPLE COUNT PER BOX  (N = [α-pair count] × [window count])",
+                    "",
+                    ] + detail_lines + [
+                    "CALCULATION SUMMARY",
+                    f"  {total_filtered} filtered rows  →  split into",
+                    f"  {len(frequencies)} frequencies × {len(alpha_sums)} AlphaSum groups",
+                    f"  = up to {len(frequencies) * len(alpha_sums)} boxes (fewer if any combo has 0 samples)",
+                    "  Each box shows IQR + whiskers (outliers hidden with showfliers=False).",
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Top subplot   : MSS_Homomorphic",
+                    "  Bottom subplot: MSE_Homomorphic",
+                ]
+    write_sample_analysis(output_dir / 'boxplot_by_frequency_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -603,6 +841,58 @@ def plot_commutativity_heatmaps_combined(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_records    = len(data)
+    n_alpha_pairs    = len(agg_data)
+    grid_cells       = len(full_alpha_range) ** 2
+    filled_cells_mss = int(mss_pivot.notna().values.sum())
+    filled_cells_mse = int(mse_pivot.notna().values.sum())
+    records_per_pair = total_records / n_alpha_pairs if n_alpha_pairs > 0 else float('nan')
+    n_windows        = data['Window'].nunique()    if 'Window'    in data.columns else 'N/A'
+    n_frequencies    = data['Frequency'].nunique() if 'Frequency' in data.columns else 'N/A'
+
+    txt_lines = [
+        "=" * 70,
+        "SAMPLE ANALYSIS: Commutativity Combined Heatmap",
+        "File: heatmap_combined_all.png",
+        "=" * 70,
+        "",
+        "INPUT DATA",
+        f"  Total records (rows) in comm_df            : {total_records}",
+        f"  Unique window sizes                        : {n_windows}",
+        f"  Unique frequencies                         : {n_frequencies}",
+        "",
+        "AGGREGATION STEP",
+        "  Data is grouped by (Alpha1, Alpha2) and the MEDIAN of",
+        "  MSS_Commutativity and MSE_Commutativity is computed per pair.",
+        "  A second pivot_table with aggfunc='mean' is then applied",
+        "  (effectively a mean of medians if duplicate pairs exist).",
+        f"  Unique (Alpha1, Alpha2) pairs found        : {n_alpha_pairs}",
+        f"  Avg records contributing to each cell      : {records_per_pair:.1f}",
+        "  Note: Unlike the homomorphism heatmap, missing cells are shown",
+        "        as NaN (white) — no symmetric filling is applied.",
+        "",
+        "HEATMAP GRID",
+        f"  Alpha range                                : -2.0 to +2.0, step 0.2",
+        f"  Grid dimensions                            : 21 x 21 = {grid_cells} cells",
+        f"  MSS cells with data (non-NaN)              : {filled_cells_mss}",
+        f"  MSS empty cells (NaN / missing)            : {grid_cells - filled_cells_mss}",
+        f"  MSE cells with data (non-NaN)              : {filled_cells_mse}",
+        f"  MSE empty cells (NaN / missing)            : {grid_cells - filled_cells_mse}",
+        "",
+        "CALCULATION SUMMARY",
+        f"  {total_records} rows  →  grouped into {n_alpha_pairs} (Alpha1, Alpha2) pairs",
+        f"  →  each pair yields 1 median MSS value and 1 median MSE value",
+        f"  →  pivoted onto a 21×21 grid ({grid_cells} cells)",
+        f"     MSS: {filled_cells_mss} filled / {grid_cells - filled_cells_mss} empty",
+        f"     MSE: {filled_cells_mse} filled / {grid_cells - filled_cells_mse} empty",
+        "",
+        "METRICS DISPLAYED",
+        "  MSS_Commutativity (median per alpha pair) — left heatmap",
+        "  MSE_Commutativity (median per alpha pair) — right heatmap",
+        ]
+    write_sample_analysis(output_dir / 'heatmap_combined_all_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -660,6 +950,36 @@ def plot_commutativity_vs_alpha_sum_barplot(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records  = len(data)
+    n_alpha_sums   = len(agg_data)
+    counts_by_sum  = data.groupby('AlphaSum_rounded').size().to_dict()
+    detail_lines   = [f"    AlphaSum={k:.1f}  →  {v:4d} samples" for k, v in sorted(counts_by_sum.items())]
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Commutativity Bar Plot vs Alpha Sum",
+                    "File: barplot_vs_alpha_sum_all.png",
+                    "=" * 70,
+                    "",
+                    "INPUT DATA",
+                    f"  Total records in comm_df                   : {total_records}",
+                    "",
+                    "AGGREGATION",
+                    "  AlphaSum = wrap(α₁+α₂) rounded to 1 decimal place.",
+                    "  Grouped by AlphaSum_rounded → median and std of MSS_Commutativity",
+                    "  and MSE_Commutativity. No window or frequency filtering applied.",
+                    f"  Unique AlphaSum groups                     : {n_alpha_sums}",
+                    "",
+                    "SAMPLES PER BAR  (each bar = median over all rows with that AlphaSum)",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Left  : MSS_Commutativity (median ± std per AlphaSum)",
+                    "  Right : MSE_Commutativity (median ± std per AlphaSum)",
+                ]
+    write_sample_analysis(output_dir / 'barplot_vs_alpha_sum_all_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -743,6 +1063,82 @@ def plot_commutativity_boxplot_by_window(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_filtered = len(data)
+    n_frequencies  = data['Frequency'].nunique() if 'Frequency' in data.columns else 0
+
+    # For the math breakdown: count how many (Alpha1,Alpha2) pairs map to each AlphaSum
+    alpha_pair_counts = {}
+    for alpha_sum in alpha_sums:
+        pairs = data[abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05]
+        if 'Alpha1' in data.columns and 'Alpha2' in data.columns:
+            alpha_pair_counts[alpha_sum] = pairs.groupby(['Alpha1','Alpha2']).ngroups
+        else:
+            alpha_pair_counts[alpha_sum] = 'N/A'
+
+    detail_lines = []
+    for alpha_sum in alpha_sums:
+        n_pairs = alpha_pair_counts[alpha_sum]
+        detail_lines.append(f"  AlphaSum = {alpha_sum:.1f}  "
+                            f"[{n_pairs} (α₁,α₂) pairs × {n_frequencies} frequencies]")
+        alpha_total = 0
+        for window in window_sizes:
+            subset = data[(data['Window'] == window) &
+                          (abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05)]
+            n = len(subset)
+            alpha_total += n
+            n_pairs_w = subset.groupby(['Alpha1','Alpha2']).ngroups if 'Alpha1' in data.columns else '?'
+            n_freqs_w = subset['Frequency'].nunique() if 'Frequency' in data.columns else '?'
+            detail_lines.append(
+                f"    BOX  Window={window:6d} samples, AlphaSum={alpha_sum:.1f}"
+                f"  →  N = {n:4d}  "
+                f"({n_pairs_w} (α₁,α₂) pairs × {n_freqs_w} frequencies)"
+            )
+        detail_lines.append(f"    TOTAL across all windows for AlphaSum={alpha_sum:.1f}  →  {alpha_total:4d} samples")
+        detail_lines.append("")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Commutativity Boxplot by Window Size",
+                    "File: boxplot_by_window.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  1. AlphaSum (wrapped α₁+α₂) restricted to [0.0, 2.0]  (symmetric half)",
+                    "  2. Window size restricted to >= 64",
+                    "  NOTE: Unlike the homomorphism equivalent, NO [::2] sub-sampling is",
+                    "        applied — all window sizes >= 64 are plotted.",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records remaining                    : {total_filtered}",
+                    f"  Window sizes plotted                       : {window_sizes}",
+                    f"  AlphaSum values plotted                    : {[round(a,1) for a in alpha_sums]}",
+                    f"  Unique frequencies in dataset              : {n_frequencies} frequencies",
+                    "",
+                    "HOW N IS CALCULATED PER BOX",
+                    "  Each row in the dataset is one measurement for a specific",
+                    "  (α₁, α₂, Window, Frequency) combination.",
+                    "",
+                    "  For a box at (Window = W, AlphaSum = s):",
+                    "    N = #{(α₁,α₂) pairs with wrap(α₁+α₂) ≈ s}  ×  #{frequencies}",
+                    "      = [α-pair count]  ×  [frequency count]",
+                    "  (window size is fixed for the box, so it does not multiply in)",
+                    "",
+                    "SAMPLE COUNT PER BOX  (N = [α-pair count] × [frequency count])",
+                    "",
+                    ] + detail_lines + [
+                    "CALCULATION SUMMARY",
+                    f"  {total_filtered} filtered rows  →  split into",
+                    f"  {len(window_sizes)} windows × {len(alpha_sums)} AlphaSum groups",
+                    f"  = up to {len(window_sizes) * len(alpha_sums)} boxes (fewer if any combo has 0 samples)",
+                    "  Each box shows IQR + whiskers (outliers hidden with showfliers=False).",
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Top subplot   : MSS_Commutativity",
+                    "  Bottom subplot: MSE_Commutativity",
+                ]
+    write_sample_analysis(output_dir / 'boxplot_by_window_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -818,6 +1214,80 @@ def plot_commutativity_boxplot_by_frequency(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_filtered = len(data)
+    n_windows      = data['Window'].nunique() if 'Window' in data.columns else 0
+
+    # For the math breakdown: count how many (Alpha1,Alpha2) pairs map to each AlphaSum
+    alpha_pair_counts = {}
+    for alpha_sum in alpha_sums:
+        pairs = data[abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05]
+        if 'Alpha1' in data.columns and 'Alpha2' in data.columns:
+            alpha_pair_counts[alpha_sum] = pairs.groupby(['Alpha1','Alpha2']).ngroups
+        else:
+            alpha_pair_counts[alpha_sum] = 'N/A'
+
+    detail_lines = []
+    for alpha_sum in alpha_sums:
+        n_pairs = alpha_pair_counts[alpha_sum]
+        detail_lines.append(f"  AlphaSum = {alpha_sum:.1f}  "
+                            f"[{n_pairs} (α₁,α₂) pairs × {n_windows} windows]")
+        alpha_total = 0
+        for freq in frequencies:
+            subset = data[(data['Frequency'] == freq) &
+                          (abs(data['AlphaSum_rounded'] - alpha_sum) < 0.05)]
+            n = len(subset)
+            alpha_total += n
+            n_pairs_f = subset.groupby(['Alpha1','Alpha2']).ngroups if 'Alpha1' in data.columns else '?'
+            n_wins_f  = subset['Window'].nunique() if 'Window' in data.columns else '?'
+            detail_lines.append(
+                f"    BOX  Freq={int(freq):6d} Hz, AlphaSum={alpha_sum:.1f}"
+                f"  →  N = {n:4d}  "
+                f"({n_pairs_f} (α₁,α₂) pairs × {n_wins_f} windows)"
+            )
+        detail_lines.append(f"    TOTAL across all frequencies for AlphaSum={alpha_sum:.1f}  →  {alpha_total:4d} samples")
+        detail_lines.append("")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Commutativity Boxplot by Frequency",
+                    "File: boxplot_by_frequency.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  1. AlphaSum (wrapped α₁+α₂) restricted to [0.0, 2.0]  (symmetric half)",
+                    "  (No window size filter — all window sizes included)",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records remaining                    : {total_filtered}",
+                    f"  Unique frequencies plotted                 : {len(frequencies)}  →  {[int(f) for f in frequencies]} Hz",
+                    f"  AlphaSum values plotted                    : {[round(a,1) for a in alpha_sums]}",
+                    f"  Unique window sizes in dataset             : {n_windows} windows",
+                    "",
+                    "HOW N IS CALCULATED PER BOX",
+                    "  Each row in the dataset is one measurement for a specific",
+                    "  (α₁, α₂, Window, Frequency) combination.",
+                    "",
+                    "  For a box at (Frequency = f, AlphaSum = s):",
+                    "    N = #{(α₁,α₂) pairs with wrap(α₁+α₂) ≈ s}  ×  #{windows}",
+                    "      = [α-pair count]  ×  [window count]",
+                    "  (frequency is fixed for the box, so it does not multiply in)",
+                    "",
+                    "SAMPLE COUNT PER BOX  (N = [α-pair count] × [window count])",
+                    "",
+                    ] + detail_lines + [
+                    "CALCULATION SUMMARY",
+                    f"  {total_filtered} filtered rows  →  split into",
+                    f"  {len(frequencies)} frequencies × {len(alpha_sums)} AlphaSum groups",
+                    f"  = up to {len(frequencies) * len(alpha_sums)} boxes (fewer if any combo has 0 samples)",
+                    "  Each box shows IQR + whiskers (outliers hidden with showfliers=False).",
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Top subplot   : MSS_Commutativity",
+                    "  Bottom subplot: MSE_Commutativity",
+                ]
+    write_sample_analysis(output_dir / 'boxplot_by_frequency_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -958,6 +1428,37 @@ def plot_performance_split_alpha(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_records = len(data)
+    detail_lines  = []
+    for alpha in alphas:
+        ad = data[data['alpha'] == alpha].sort_values('window_size')
+        detail_lines.append(f"    α={alpha:.1f}  →  {len(ad):3d} records  "
+                            f"window_sizes={sorted(ad['window_size'].unique())}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Performance by Alpha (multi-subplot line chart)",
+                    "File: performance_by_alpha.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  window_size >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Alpha values (one subplot each)            : {alphas}",
+                    f"  Window sizes                               : {window_sizes}",
+                    "",
+                    "SAMPLES PER SUBPLOT (each point = 1 timing record for that alpha × window_size)",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Y-axis: mean_time_ms (measured inference time in ms, log scale)",
+                    "  Complexity reference lines (O(N), O(N log N), O(N²)) anchored at window_size=64.",
+                ]
+    write_sample_analysis(output_dir / 'performance_by_alpha_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1035,6 +1536,37 @@ def plot_rtf_split_alpha(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_records = len(data)
+    detail_lines  = []
+    for alpha in alphas:
+        ad = data[data['alpha'] == alpha].sort_values('window_size')
+        detail_lines.append(f"    α={alpha:.1f}  →  {len(ad):3d} records  "
+                            f"window_sizes={sorted(ad['window_size'].unique())}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Real-Time Factor by Alpha (multi-subplot line chart)",
+                    "File: rtf_by_alpha.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  window_size >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Alpha values (one subplot each)            : {alphas}",
+                    f"  Window sizes                               : {window_sizes}",
+                    "",
+                    "SAMPLES PER SUBPLOT (each point = 1 timing record for that alpha × window_size)",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Y-axis: mean_rt_factor (Real-Time Factor = inference_time / audio_buffer_duration)",
+                    "  RTF < 1.0 = faster than real-time. Reference line drawn at RTF = 1.0.",
+                ]
+    write_sample_analysis(output_dir / 'rtf_by_alpha_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1085,6 +1617,52 @@ def plot_performance_by_alpha_heatmap(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records  = len(data)
+    n_alphas       = len(pivot_data.index)
+    n_windows      = len(pivot_data.columns)
+    grid_cells     = n_alphas * n_windows
+    filled_cells   = int(pivot_data.notna().values.sum())
+    records_per_cell = total_records / grid_cells if grid_cells > 0 else float('nan')
+
+    detail_lines = []
+    for alpha in sorted(data['alpha'].unique()):
+        for ws in sorted(data['window_size'].unique()):
+            cnt = len(data[(data['alpha'] == alpha) & (data['window_size'] == ws)])
+            detail_lines.append(
+                f"    alpha={alpha:.1f}, window_size={ws:6d}  →  {cnt:4d} records"
+            )
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Performance Inference Time Heatmap",
+                    "File: performance_heatmap.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  1. window_size restricted to >= 64",
+                    "",
+                    "INPUT DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Unique alpha values                        : {n_alphas}  →  {sorted(data['alpha'].unique())}",
+                    f"  Unique window sizes                        : {n_windows}  →  {sorted(data['window_size'].unique())}",
+                    "",
+                    "AGGREGATION STEP",
+                    "  pivot_table with aggfunc='mean' over mean_time_ms.",
+                    "  Each cell = mean of all timing records with that (alpha, window_size) pair.",
+                    f"  Grid dimensions                            : {n_alphas} alphas × {n_windows} windows = {grid_cells} cells",
+                    f"  Cells with data (non-NaN)                  : {filled_cells}",
+                    f"  Empty cells                                : {grid_cells - filled_cells}",
+                    f"  Avg records per cell                       : {records_per_cell:.1f}",
+                    "",
+                    "RECORD COUNT PER CELL",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  mean_time_ms (mean per alpha × window_size) — single heatmap",
+                ]
+    write_sample_analysis(output_dir / 'performance_heatmap_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -1196,6 +1774,45 @@ def plot_performance_all_alphas_aggregated(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    n_alphas      = data['alpha'].nunique()
+    total_records = len(data)
+    detail_lines  = []
+    for _, row in agg_stats.iterrows():
+        n = len(data[data['window_size'] == row['window_size']])
+        detail_lines.append(
+            f"    window_size={int(row['window_size']):6d}  n={n:3d}  "
+            f"mean={row['mean']:.3e} ms  min={row['min']:.3e}  max={row['max']:.3e}  std={row['std']:.3e}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Performance All Alphas Aggregated",
+                    "File: performance_all_alphas_aggregated.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  window_size >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Alpha values pooled                        : {n_alphas}",
+                    f"  Window sizes                               : {window_sizes}",
+                    "",
+                    "AGGREGATION",
+                    "  Grouped by window_size. For each window, mean/min/max/std of",
+                    "  mean_time_ms computed across all alpha values.",
+                    f"  Samples per window size point              : {n_alphas} (one per alpha)",
+                    "",
+                    "PER-WINDOW STATISTICS  (format: window  n  mean  min  max  std  [ms])",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Mean line + min/max shaded band of mean_time_ms across all α.",
+                    "  Right y-axis shows equivalent Max/MSP audio buffer sizes at 44.1 kHz.",
+                    "  Complexity reference lines (O(N), O(N log N), O(N²)) anchored at window=64.",
+                ]
+    write_sample_analysis(output_dir / 'performance_all_alphas_aggregated_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1261,6 +1878,45 @@ def plot_rtf_all_alphas_aggregated(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    n_alphas      = data['alpha'].nunique()
+    total_records = len(data)
+    detail_lines  = []
+    for _, row in agg_stats.iterrows():
+        n = len(data[data['window_size'] == row['window_size']])
+        detail_lines.append(
+            f"    window_size={int(row['window_size']):6d}  n={n:3d}  "
+            f"mean_RTF={row['mean']:.4f}  min={row['min']:.4f}  max={row['max']:.4f}  std={row['std']:.4f}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: RTF All Alphas Aggregated",
+                    "File: rtf_all_alphas_aggregated.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  window_size >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Alpha values pooled                        : {n_alphas}",
+                    f"  Window sizes                               : {window_sizes}",
+                    "",
+                    "AGGREGATION",
+                    "  Grouped by window_size. For each window, mean/min/max/std of",
+                    "  mean_rt_factor computed across all alpha values.",
+                    f"  Samples per window size point              : {n_alphas} (one per alpha)",
+                    "",
+                    "PER-WINDOW STATISTICS  (format: window  n  mean_RTF  min  max  std)",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  Mean RTF line + min/max shaded band across all α.",
+                    "  Reference line at RTF=1.0 (real-time boundary).",
+                    "  RTF < 1 means faster than real-time.",
+                ]
+    write_sample_analysis(output_dir / 'rtf_all_alphas_aggregated_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -1518,6 +2174,44 @@ def plot_passthrough_reversal_combined(data, output_dir):
 
     print(f"    → {tex_filename}")
 
+    # ---- sample analysis report ----
+    pt_count   = len(passthrough_data)
+    rev_count  = len(reversal_data)
+    pt_windows = sorted(passthrough_data['window_size'].unique())
+    rev_windows= sorted(reversal_data['window_size'].unique())
+    rev_types  = sorted(reversal_data['test_type'].unique()) if 'test_type' in reversal_data.columns else []
+
+    txt_lines = [
+        "=" * 70,
+        "SAMPLE ANALYSIS: Passthrough / Reversal Combined Plot",
+        "File: passthrough_reversal_combined.png",
+        "=" * 70,
+        "",
+        "DATA SPLIT",
+        f"  Passthrough records (test_type='passthrough') : {pt_count}",
+        f"  Reversal records (test_type in {rev_types})   : {rev_count}",
+        "",
+        "PASSTHROUGH (α=0) — top row",
+        f"  Window sizes in data                         : {pt_windows}",
+        f"  MSS subplot (top-left)  : window_size >= 8192  →  {sorted(passthrough_data[passthrough_data['window_size']>=8192]['window_size'].unique())}",
+        f"  MSE subplot (top-right) : window_size >= 64    →  {sorted(passthrough_data[passthrough_data['window_size']>=64]['window_size'].unique())}",
+        "  Each point = mean ± std of mss_loss / mse_loss across all records at that window size.",
+        "",
+        "REVERSAL (α=±2) — bottom row",
+        f"  Window sizes in data                         : {rev_windows}",
+        f"  MSS subplot (bot-left)  : window_size >= 8192  →  {sorted(reversal_data[reversal_data['window_size']>=8192]['window_size'].unique())}",
+        f"  MSE subplot (bot-right) : window_size >= 64    →  {sorted(reversal_data[reversal_data['window_size']>=64]['window_size'].unique())}",
+        "  Each point = mean ± std aggregated over both reversal_fwd and reversal_bwd records.",
+        "",
+        "METRICS DISPLAYED",
+        "  mss_loss (top/bottom left) — MSS (perceptual similarity score)",
+        "  mse_loss (top/bottom right) — mean squared error",
+        "",
+        "ADDITIONAL OUTPUT",
+        f"  LaTeX table also saved to: {tex_filename}",
+        ]
+    write_sample_analysis(output_dir / 'passthrough_reversal_combined_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1574,6 +2268,12 @@ def plot_fft_comparison_errors(data, output_dir):
     ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax2 = ax.twinx()
+    ax2.set_yscale('log')
+    ax2.set_ylim(ax.get_ylim())
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda v, _: f'{10*np.log10(v):.0f} dB' if v > 0 else ''))
+    ax2.set_ylabel('dB', fontweight='bold')
 
     # Plot 2: Phase MSE
     ax = axes[1]
@@ -1594,6 +2294,12 @@ def plot_fft_comparison_errors(data, output_dir):
     ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax2 = ax.twinx()
+    ax2.set_yscale('log')
+    ax2.set_ylim(ax.get_ylim())
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda v, _: f'{10*np.log10(v):.0f} dB' if v > 0 else ''))
+    ax2.set_ylabel('dB', fontweight='bold')
 
     # Plot 3: Complex MSE
     ax = axes[2]
@@ -1614,12 +2320,48 @@ def plot_fft_comparison_errors(data, output_dir):
     ax.set_xticklabels(tick_labels)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+    ax2 = ax.twinx()
+    ax2.set_yscale('log')
+    ax2.set_ylim(ax.get_ylim())
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda v, _: f'{10*np.log10(v):.0f} dB' if v > 0 else ''))
+    ax2.set_ylabel('dB', fontweight='bold')
 
     plt.tight_layout()
     filename = output_dir / 'fft_comparison_errors_vs_frequency.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records  = len(data)
+    n_freqs        = len(frequencies)
+    n_windows      = data['WindowSize'].nunique() if 'WindowSize' in data.columns else 'N/A'
+    records_per_freq = total_records / n_freqs if n_freqs > 0 else float('nan')
+
+    txt_lines = [
+        "=" * 70,
+        "SAMPLE ANALYSIS: FFT Comparison Errors vs Frequency (aggregated)",
+        "File: fft_comparison_errors_vs_frequency.png",
+        "=" * 70,
+        "",
+        "INPUT DATA",
+        f"  Total records                              : {total_records}",
+        f"  Unique frequencies                         : {n_freqs}  (range {frequencies.min():.1f} – {frequencies.max():.1f} Hz)",
+        f"  Unique window sizes (pooled into band)     : {n_windows}",
+        "",
+        "AGGREGATION",
+        "  Grouped by Frequency → mean/min/max of MSE_Magnitude, MSE_Phase,",
+        "  MSE_Complex across ALL window sizes.",
+        f"  Avg records per frequency point            : {records_per_freq:.1f}",
+        "  (min/max band width reflects variation across window sizes)",
+        "",
+        "METRICS DISPLAYED  (3 subplots, each: mean line + min/max band)",
+        "  Top    : MSE_Magnitude",
+        "  Middle : MSE_Phase",
+        "  Bottom : MSE_Complex",
+        ]
+    write_sample_analysis(output_dir / 'fft_comparison_errors_vs_frequency_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -1676,6 +2418,12 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
         ax.set_xticks(tick_freqs)
         ax.set_xticklabels(tick_labels)
         ax.grid(True, alpha=0.3, which='both', linestyle='--')
+        ax2 = ax.twinx()
+        ax2.set_yscale('log')
+        ax2.set_ylim(ax.get_ylim())
+        ax2.yaxis.set_major_formatter(plt.FuncFormatter(
+            lambda v, _: f'{10*np.log10(v):.0f} dB' if v > 0 else ''))
+        ax2.set_ylabel('dB', fontweight='bold')
 
     # Single shared legend on the bottom subplot
     axes[2].legend(loc='best', framealpha=0.9, title='Window Size', ncol=2)
@@ -1685,6 +2433,41 @@ def plot_fft_comparison_errors_by_window_size(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records = len(data_filtered)
+    detail_lines  = []
+    for ws in window_sizes:
+        n = len(data_filtered[data_filtered['WindowSize'] == ws])
+        n_f = data_filtered[data_filtered['WindowSize'] == ws]['Frequency'].nunique()
+        detail_lines.append(f"    WindowSize={ws:6d}  total_rows={n:5d}  unique_freqs={n_f}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: FFT Comparison Errors by Window Size",
+                    "File: fft_comparison_errors_by_window_size.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  WindowSize >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Window sizes plotted                       : {window_sizes}",
+                    "",
+                    "AGGREGATION",
+                    "  For each (WindowSize, Frequency) group: mean of MSE_Magnitude,",
+                    "  MSE_Phase, MSE_Complex plotted as a separate line per window size.",
+                    "",
+                    "RECORDS PER WINDOW SIZE LINE",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED  (3 subplots, one line per window size)",
+                    "  Top    : MSE_Magnitude",
+                    "  Middle : MSE_Phase",
+                    "  Bottom : MSE_Complex",
+                ]
+    write_sample_analysis(output_dir / 'fft_comparison_errors_by_window_size_sample_analysis.txt', txt_lines)
 
     return 1
 
@@ -1740,6 +2523,40 @@ def plot_fft_comparison_complex_mse_by_window_size(data, output_dir):
     print(f"    → {filename}")
     plt.close()
 
+    # ---- sample analysis report ----
+    total_records = len(data_filtered)
+    detail_lines  = []
+    for ws in window_sizes:
+        n = len(data_filtered[data_filtered['WindowSize'] == ws])
+        n_f = data_filtered[data_filtered['WindowSize'] == ws]['Frequency'].nunique()
+        detail_lines.append(f"    WindowSize={ws:6d}  total_rows={n:5d}  unique_freqs={n_f}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: FFT Comparison Complex MSE by Window Size (standalone)",
+                    "File: fft_comparison_complex_mse_by_window_size.png",
+                    "=" * 70,
+                    "",
+                    "FILTERS APPLIED",
+                    "  WindowSize >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Window sizes plotted                       : {window_sizes}",
+                    "",
+                    "AGGREGATION",
+                    "  For each (WindowSize, Frequency) group: mean of MSE_Complex.",
+                    "  One line per window size.",
+                    "",
+                    "RECORDS PER LINE",
+                    ] + detail_lines + [
+                    "",
+                    "METRIC DISPLAYED",
+                    "  MSE_Complex (mean per frequency, one line per window size)",
+                    "  Legend placed outside right. Y-axis log scale.",
+                ]
+    write_sample_analysis(output_dir / 'fft_comparison_complex_mse_by_window_size_sample_analysis.txt', txt_lines)
+
     return 1
 
 # ============================================================================
@@ -1788,6 +2605,39 @@ def plot_extra_exact_bin_complex_mse(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records    = len(data)
+    n_freqs          = len(grouped)
+    n_windows        = data['WindowSize'].nunique() if 'WindowSize' in data.columns else 'N/A'
+    records_per_freq = total_records / n_freqs if n_freqs > 0 else float('nan')
+
+    txt_lines = [
+        "=" * 70,
+        "SAMPLE ANALYSIS: Exact-Bin Complex MSE vs Frequency (aggregated)",
+        "File: exact_bin_complex_mse_vs_frequency.png",
+        "=" * 70,
+        "",
+        "BACKGROUND",
+        "  Test uses sine waves whose frequency falls exactly on an FFT bin,",
+        "  eliminating spectral leakage. Any remaining MSE is FRFT numerical error.",
+        "",
+        "INPUT DATA",
+        f"  Total records                              : {total_records}",
+        f"  Unique frequencies tested                  : {n_freqs}",
+        f"  Unique window sizes (pooled into band)     : {n_windows}",
+        f"  Avg records per frequency point            : {records_per_freq:.1f}",
+        "",
+        "AGGREGATION",
+        "  Grouped by Frequency → mean / min / max of MSE_Complex across",
+        "  ALL window sizes. The shaded band width reflects variation across windows.",
+        "",
+        "METRIC DISPLAYED",
+        "  MSE_Complex (mean line + min/max shaded band vs frequency)",
+        ]
+    write_sample_analysis(
+        output_dir / 'exact_bin_complex_mse_vs_frequency_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1836,6 +2686,46 @@ def plot_extra_exact_bin_complex_mse_by_window_size(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records = len(data_filtered)
+    detail_lines  = []
+    for ws in window_sizes:
+        n   = len(data_filtered[data_filtered['WindowSize'] == ws])
+        n_f = data_filtered[data_filtered['WindowSize'] == ws]['Frequency'].nunique()
+        detail_lines.append(
+            f"    WindowSize={ws:6d}  total_rows={n:5d}  unique_freqs={n_f}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Exact-Bin Complex MSE by Window Size",
+                    "File: exact_bin_complex_mse_by_window_size.png",
+                    "=" * 70,
+                    "",
+                    "BACKGROUND",
+                    "  Same exact-bin sine data as the aggregated plot, but separated by",
+                    "  window size so per-window accuracy trends are visible.",
+                    "",
+                    "FILTERS APPLIED",
+                    "  WindowSize >= 64",
+                    "",
+                    "DATA AFTER FILTERING",
+                    f"  Total records                              : {total_records}",
+                    f"  Window sizes plotted (one line each)       : {window_sizes}",
+                    "",
+                    "AGGREGATION",
+                    "  For each (WindowSize, Frequency) group: mean of MSE_Complex.",
+                    "  One line per window size; no cross-window aggregation.",
+                    "",
+                    "RECORDS PER LINE",
+                    ] + detail_lines + [
+                    "",
+                    "METRIC DISPLAYED",
+                    "  MSE_Complex (mean per frequency, one coloured line per window size)",
+                ]
+    write_sample_analysis(
+        output_dir / 'exact_bin_complex_mse_by_window_size_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1883,6 +2773,44 @@ def plot_extra_impulse_complex_mse_by_window_size(data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    total_records = len(data)
+    used_records  = len(d)
+    overlap_note  = "OverlapFactor == 1 only" if 'OverlapFactor' in data.columns else "all rows (no OverlapFactor column)"
+
+    detail_lines = []
+    for w, m in zip(ws, mse):
+        detail_lines.append(
+            f"    WindowSize=2^{int(np.log2(w))} ({w:6d})  MSE_Complex={m:.4e}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Impulse Complex MSE by Window Size (bar chart)",
+                    "File: impulse_complex_mse_by_window_size.png",
+                    "=" * 70,
+                    "",
+                    "BACKGROUND",
+                    "  For a unit impulse at sample 0, FRFT at α=1 should equal FFT exactly.",
+                    "  Any non-zero MSE_Complex is purely floating-point numerical noise.",
+                    "",
+                    "FILTER APPLIED",
+                    f"  {overlap_note}",
+                    "",
+                    "DATA",
+                    f"  Total records in impulse results.txt      : {total_records}",
+                    f"  Records used for this plot                : {used_records}",
+                    "  One bar per window size — no aggregation (single measurement each).",
+                    "",
+                    "VALUES PLOTTED",
+                    ] + detail_lines + [
+                    "",
+                    "METRIC DISPLAYED",
+                    "  MSE_Complex (FRFT vs FFT), log y-axis. Lower = better numerical accuracy.",
+                ]
+    write_sample_analysis(
+        output_dir / 'impulse_complex_mse_by_window_size_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1936,6 +2864,50 @@ def plot_extra_impulse_analytical_error(anal_data, output_dir):
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    detail_lines = []
+    for i, w in enumerate(ws):
+        mse_v  = anal_data['MSE_Complex_vs_Analytical'].values[i]
+        max_v  = anal_data['MaxError_vs_Analytical'].values[i]
+        mean_v = anal_data['MeanError_vs_Analytical'].values[i]
+        detail_lines.append(
+            f"    2^{int(np.log2(w))} ({w:6d})  MSE={mse_v:.4e}  MaxErr={max_v:.4e}  MeanErr={mean_v:.4e}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Impulse Analytical Error vs Window Size",
+                    "File: impulse_analytical_error_vs_window_size.png",
+                    "=" * 70,
+                    "",
+                    "BACKGROUND",
+                    "  Compares FRFT output against the exact analytical ground truth:",
+                    "  for a unit impulse at sample 0, the ideal spectrum is 1/sqrt(N)",
+                    "  at every bin with zero imaginary part. This is the purest measure",
+                    "  of FRFT numerical accuracy, independent of FFT error.",
+                    "",
+                    "DATA SOURCE",
+                    f"  File: impulse/analytical_error.txt",
+                    f"  Rows (one per window size, OverlapFactor=1 only): {len(anal_data)}",
+                    "  Columns: WindowSize, MSE_Complex_vs_Analytical, MaxError_vs_Analytical,",
+                    "           MeanError_vs_Analytical",
+                    "",
+                    "SAMPLES PER POINT",
+                    "  Each point = single measurement (OverlapFactor=1, 1 frame).",
+                    "  No aggregation — each window size has exactly 1 data point.",
+                    "",
+                    "VALUES PLOTTED",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  MSE_Complex_vs_Analytical  (o- line)",
+                    "  MaxError_vs_Analytical     (s-- line)",
+                    "  MeanError_vs_Analytical    (^:  line)",
+                    "  All on log y-axis. Log-log slope annotated if ≥3 window sizes.",
+                ]
+    write_sample_analysis(
+        output_dir / 'impulse_analytical_error_vs_window_size_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -1996,6 +2968,193 @@ def plot_extra_impulse_analytical_error_comparison(fft_data, anal_data, output_d
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
     plt.close()
+
+    # ---- sample analysis report ----
+    detail_lines = []
+    for i, w in enumerate(ws):
+        fft_v  = merged['mse_vs_fft'].values[i]
+        anal_v = merged['mse_vs_analytical'].values[i]
+        detail_lines.append(
+            f"    2^{int(np.log2(w))} ({w:6d})  vs_FFT={fft_v:.4e}  vs_Analytical={anal_v:.4e}")
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Impulse FRFT-vs-FFT vs Analytical Comparison",
+                    "File: impulse_frft_vs_fft_vs_analytical.png",
+                    "=" * 70,
+                    "",
+                    "BACKGROUND",
+                    "  Overlays two error measures to separate sources of numerical error:",
+                    "  - FRFT vs FFT: both transforms have floating-point noise; a low value",
+                    "    here shows FRFT and FFT agree, but doesn't tell us how accurate either is.",
+                    "  - FRFT vs Analytical (1/√N): the absolute accuracy benchmark.",
+                    "  If both lines track each other, FFT and FRFT share the same error floor.",
+                    "",
+                    "DATA SOURCES",
+                    f"  FRFT-vs-FFT   : impulse/results.txt        (OverlapFactor=1, {len(fft_d)} rows)",
+                    f"  vs-Analytical : impulse/analytical_error.txt ({len(anal_d)} rows)",
+                    f"  Inner-joined on WindowSize → {len(merged)} shared window sizes",
+                    "",
+                    "SAMPLES PER POINT",
+                    "  Each point = single measurement per window size. No aggregation.",
+                    "",
+                    "VALUES PLOTTED",
+                    ] + detail_lines + [
+                    "",
+                    "METRICS DISPLAYED",
+                    "  o-  line : MSE_Complex between FRFT and FFT outputs",
+                    "  s-- line : MSE_Complex between FRFT and analytical ground truth (1/√N)",
+                    "  Both on log y-axis.",
+                ]
+    write_sample_analysis(
+        output_dir / 'impulse_frft_vs_fft_vs_analytical_sample_analysis.txt', txt_lines)
+
+    return 1
+
+
+def plot_extra_impulse_spectrum(spectrum_data, output_dir):
+    """
+    Plot the actual per-bin FRFT and FFT spectrum magnitudes for the impulse test.
+
+    For a unit impulse at sample 0, the ideal spectrum magnitude is 1/sqrt(N) flat
+    at every bin.  We plot one subplot per window size, each showing:
+      - Mean FRFT magnitude across overlap factors (solid line, blue)
+      - Min/max FRFT band (shaded blue)
+      - Mean FFT  magnitude across overlap factors (dashed line, purple)
+      - Min/max FFT  band (shaded purple)
+      - Analytical reference line at 1/sqrt(N) (dotted grey)
+
+    The spread (min/max) comes from the different overlap factors tested, which
+    place the impulse at different positions within the analysis frame.
+
+    Data file: impulse/spectrum.txt
+    Columns  : WindowSize, OverlapFactor, BinIndex, FRFT_Mag, FFT_Mag
+    """
+    print("  Generating impulse spectrum mean/min/max plot...")
+
+    if spectrum_data is None or len(spectrum_data) == 0:
+        print("  No spectrum data found")
+        return 0
+
+    window_sizes = sorted(spectrum_data['WindowSize'].unique())
+    n_ws = len(window_sizes)
+    if n_ws == 0:
+        return 0
+
+    # Layout: up to 4 columns
+    n_cols = min(4, n_ws)
+    n_rows = int(np.ceil(n_ws / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(5 * n_cols, 4 * n_rows),
+                             squeeze=False)
+
+    for idx, ws in enumerate(window_sizes):
+        ax  = axes[idx // n_cols][idx % n_cols]
+        wsd = spectrum_data[spectrum_data['WindowSize'] == ws]
+
+        # Aggregate over OverlapFactor for each BinIndex
+        agg = wsd.groupby('BinIndex').agg(
+            frft_mean=('FRFT_Mag', 'mean'),
+            frft_min =('FRFT_Mag', 'min'),
+            frft_max =('FRFT_Mag', 'max'),
+            fft_mean =('FFT_Mag',  'mean'),
+            fft_min  =('FFT_Mag',  'min'),
+            fft_max  =('FFT_Mag',  'max'),
+        ).reset_index().sort_values('BinIndex')
+
+        bins = agg['BinIndex'].values
+        analytical = 1.0 / np.sqrt(ws)
+
+        # FRFT
+        ax.fill_between(bins,
+                        agg['frft_min'].values, agg['frft_max'].values,
+                        alpha=0.20, color=COLORS['mss'], label='FRFT min/max')
+        ax.plot(bins, agg['frft_mean'].values,
+                '-', linewidth=1.5, color=COLORS['mss'], label='FRFT mean', alpha=0.9)
+
+        # FFT
+        ax.fill_between(bins,
+                        agg['fft_min'].values, agg['fft_max'].values,
+                        alpha=0.20, color=COLORS['mse'], label='FFT min/max')
+        ax.plot(bins, agg['fft_mean'].values,
+                '--', linewidth=1.5, color=COLORS['mse'], label='FFT mean', alpha=0.9)
+
+        # Analytical reference: 1/sqrt(N)
+        ax.axhline(analytical, color='gray', linestyle=':', linewidth=1.2,
+                   label=f'1/√N = {analytical:.4f}', alpha=0.8)
+
+        ax.set_title(f'N = 2^{int(np.log2(ws))} = {ws}', fontweight='bold', fontsize=13)
+        ax.set_xlabel('Bin Index', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Magnitude', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(fontsize=8, framealpha=0.8, loc='upper right')
+
+    # Hide unused subplots
+    for idx in range(n_ws, n_rows * n_cols):
+        axes[idx // n_cols][idx % n_cols].set_visible(False)
+
+    plt.tight_layout()
+    filename = output_dir / 'impulse_spectrum_mean_minmax.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"    → {filename}")
+    plt.close()
+
+    # ---- sample analysis report ----
+    overlap_values  = sorted(spectrum_data['OverlapFactor'].unique())
+    total_rows      = len(spectrum_data)
+
+    detail_lines = []
+    for ws in window_sizes:
+        wsd  = spectrum_data[spectrum_data['WindowSize'] == ws]
+        n_of = wsd['OverlapFactor'].nunique()
+        n_bins = wsd['BinIndex'].nunique()
+        detail_lines.append(
+            f"    WindowSize=2^{int(np.log2(ws))} ({ws:6d})"
+            f"  overlap_factors={sorted(wsd['OverlapFactor'].unique())}"
+            f"  bins={n_bins}"
+            f"  rows={len(wsd)}"
+            f"  analytical_ref=1/√{ws}={1.0/np.sqrt(ws):.6e}"
+        )
+
+    txt_lines = [
+                    "=" * 70,
+                    "SAMPLE ANALYSIS: Impulse Spectrum Mean/Min/Max (FRFT vs FFT)",
+                    "File: impulse_spectrum_mean_minmax.png",
+                    "=" * 70,
+                    "",
+                    "BACKGROUND",
+                    "  For a unit impulse at sample 0, the ideal spectrum magnitude is",
+                    "  1/sqrt(N) at every bin (perfectly flat). Both FRFT (at α=1) and FFT",
+                    "  should produce this flat spectrum. Any deviation is numerical noise.",
+                    "  The spread across overlap factors reflects how impulse position within",
+                    "  the frame affects per-bin magnitudes.",
+                    "",
+                    "DATA SOURCE",
+                    f"  File            : impulse/spectrum.txt",
+                    f"  Total rows      : {total_rows}",
+                    f"  Columns         : WindowSize, OverlapFactor, BinIndex, FRFT_Mag, FFT_Mag",
+                    f"  Window sizes    : {window_sizes}",
+                    f"  Overlap factors : {overlap_values}",
+                    "",
+                    "AGGREGATION PER SUBPLOT",
+                    "  For each WindowSize, data is grouped by BinIndex and the mean/min/max",
+                    "  of FRFT_Mag and FFT_Mag are computed across all OverlapFactor rows.",
+                    "  Each bin therefore has (n_overlap_factors) contributing measurements.",
+                    f"  Samples per bin per window : {len(overlap_values)}  "
+                    f"(one per overlap factor: {overlap_values})",
+                    "",
+                    "PER-WINDOW DETAIL",
+                    "  Format: WindowSize  overlap_factors  n_bins  total_rows  analytical_ref",
+                    ] + detail_lines + [
+                    "",
+                    "INTERPRETATION",
+                    "  FRFT mean ≈ FFT mean ≈ 1/sqrt(N) everywhere → FRFT behaves as FFT at α=1.",
+                    "  Min/max band width shows sensitivity to impulse position in the frame.",
+                    "  Larger windows tend to tighter bands (more bins, same N impulse samples).",
+                ]
+    write_sample_analysis(
+        output_dir / 'impulse_spectrum_mean_minmax_sample_analysis.txt', txt_lines)
+
     return 1
 
 
@@ -2284,9 +3443,20 @@ def main():
         impulse_data = load_results_data(impulse_file)
         anal_data    = load_results_data(analytical_file) if analytical_file.exists() else None
 
+        # Load per-bin spectrum data (written by updated C++ test)
+        spectrum_file = extra_analysis_dir / 'impulse' / 'spectrum.txt'
+        spectrum_data = load_results_data(spectrum_file) if spectrum_file.exists() else None
+
         if impulse_data is not None:
             print(f"  Total impulse records: {len(impulse_data)}")
             total_plots += plot_extra_impulse_complex_mse_by_window_size(impulse_data, impulse_output)
+
+        if spectrum_data is not None:
+            print(f"  Total impulse spectrum rows: {len(spectrum_data)}")
+            total_plots += plot_extra_impulse_spectrum(spectrum_data, impulse_output)
+        else:
+            print(f"  ⚠ Impulse spectrum file not found: {spectrum_file}")
+            print(f"    (Re-run the C++ test to generate it)")
 
         if anal_data is not None:
             print(f"  Total analytical error records: {len(anal_data)}")

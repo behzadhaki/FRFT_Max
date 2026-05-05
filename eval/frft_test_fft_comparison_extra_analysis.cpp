@@ -189,6 +189,9 @@ struct FFTComparisonResult {
     double mean_error_mag;
     int    num_frames;
     bool   success;
+    // Per-bin averaged magnitudes (populated only when store_spectrum == true)
+    std::vector<double> avg_frft_mag;
+    std::vector<double> avg_fft_mag;
 };
 
 // ============================================================================
@@ -200,7 +203,8 @@ FFTComparisonResult run_comparison(FRFTEngine& engine,
                                    int overlap_factor,
                                    const std::vector<double>& full_signal,
                                    double frequency_label,
-                                   int n_analysis) {
+                                   int n_analysis,
+                                   bool store_spectrum = false) {
     FFTComparisonResult result;
     result.window_size    = window_size;
     result.overlap_factor = overlap_factor;
@@ -303,6 +307,12 @@ FFTComparisonResult run_comparison(FRFTEngine& engine,
     result.mean_error_mag  = calculate_mean_error(nf, nd);
     result.num_frames      = num_frames;
     result.success         = true;
+
+    if (store_spectrum) {
+        result.avg_frft_mag = avg_frft;
+        result.avg_fft_mag  = avg_fft;
+    }
+
     return result;
 }
 
@@ -470,6 +480,20 @@ void run_impulse_tests(const TestConfig& config) {
         aout << "WindowSize\tMSE_Complex_vs_Analytical\tMaxError_vs_Analytical\tMeanError_vs_Analytical\n";
     }
 
+    // Spectrum file: per-bin FRFT and FFT averaged magnitudes for every
+    // (WindowSize, OverlapFactor).  The Python plotter reads this to plot
+    // mean / min / max of the spectrum across overlap factors.
+    std::string spectrum_file = out_dir + "/spectrum.txt";
+    std::ofstream sout(spectrum_file);
+    if (sout.is_open()) {
+        sout << "WindowSize\tOverlapFactor\tBinIndex\tFRFT_Mag\tFFT_Mag\n";
+    }
+
+    // Use multiple overlap factors so the impulse lands at different positions
+    // within the analysis frame — this gives meaningful spread for min/max plots.
+    // OverlapFactor=1 → impulse at bin 0; larger factors shift the hop position.
+    std::vector<int> impulse_overlap_factors = {1, 2, 4, 8};
+
     FRFTEngine engine;
     auto t0 = std::chrono::high_resolution_clock::now();
     int test_count = 0, failed_count = 0;
@@ -483,16 +507,27 @@ void run_impulse_tests(const TestConfig& config) {
         std::vector<double> signal;
         generate_impulse(signal, window_size);
 
-        for (int overlap_factor : config.overlap_factors) {
+        for (int overlap_factor : impulse_overlap_factors) {
             std::cout << "    Overlap: " << overlap_factor << "x  ";
             std::cout.flush();
 
             // run_comparison will process exactly 1 frame (signal_length == window_size)
             FFTComparisonResult result = run_comparison(
                 engine, window_size, overlap_factor, signal,
-                /*frequency_label=*/-1.0, /*n_analysis=*/1);
+                /*frequency_label=*/-1.0, /*n_analysis=*/1,
+                /*store_spectrum=*/true);
 
             write_result(out, result, /*include_frequency_col=*/false);
+
+            // Write per-bin spectrum to spectrum.txt
+            if (result.success && sout.is_open()) {
+                for (int b = 0; b < window_size; ++b) {
+                    sout << window_size << "\t" << overlap_factor << "\t" << b << "\t"
+                         << std::scientific << std::setprecision(10)
+                         << result.avg_frft_mag[b] << "\t"
+                         << result.avg_fft_mag[b]  << "\n";
+                }
+            }
 
             ++test_count;
             if (!result.success) {
@@ -546,12 +581,14 @@ void run_impulse_tests(const TestConfig& config) {
 
     out.close();
     if (aout.is_open()) aout.close();
+    if (sout.is_open()) sout.close();
 
     std::cout << "\n  Impulse tests complete.\n";
     std::cout << "  Total: " << test_count << "  Failed: " << failed_count
               << "  Duration: " << std::fixed << std::setprecision(1) << secs << "s\n";
     std::cout << "  Results         → " << results_file << "\n";
     std::cout << "  Analytical error→ " << analytical_file << "\n";
+    std::cout << "  Spectrum        → " << spectrum_file  << "\n";
 }
 
 // ============================================================================

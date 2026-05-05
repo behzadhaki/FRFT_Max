@@ -325,11 +325,11 @@ void test_single_frame(FRFTEngine& engine,
     generate_sawtooth(original_frame, window_size, sawtooth_freq, config.sample_rate);
 
     // Apply Hamming window
-    std::vector<double> window;
-    generate_hamming_window(window, window_size);
-    for (int i = 0; i < window_size; ++i) {
-        original_frame[i] *= window[i];
-    }
+//    std::vector<double> window;
+//    generate_hamming_window(window, window_size);
+//    for (int i = 0; i < window_size; ++i) {
+//        original_frame[i] *= window[i];
+//    }
 
     // Prepare FRFT engine
     engine.prepare(window_size);

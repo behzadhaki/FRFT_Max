@@ -32,6 +32,7 @@ Two additional targeted tests are provided to further isolate sources of numeric
 - **Impulse response**: a unit delta (1 at sample 0) is used as input. Since the analytical FFT of a unit impulse is exactly 1/√N at every bin, this test measures absolute FRFT numerical error directly against a known ground truth without relying on FFTW at all.
 
 ```commandline
+chmod +x run_test_*.sh
 ./run_test_fft_comparison_extra_analysis.sh
 ```
 
@@ -138,7 +139,7 @@ python3 plot_results.py --mss test_results/homomorphism_mss_grid_direct/
 
 ```commandline
 chmod +x run_test_*.sh
-./run_test_mss.sh --dur 1.5 --winsizes 512,1024,2048,4096 --freqs 100,1000,2000,4000,8000 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
+./run_test_mss.sh --dur 1.5 --winsizes 512,1024,2048,4096,8192,16384,32768,65536 --freqs 1,10,20,40,60,80 --alpha-min -2 --alpha-max 2 --alpha-step 0.2
 ```
 
 This results in some audio files and text files being generated in the 'test_results/homomorphism_mss_grid_windowed/' directory.

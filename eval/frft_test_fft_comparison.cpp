@@ -382,6 +382,10 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
     double max_mag_error = 0.0;
     int num_frames = 0;
 
+    // Generate Hamming window once for this window size
+    std::vector<double> hamming_window;
+    generate_hamming_window(hamming_window, window_size);
+
     // Process frames
     for (int pos = 0; pos + window_size <= signal_length; pos += hop_size) {
         // Extract frame
@@ -390,7 +394,8 @@ FFTComparisonResult test_frft_vs_fft(FRFTEngine& engine,
                   real_in.begin());
         std::fill(imag_in.begin(), imag_in.end(), 0.0);
 
-        // No windowing applied - testing theoretical accuracy
+        // Apply Hamming window before analysis
+        apply_window(real_in, hamming_window);
 
         // Compute FRFT with alpha = 1.0
         bool frft_success = engine.compute(real_in.data(), imag_in.data(),
@@ -534,6 +539,7 @@ void run_test_suite(const TestConfig& config) {
     std::cout << "\n";
     std::cout << "  Sample Rate: " << config.sample_rate << " Hz\n";
     std::cout << "  Frames per Test: " << config.n_analysis << "\n";
+    std::cout << "  Windowing: Hamming window applied before FRFT and FFT\n";
     std::cout << "  FFT Normalization: sqrt(N) applied to FFTW output\n";
     std::cout << "  Output File: " << config.output_filename << "\n";
     std::cout << "  Figures Directory: " << config.figures_dir << "\n\n";
@@ -723,7 +729,7 @@ bool parse_arguments(int argc, char* argv[], TestConfig& config) {
             std::cout << "  --no-plots         Disable plot generation (default)\n";
             std::cout << "  --quick            Run quick test (fewer window sizes and frequencies)\n";
             std::cout << "  --help             Show this help message\n\n";
-            std::cout << "Note: FFT is normalized by sqrt(N) before comparison with FRFT.\n";
+            std::cout << "Note: A Hamming window is applied before both FRFT and FFT. FFT is normalized by sqrt(N) before comparison with FRFT.\n";
             return false;
         }
         else if (arg == "--output" && i + 1 < argc) {

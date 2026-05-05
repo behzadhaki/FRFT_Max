@@ -97,11 +97,15 @@ void generate_hamming_window(std::vector<double>& window, int size) {
     }
 }
 
-// Manually reverse a signal
+// Circularly reverse a signal: index 0 stays, index k maps to N-k.
+// This matches the FrFT alpha=±2 reversal convention, where x[0] is fixed
+// and the remaining samples are mirrored (x[k] -> x[N-k]).
 void reverse_signal(const std::vector<double>& input, std::vector<double>& output) {
-    output.resize(input.size());
-    for (size_t i = 0; i < input.size(); ++i) {
-        output[i] = input[input.size() - 1 - i];
+    size_t N = input.size();
+    output.resize(N);
+    output[0] = input[0];
+    for (size_t i = 1; i < N; ++i) {
+        output[i] = input[N - i];
     }
 }
 
@@ -359,11 +363,8 @@ void test_single_frame(FRFTEngine& engine,
     std::vector<double> processed_signal(window_size);
     std::copy(real_out.begin(), real_out.end(), processed_signal.begin());
 
-    // For alpha = ±2 (reversal cases), rotate the processed signal
-    // by moving the first sample to the end before comparison
-    if (test_type == REVERSAL_FORWARD || test_type == REVERSAL_BACKWARD) {
-        rotate_signal_first_to_end(processed_signal);
-    }
+    // No rotation needed: the circular reversal convention (x[0] fixed, x[k]->x[N-k])
+    // already aligns the FrFT alpha=±2 output with the expected signal directly.
 
     // Determine expected output based on test type
     std::vector<double> expected_signal;
