@@ -171,9 +171,54 @@ const result = proc.processArrays(realIn, imagIn, 0.5);
 // result.real, result.imag → Float64Array
 ```
 
-## Stage 4 — AudioWorklet  *(coming soon)*
+## Stage 4 — AudioWorklet
 
-`frft-processor.js` will wrap the WASM module for use in the Web Audio API.
+Two files in `web/audio/`:
+
+| File | Role |
+|------|------|
+| `frft-processor.js` | Runs in the audio thread — loads WASM, accumulates samples, calls `FRFTProcessor` |
+| `frft-node.js` | Main-thread helper — registers the worklet, waits for WASM ready, exposes a clean API |
+
+### How it works
+
+Web Audio delivers **128 samples per render quantum**. The processor accumulates
+these into a larger block (`bufSize`, default 512), applies the FRFT, then drains
+the result 128 samples at a time. This adds one block of latency (~11 ms at 44.1 kHz
+with `bufSize=512`).
+
+The WASM heap pointers from Stage 2 (Pattern A) are used throughout — audio data
+is written directly into WASM memory with no intermediate copies.
+
+### Wiring it up
+
+```js
+import { createFRFTNode } from './audio/frft-node.js';
+
+const ctx  = new AudioContext();
+const node = await createFRFTNode(ctx, {
+    processorUrl: '/audio/frft-processor.js',
+    frftJsUrl:    '/wasm/dist/frft.js',
+    alpha:        0.5,
+    bufSize:      512,
+});
+
+sourceNode.connect(node);
+node.connect(ctx.destination);
+
+// Change parameters at any time
+node.setAlpha(0.75);
+node.setBufSize(1024);
+```
+
+### Alpha guide
+
+| Alpha | Effect |
+|-------|--------|
+| `0` | Identity (passthrough) |
+| `0.5` | Halfway between time and frequency domain |
+| `1` | Standard FFT (frequency domain) |
+| `2` | Time-reversal |
 
 ## Stage 5 — Demo pages  *(coming soon)*
 
