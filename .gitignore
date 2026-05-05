@@ -4,3 +4,6 @@
 .idea/
 /eval/.$Figures.drawio.bkp
 /web/wasm/kissfft/
+/web/wasm/dist/
+*.o
+web/wasm/test_engine

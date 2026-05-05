@@ -79,15 +79,97 @@ make clean    # remove build artefacts and the kissfft/ folder
 
 ---
 
-## Stage 2 — Emscripten bindings  *(coming soon)*
+## Stage 2 — Emscripten bindings
 
-`frft_bindings.cpp` will expose `FRFTEngine::compute()` to JavaScript via
-`emscripten::embind`.
+`web/wasm/frft_bindings.cpp` wraps `FRFTEngine` in an `FRFTProcessor` class
+and exposes it to JavaScript via `emscripten::embind`.
 
-## Stage 3 — WASM build  *(coming soon)*
+Two usage patterns are available from JS:
 
-A CMake build using the Emscripten toolchain will compile
-`frft_engine_wasm.cpp` + KissFFT → `frft.wasm` + `frft.js`.
+**Pattern A — zero-copy (AudioWorklet)**
+Write audio data directly to/from WASM heap buffers using typed array views:
+
+```js
+proc.prepare(512);
+
+// Map JS views onto internal WASM buffers (no copy)
+const inR  = new Float64Array(Module.HEAPF64.buffer, proc.inputRealPtr(),  512);
+const inI  = new Float64Array(Module.HEAPF64.buffer, proc.inputImagPtr(),  512);
+const outR = new Float64Array(Module.HEAPF64.buffer, proc.outputRealPtr(), 512);
+const outI = new Float64Array(Module.HEAPF64.buffer, proc.outputImagPtr(), 512);
+
+inR.set(audioSamples);      // write input
+proc.process(512, alpha);   // run FRFT
+// outR / outI now hold results
+```
+
+**Pattern B — convenience (offline / scripting)**
+Pass Float64Arrays in, get a plain JS object back:
+
+```js
+const result = proc.processArrays(realIn, imagIn, alpha);
+// result.real → Float64Array
+// result.imag → Float64Array
+```
+
+## Stage 3 — WASM build
+
+### Install Emscripten (one time)
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
+cd ~/emsdk
+./emsdk install latest
+./emsdk activate latest
+source ~/emsdk/emsdk_env.sh   # adds emcc to PATH for this shell session
+```
+
+Add the `source` line to your `~/.zshrc` if you want `emcc` available by default.
+
+### Build
+
+```bash
+cd web/wasm
+make test          # fetch KissFFT and run native test first (if not done yet)
+make wasm          # release build → dist/frft.js + dist/frft.wasm
+make wasm_debug    # debug build   → dist/debug/frft.js + dist/debug/frft.wasm
+```
+
+Or call the script directly:
+
+```bash
+./build_wasm.sh           # release
+./build_wasm.sh debug     # debug (O0, assertions on)
+```
+
+### Output
+
+| File | Description |
+|------|-------------|
+| `dist/frft.js` | JS glue — loads and wraps the WASM module |
+| `dist/frft.wasm` | Compiled engine |
+
+### Use in JS
+
+```js
+import FRFTModule from './frft.js';
+
+const Module = await FRFTModule();
+const proc = new Module.FRFTProcessor();
+
+proc.prepare(512);
+
+// Pattern A — zero-copy (AudioWorklet)
+const inR  = new Float64Array(Module.HEAPF64.buffer, proc.inputRealPtr(),  512);
+const outR = new Float64Array(Module.HEAPF64.buffer, proc.outputRealPtr(), 512);
+inR.set(samples);
+proc.process(512, 0.5);
+// outR holds the result
+
+// Pattern B — convenience
+const result = proc.processArrays(realIn, imagIn, 0.5);
+// result.real, result.imag → Float64Array
+```
 
 ## Stage 4 — AudioWorklet  *(coming soon)*
 

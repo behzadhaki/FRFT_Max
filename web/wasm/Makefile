@@ -61,13 +61,19 @@ test_engine: test_engine.o orig_engine.o wasm_engine.o kiss_fft.o
 	    -o $@
 
 # ── Targets ──────────────────────────────────────────────────────────────────
-.PHONY: all test clean
+.PHONY: all test wasm wasm_debug clean
 
 all: test_engine
 
 test: test_engine
 	./test_engine
 
+wasm: $(KISS_SRCS) $(KISS_HDRS)
+	./build_wasm.sh release
+
+wasm_debug: $(KISS_SRCS) $(KISS_HDRS)
+	./build_wasm.sh debug
+
 clean:
 	rm -f *.o test_engine
-	rm -rf $(KISS_DIR)
+	rm -rf $(KISS_DIR) dist
