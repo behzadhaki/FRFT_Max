@@ -152,13 +152,14 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
     }
 
     // Special integer cases
-    if (std::abs(a) < 1e-10) {
-        // result = fc (already in work_buffer1)
-    } else if (std::abs(a - 2.0) < 1e-10 || std::abs(a + 2.0) < 1e-10) {
-        // result = dflip(fc)
-        dflip(work_buffer1_, size, work_buffer2_);  // work_buffer1 -> work_buffer2
-        std::copy(work_buffer2_.begin(), work_buffer2_.begin() + size, work_buffer1_.begin());
-    } else {
+    // if (std::abs(a) < 1e-10) {
+    //     // result = fc (already in work_buffer1)
+    // } else if (std::abs(a - 2.0) < 1e-10 || std::abs(a + 2.0) < 1e-10) {
+    //     // result = dflip(fc)
+    //     dflip(work_buffer1_, size, work_buffer2_);  // work_buffer1 -> work_buffer2
+    //     std::copy(work_buffer2_.begin(), work_buffer2_.begin() + size, work_buffer1_.begin());
+    // } else
+    {
         // General case
         // biz = bizinter(fc)
         bizinter(work_buffer1_, size, work_buffer2_);  // work_buffer1 -> work_buffer2
@@ -180,14 +181,14 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
         size_t fc_expanded_size = size + biz_size + size;
 
         // Conditional transformations based on a value
-        if ((0 < a && a < 0.5) || (1.5 < a && a < 2.0)) {
+        if ((0 <= a && a < 0.5) || (1.5 < a && a <= 2.0)) {
             corefrmod2(work_buffer3_, fc_expanded_size, 1.0, work_buffer4_);  // work_buffer3 -> work_buffer4
             std::copy(work_buffer4_.begin(), work_buffer4_.begin() + fc_expanded_size,
                       work_buffer3_.begin());
             a -= 1.0;
         }
 
-        if ((-0.5 < a && a < 0) || (-2.0 < a && a < -1.5)) {
+        if ((-0.5 < a && a < 0) || (-2.0 <= a && a < -1.5)) {
             corefrmod2(work_buffer3_, fc_expanded_size, -1.0, work_buffer4_);  // work_buffer3 -> work_buffer4
             std::copy(work_buffer4_.begin(), work_buffer4_.begin() + fc_expanded_size,
                       work_buffer3_.begin());
@@ -218,6 +219,14 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
         imag_out[i] = work_buffer2_[i].imag();
     }
 
+    // If alpha is zero, or ±2, the middle sample needs to be the average of the samples at N/2-1 and N/2 + 1
+    // TBD: REMOVE IN CASE OF SPECIAL TREATMENT for alpha=0 or ±2 (as commented out above - similar to torch implementation)
+    if (std::abs(a_param) < 1e-10 || std::abs(std::abs(a_param) - 2.0) < 1e-10) {
+        int mid_index = size / 2;
+        real_out[mid_index] = 0.5 * (real_out[mid_index - 1] + real_out[mid_index + 1]);
+        imag_out[mid_index] = 0.5 * (imag_out[mid_index - 1] + imag_out[mid_index + 1]);
+    }
+
     return true;
 }
 
@@ -227,6 +236,7 @@ void FRFTEngine::dflip(const std::vector<Complex>& input, size_t n, std::vector<
     }
 
     ensure_size(output, n);
+
     output[0] = input[0];
 
     for (size_t i = 1; i < n; ++i) {
@@ -294,9 +304,9 @@ void FRFTEngine::bizinter_real(const std::vector<double>& input, size_t n, std::
     // IFFT back into output
     ifft(conv_buffer_, n * 2, output);
 
-    // Scale by 2 to compensate for upsampling - CRITICAL: scale ALL 2*n elements
+    // Take real part first, then scale by 2 (matches Python: 2 * torch.real(ifft(...)))
     for (size_t i = 0; i < 2 * n; ++i) {
-        output[i] *= 2.0;
+        output[i] = Complex(2.0 * output[i].real(), 0.0);
     }
 }
 

@@ -49,12 +49,12 @@ if(IS_WINDOWS)
     find_path(FFTW3_INCLUDE_DIRS NAMES fftw3.h
             PATHS "${FFTW3_BUNDLED_ROOT}/include"
             NO_DEFAULT_PATH
-            )
+    )
 
     find_library(FFTW3_LIBRARIES NAMES fftw3.lib fftw3-3.lib libfftw3-3.lib
             PATHS "${FFTW3_BUNDLED_ROOT}/lib"
             NO_DEFAULT_PATH
-            )
+    )
 
     if(FFTW3_INCLUDE_DIRS AND FFTW3_LIBRARIES)
         set(FFTW3_FOUND TRUE)
@@ -79,7 +79,7 @@ elseif(IS_MACOS)
             /opt/homebrew/opt/fftw/include
             /usr/local/include
             /usr/local/opt/fftw/include
-            )
+    )
 
     find_library(FFTW3_LIBRARIES NAMES libfftw3.a
             HINTS
@@ -87,7 +87,7 @@ elseif(IS_MACOS)
             /opt/homebrew/opt/fftw/lib
             /usr/local/lib
             /usr/local/opt/fftw/lib
-            )
+    )
 
     if(FFTW3_INCLUDE_DIRS AND FFTW3_LIBRARIES)
         set(FFTW3_FOUND TRUE)
@@ -135,15 +135,15 @@ if(IS_WINDOWS)
     find_library(MAXAPI_LIB NAMES MaxAPI
             PATHS "${MAX_SDK_ROOT}/source/max-sdk-base/c74support/max-includes/x64"
             NO_DEFAULT_PATH
-            )
+    )
     find_library(MAXAUDIO_LIB NAMES MaxAudio
             PATHS "${MAX_SDK_ROOT}/source/max-sdk-base/c74support/msp-includes/x64"
             NO_DEFAULT_PATH
-            )
+    )
     find_library(JITTER_LIB NAMES jitlib
             PATHS "${MAX_SDK_ROOT}/source/max-sdk-base/c74support/jit-includes/x64"
             NO_DEFAULT_PATH
-            )
+    )
 
     if(NOT MAXAPI_LIB)
         message(FATAL_ERROR "❌ MaxAPI.lib not found!
@@ -181,7 +181,7 @@ if(IS_WINDOWS)
             advapi32
             winmm
             ws2_32
-            )
+    )
 else()
     set(PLATFORM_LIBRARIES "")
 endif()
@@ -195,7 +195,7 @@ set(COMMON_INCLUDES
         ${MAX_SDK_ROOT}/source/max-sdk-base/c74support/max-includes
         ${MAX_SDK_ROOT}/source/max-sdk-base/c74support/msp-includes
         ${FFTW3_INCLUDE_DIRS}
-        )
+)
 
 # ------------------------------------------------------------------------------
 # Shared Source Directory
@@ -208,11 +208,11 @@ set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 add_library(frft_engine STATIC
         ${SRC_DIR}/frft_engine.cpp
         ${SRC_DIR}/frft_engine.h
-        )
+)
 target_include_directories(frft_engine PUBLIC
         ${SRC_DIR}
         ${FFTW3_INCLUDE_DIRS}
-        )
+)
 
 # Link with static FFTW library
 if(IS_WINDOWS)
@@ -233,7 +233,7 @@ function(deploy_to_max TARGET_NAME)
                 COMMAND codesign --force --deep --sign - --timestamp=none
                 "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
                 COMMENT "🔏 Code signed ${TARGET_NAME}.${EXTERNAL_EXTENSION}"
-                )
+        )
     endif()
 
     # Set deployment path based on platform
@@ -253,7 +253,7 @@ function(deploy_to_max TARGET_NAME)
                 "$<TARGET_FILE:${TARGET_NAME}>"
                 "${MAX_PACKAGE_PATH}/${TARGET_NAME}.${EXTERNAL_EXTENSION}"
                 COMMENT "✅ Copied ${TARGET_NAME}.${EXTERNAL_EXTENSION} to Max Packages folder"
-                )
+        )
     else()
         # macOS: copy bundle
         add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
@@ -262,7 +262,7 @@ function(deploy_to_max TARGET_NAME)
                 "${CMAKE_BINARY_DIR}/${TARGET_NAME}.${EXTERNAL_EXTENSION}"
                 "${MAX_PACKAGE_PATH}/${TARGET_NAME}.${EXTERNAL_EXTENSION}"
                 COMMENT "✅ Copied ${TARGET_NAME}.${EXTERNAL_EXTENSION} to Max Packages folder"
-                )
+        )
     endif()
 
     message(STATUS "📦 ${TARGET_NAME} will deploy to: ${MAX_PACKAGE_PATH}")
@@ -275,7 +275,7 @@ set(FRFT frft)
 
 set(FRFT_SOURCE_FILES
         ${SRC_DIR}/frft.cpp
-        )
+)
 
 # Add commonsyms.c only on macOS (Windows links against MaxAPI.lib)
 if(IS_MACOS)
@@ -291,7 +291,7 @@ if(IS_WINDOWS)
     target_link_libraries(${FRFT} PRIVATE
             ${PLATFORM_LIBRARIES}
             ${MAXAPI_LIB}
-            )
+    )
 
     # Add MaxAudio if available (for MSP objects)
     if(MAXAUDIO_LIB)
@@ -307,13 +307,13 @@ if(IS_WINDOWS)
     target_link_options(${FRFT} PRIVATE
             "/FORCE:MULTIPLE"     # Allow multiple symbol definitions
             "/IGNORE:4006"        # Ignore warnings about multiple definitions
-            )
+    )
 
     set_target_properties(${FRFT} PROPERTIES
             OUTPUT_NAME ${FRFT}
             SUFFIX ".${EXTERNAL_EXTENSION}"
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-            )
+    )
 
 elseif(IS_MACOS)
     # macOS-specific properties
@@ -327,7 +327,7 @@ elseif(IS_MACOS)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${FRFT}.${EXTERNAL_EXTENSION}/Contents/MacOS
             INSTALL_RPATH "@loader_path"
             BUILD_WITH_INSTALL_RPATH TRUE
-            )
+    )
 
     configure_file(
             ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
@@ -345,91 +345,14 @@ if(IS_WINDOWS)
     install(FILES "$<TARGET_FILE:${FRFT}>"
             DESTINATION "${CMAKE_SOURCE_DIR}/externals"
             RENAME "${FRFT}.${EXTERNAL_EXTENSION}"
-            )
+    )
 else()
     install(DIRECTORY "${CMAKE_BINARY_DIR}/${FRFT}.${EXTERNAL_EXTENSION}"
             DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-            )
+    )
 endif()
 
-# ------------------------------------------------------------------------------
-# Signal Inspector Target (Optional)
-# ------------------------------------------------------------------------------
-if(EXISTS ${SRC_DIR}/signalinspector.cpp)
-    set(SignalInspector signalinspector)
 
-    set(INSPECTOR_SOURCE_FILES ${SRC_DIR}/signalinspector.cpp)
-    if(IS_MACOS)
-        list(APPEND INSPECTOR_SOURCE_FILES ${MAX_SDK_INCLUDES}/common/commonsyms.c)
-    endif()
-
-    add_library(${SignalInspector} MODULE ${INSPECTOR_SOURCE_FILES})
-    target_include_directories(${SignalInspector} PRIVATE ${COMMON_INCLUDES})
-    target_link_libraries(${SignalInspector} PRIVATE frft_engine)
-
-    if(IS_WINDOWS)
-        target_link_libraries(${SignalInspector} PRIVATE
-                ${PLATFORM_LIBRARIES}
-                ${MAXAPI_LIB}
-                )
-
-        if(MAXAUDIO_LIB)
-            target_link_libraries(${SignalInspector} PRIVATE ${MAXAUDIO_LIB})
-        endif()
-
-        if(JITTER_LIB)
-            target_link_libraries(${SignalInspector} PRIVATE ${JITTER_LIB})
-        endif()
-
-        target_link_options(${SignalInspector} PRIVATE
-                "/FORCE:MULTIPLE"
-                "/IGNORE:4006"
-                )
-
-        set_target_properties(${SignalInspector} PROPERTIES
-                OUTPUT_NAME ${SignalInspector}
-                SUFFIX ".${EXTERNAL_EXTENSION}"
-                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-                )
-
-    elseif(IS_MACOS)
-        target_link_libraries(${SignalInspector} PRIVATE ${PLATFORM_LIBRARIES})
-
-        set_target_properties(${SignalInspector} PROPERTIES
-                LINK_FLAGS "-undefined dynamic_lookup"
-                BUNDLE TRUE
-                BUNDLE_EXTENSION ${EXTERNAL_EXTENSION}
-                OUTPUT_NAME ${SignalInspector}
-                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}/Contents/MacOS
-                INSTALL_RPATH "@loader_path"
-                BUILD_WITH_INSTALL_RPATH TRUE
-                )
-
-        configure_file(
-                ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
-                ${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}/Contents/Info.plist
-                @ONLY
-        )
-    endif()
-
-    deploy_to_max(${SignalInspector})
-
-    if(IS_WINDOWS)
-        install(FILES "$<TARGET_FILE:${SignalInspector}>"
-                DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-                RENAME "${SignalInspector}.${EXTERNAL_EXTENSION}"
-                )
-    else()
-        install(DIRECTORY "${CMAKE_BINARY_DIR}/${SignalInspector}.${EXTERNAL_EXTENSION}"
-                DESTINATION "${CMAKE_SOURCE_DIR}/externals"
-                )
-    endif()
-
-    add_custom_target(FRFTAll DEPENDS ${FRFT} ${SignalInspector})
-else()
-    message(STATUS "ℹ️  signalinspector.cpp not found, skipping")
-    add_custom_target(FRFTAll DEPENDS ${FRFT})
-endif()
 
 # ------------------------------------------------------------------------------
 # Optimization flags for Release builds
@@ -438,15 +361,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(MSVC)
         target_compile_options(frft_engine PRIVATE /O2 /fp:fast)
         target_compile_options(${FRFT} PRIVATE /O2 /fp:fast)
-        if(TARGET ${SignalInspector})
-            target_compile_options(${SignalInspector} PRIVATE /O2 /fp:fast)
-        endif()
     else()
         target_compile_options(frft_engine PRIVATE -O3 -march=native -ffast-math)
         target_compile_options(${FRFT} PRIVATE -O3 -march=native -ffast-math)
-        if(TARGET ${SignalInspector})
-            target_compile_options(${SignalInspector} PRIVATE -O3 -march=native -ffast-math)
-        endif()
     endif()
     message(STATUS "✅ Release optimizations enabled")
 endif()

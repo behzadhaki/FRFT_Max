@@ -1,0 +1,4 @@
+numpy>=1.19.0
+torch>=1.8.0
+pybind11>=2.6.0
+setuptools>=40.0.0
