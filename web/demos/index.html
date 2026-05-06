@@ -5,13 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FRFT Audio Demo</title>
 <script>
-  // Inject frft.js with a timestamp query so every page load bypasses cache.
-  // Trigger the initial auto-process once the module is ready.
   window._wasmCacheBust = Date.now();
-  const _s = document.createElement('script');
-  _s.src = '../wasm/dist/frft.js?v=' + window._wasmCacheBust;
-  _s.onload = () => scheduleProcess(true);
-  document.head.appendChild(_s);
 </script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -123,10 +117,6 @@
   }
   .all-label input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
-  /* progress bar */
-  .progress-wrap { height: 4px; background: var(--border); border-radius: 2px; flex: 1; overflow: hidden; }
-  .progress-bar  { height: 100%; background: var(--accent); width: 0%; transition: width .1s; }
-
   /* status pill */
   #status {
     font-size: 12px; padding: 3px 10px;
@@ -146,17 +136,11 @@
   }
   .alphaBtn:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* spectrogram tabs */
-  .tab-bar { display: flex; gap: 6px; margin-bottom: 12px; }
-  .tab-btn {
-    padding: 5px 16px; border-radius: 6px;
-    font-size: 12px; font-weight: 600;
-    border: 1px solid var(--border);
-    background: transparent; color: var(--muted);
-    cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+  /* FRFT button progress-fill pulse (shown when processing, no real progress yet) */
+  @keyframes frft-pulse {
+    0%, 100% { width:  6%; opacity: 0.55; }
+    50%       { width: 45%; opacity: 0.90; }
   }
-  .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .tab-btn:not(.active):hover { border-color: var(--accent); color: var(--accent); }
 
   canvas {
     width: 100%; height: 220px;
@@ -238,19 +222,22 @@
   </div>
 </div>
 
-<!-- Process controls kept in DOM for JS references but not shown -->
-<div style="display:none">
-  <button id="processBtn">Process</button>
-  <div class="progress-bar" id="progressBar"></div>
-  <span id="status"></span>
-</div>
+<!-- Status pill (hidden visually via zero-size parent but still queriable) -->
+<div style="display:none"><span id="status"></span></div>
 
 <!-- ── Playback + Spectrogram (shown after processing) ── -->
 <div class="card" id="playbackCard" style="display:none">
   <h2>Playback</h2>
   <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:14px">
     <button class="btn-ok"      id="playDryBtn"  disabled>▶ Source</button>
-    <button class="btn-ok"      id="playWetBtn"  disabled>▶ FRFT</button>
+    <button class="btn-ok" id="playWetBtn" disabled
+            style="position:relative;overflow:hidden;white-space:nowrap">
+      <span id="frftFill"
+            style="position:absolute;left:0;top:0;bottom:0;width:0%;
+                   background:rgba(52,199,89,0.25);pointer-events:none;
+                   transition:width .1s linear"></span>
+      <span id="playWetLabel">▶ FRFT</span>
+    </button>
     <button class="btn-neutral" id="downloadBtn" disabled>⬇ Download</button>
     <div style="flex:1;position:relative">
       <canvas id="spectrumCanvas" width="600" height="40"
@@ -258,16 +245,15 @@
                border-radius:8px;border:1px solid var(--border);background:var(--bg)"></canvas>
     </div>
   </div>
-  <div class="tab-bar">
-    <button class="tab-btn"        id="tabDry">Original</button>
-    <button class="tab-btn active" id="tabWet">FRFT (α = <span id="alphaLabel">0.50</span>)</button>
-  </div>
   <canvas id="specCanvas" width="1200" height="400"></canvas>
 </div>
 
 <script>
-// ── WASM module (loaded once) ────────────────────────────────────────────────
-let WasmModule      = null;
+// ── Worker + job tracking ────────────────────────────────────────────────────
+let frftWorker   = null;
+let workerReady  = false;
+let currentJobId = 0;        // incremented every scheduleProcess call
+
 let dryBuf          = null;
 let wetBuf          = null;
 let trimmedDryBuf   = null;  // dryBuf cropped to the OLA-valid region
@@ -297,23 +283,19 @@ const alphaSlider = document.getElementById('alpha');
 const alphaNum    = document.getElementById('alphaNum');
 const bufSizeSel  = document.getElementById('bufSizeSel');
 const overlapSel  = document.getElementById('overlap');
-const processBtn  = document.getElementById('processBtn');
-const progressBar = document.getElementById('progressBar');
 const statusEl    = document.getElementById('status');
 const playbackCard= document.getElementById('playbackCard');
 const playDryBtn  = document.getElementById('playDryBtn');
 const playWetBtn  = document.getElementById('playWetBtn');
+const playWetLabel= document.getElementById('playWetLabel');
+const frftFill    = document.getElementById('frftFill');
 const downloadBtn = document.getElementById('downloadBtn');
 const specCanvas      = document.getElementById('specCanvas');
 const spectrumCanvas  = document.getElementById('spectrumCanvas');
-const tabDry          = document.getElementById('tabDry');
-const tabWet          = document.getElementById('tabWet');
-const alphaLabel      = document.getElementById('alphaLabel');
 
-// ── Auto-processing: debounce + cancellation ─────────────────────────────────
+// ── Auto-processing: debounce + worker cancellation ──────────────────────────
 const DEBOUNCE_MS   = 400;
 let   debounceTimer = null;
-let   activeToken   = null; // { cancelled: bool } for the running job
 
 // Call when source signal must be regenerated (type / freq / duration / file)
 function invalidateSource() {
@@ -327,14 +309,21 @@ function invalidateFRFT() {
 }
 
 function scheduleProcess(immediate = false) {
-  // Cancel any in-flight run
-  if (activeToken) activeToken.cancelled = true;
+  // Bump job id — worker checks this to self-cancel
+  currentJobId++;
+  if (workerReady) frftWorker.postMessage({ type: 'cancel' });
+
   clearTimeout(debounceTimer);
   stopPlayback();
+  clearSpectrogram();
+  clearSpectrum();
+  setFrftProgress(0);
+
   downloadBtn.disabled = true;
+  playDryBtn.disabled  = true;
+  playWetBtn.disabled  = true;
   wetBuf = null;
   trimmedDryBuf = null;
-  setProgress(0);
   setStatus('pending…');
 
   if (immediate) {
@@ -345,15 +334,15 @@ function scheduleProcess(immediate = false) {
 }
 
 async function autoProcess() {
-  const token = { cancelled: false };
-  activeToken = token;
-  processBtn.disabled = true;
+  if (!workerReady) { setStatus('Loading WASM…', 'busy'); return; }
+
+  const jobId = currentJobId;
 
   try {
     // 1. Generate / decode source if needed
     if (!dryBuf) {
       if (srcType.value === 'file') {
-        if (!fileInput.files[0]) { setStatus('no file', 'err'); return; }
+        if (!fileInput.files[0]) { setStatus('select a file ↑', ''); return; }
         setStatus('Decoding…', 'busy');
         dryBuf = await decodeFile(fileInput.files[0]);
       } else {
@@ -361,53 +350,83 @@ async function autoProcess() {
         const freq = parseInt(freqNum.value) || 440;
         dryBuf = generateSignal(srcType.value, 10, sampleRate, freq);
       }
-      if (token.cancelled) return;
+      if (jobId !== currentJobId) return;   // superseded during file decode
     }
 
-    // 2. FRFT
-    const alpha    = parseFloat(alphaSlider.value);
-    const overlap  = parseInt(overlapSel.value);
-    const isAll    = bufSizeSel.value === 'all';
-    const bufSize  = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
+    // 2. Hand off to worker — result arrives via handleWorkerMessage
+    const alpha            = parseFloat(alphaSlider.value);
+    const overlap          = parseInt(overlapSel.value);
+    const isAll            = bufSizeSel.value === 'all';
+    const bufSize          = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
     const effectiveOverlap = isAll ? 1 : overlap;
 
     setStatus('Processing…', 'busy');
-    const result = await runFRFT(dryBuf, alpha, bufSize, effectiveOverlap, token);
-    if (token.cancelled || result === null) return;
+    frftWorker.postMessage({
+      type: 'process',
+      samples: dryBuf,         // structured-clone (keep dryBuf on main thread)
+      alpha, bufSize,
+      overlapFactor: effectiveOverlap,
+      jobId,
+    });
 
-    wetBuf = result;
+  } catch (err) {
+    console.error(err);
+    setStatus(err.message || 'Error', 'err');
+  }
+}
 
-    // Trim the dry buffer to match the OLA-valid region that runFRFT already
-    // cropped from the wet output.  trim = (R-1)*H samples on each side.
-    const H_trim   = Math.max(1, Math.floor(bufSize / effectiveOverlap));
-    const trimAmt  = (effectiveOverlap - 1) * H_trim;
-    trimmedDryBuf  = trimAmt > 0 && dryBuf.length > 2 * trimAmt
-                       ? dryBuf.slice(trimAmt, dryBuf.length - trimAmt)
-                       : dryBuf;
+// ── Worker message handler ────────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
 
-    // Compute both STFTs, sync Y axis, render the active tab.
-    alphaLabel.textContent = alpha.toFixed(2);
+  if (type === 'ready') {
+    workerReady = true;
+    scheduleProcess(true);
+    return;
+  }
+
+  if (type === 'progress') {
+    if (e.data.jobId === currentJobId)
+      setFrftProgress(e.data.value);
+    return;
+  }
+
+  if (type === 'result') {
+    if (e.data.jobId !== currentJobId) return; // stale
+
+    wetBuf = e.data.output; // already trimmed by worker
+
+    // Compute trimmedDryBuf with the same trim arithmetic as the worker
+    const isAll            = bufSizeSel.value === 'all';
+    const bufSize          = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
+    const effectiveOverlap = isAll ? 1 : parseInt(overlapSel.value);
+    const H                = Math.max(1, Math.floor(bufSize / effectiveOverlap));
+    const trimAmt          = (effectiveOverlap - 1) * H;
+    trimmedDryBuf = trimAmt > 0 && dryBuf.length > 2 * trimAmt
+      ? dryBuf.slice(trimAmt, dryBuf.length - trimAmt)
+      : dryBuf;
+
+    // STFTs + spectrogram
     drySTFT      = computeSTFT(trimmedDryBuf);
     wetSTFT      = computeSTFT(wetBuf);
     sharedTopBin = Math.max(drySTFT.topBin, wetSTFT.topBin);
     renderActiveTab();
 
+    setFrftProgress(1);  // stop pulse / clear fill
+
     playbackCard.style.display = 'block';
-    playDryBtn.disabled  = false;  playDryBtn.className = 'btn-ok';
-    playWetBtn.disabled  = false;  playWetBtn.className = 'btn-ok';
-    playDryBtn.textContent = '▶ Source';
-    playWetBtn.textContent = '▶ FRFT';
+    playDryBtn.disabled = false;  playDryBtn.className = 'btn-ok';
+    playWetBtn.disabled = false;  playWetBtn.className = 'btn-ok';
+    playDryBtn.textContent  = '▶ Source';
+    playWetLabel.textContent = '▶ FRFT';
     downloadBtn.disabled = false;
     setStatus('done', 'ok');
+    return;
+  }
 
-  } catch (err) {
-    if (!token.cancelled) {
-      console.error(err);
-      setStatus(err.message || 'Error', 'err');
-    }
-  } finally {
-    if (activeToken === token) activeToken = null;
-    processBtn.disabled = false;
+  if (type === 'error') {
+    console.error('Worker error:', e.data.message);
+    setStatus(e.data.message || 'Worker error', 'err');
   }
 }
 
@@ -419,7 +438,9 @@ srcType.addEventListener('change', () => {
   freqNum.style.display    = isSine ? '' : 'none';
   document.getElementById('freqHz').style.display = isSine ? '' : 'none';
   fileInput.style.display  = isFile ? '' : 'none';
-  invalidateSource();
+  // When switching TO file mode there's no file yet — don't try to process.
+  // Switching to sine/sweep always regenerates the signal.
+  if (!isFile) invalidateSource();
 });
 
 // ── Frequency controls (sine mode) ───────────────────────────────────────────
@@ -466,27 +487,19 @@ bufSizeSel.addEventListener('change', () => {
 
 // ── Other source / FRFT parameters ───────────────────────────────────────────
 overlapSel.addEventListener('change', invalidateFRFT);
-fileInput.addEventListener('change',  invalidateSource);
 
-// ── Spectrogram tabs ──────────────────────────────────────────────────────────
+// File selection is an explicit user action — skip the debounce and start
+// immediately.  Also null dryBuf so the new file is decoded fresh.
+fileInput.addEventListener('change', () => {
+  dryBuf = null;
+  scheduleProcess(true);   // immediate, no 400 ms wait
+});
+
+// ── Spectrogram: render whichever tab is active ───────────────────────────────
 function renderActiveTab() {
   const stft = activeTab === 'dry' ? drySTFT : wetSTFT;
   if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin);
 }
-
-tabDry.addEventListener('click', () => {
-  activeTab = 'dry';
-  tabDry.classList.add('active');
-  tabWet.classList.remove('active');
-  renderActiveTab();
-});
-
-tabWet.addEventListener('click', () => {
-  activeTab = 'wet';
-  tabWet.classList.add('active');
-  tabDry.classList.remove('active');
-  renderActiveTab();
-});
 
 
 // ── Alpha visualisation ───────────────────────────────────────────────────────
@@ -611,8 +624,38 @@ function setStatus(text, cls = '') {
   statusEl.textContent = text;
   statusEl.className   = cls;
 }
-function setProgress(frac) {
-  progressBar.style.width = (frac * 100).toFixed(1) + '%';
+
+// Fill the ▶ FRFT button left-to-right as a progress bar (0..1).
+// frac === 0  → pulse animation (no data yet, e.g. "All" mode single giant frame)
+// 0 < frac < 1 → actual fill; switches off pulse on first real update
+// frac >= 1   → snap clear (caller handles the flash-to-100% separately)
+function setFrftProgress(frac) {
+  if (frac <= 0) {
+    // Pulse: let animation drive width, disable JS transition so they don't fight
+    frftFill.style.transition = 'none';
+    frftFill.style.width      = '';
+    frftFill.style.animation  = 'frft-pulse 1.2s ease-in-out infinite';
+    playWetLabel.textContent  = '⋯';
+  } else if (frac < 1) {
+    // Real progress — kill pulse, show actual fill
+    frftFill.style.animation  = '';
+    frftFill.style.transition = 'width .1s linear';
+    frftFill.style.width      = (frac * 100).toFixed(1) + '%';
+    playWetLabel.textContent  = `⋯ ${Math.round(frac * 100)}%`;
+  } else {
+    // Done — clear everything
+    frftFill.style.animation  = '';
+    frftFill.style.transition = 'none';
+    frftFill.style.width      = '0%';
+    playWetLabel.textContent  = '▶ FRFT';
+  }
+}
+
+// Clear the spectrogram canvas to a dark background
+function clearSpectrogram() {
+  const ctx2d = specCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, specCanvas.width, specCanvas.height);
 }
 
 // ── Generate built-in signals ─────────────────────────────────────────────────
@@ -648,146 +691,6 @@ async function decodeFile(file) {
   await ctx.close();
   return mono;
 }
-
-// ── Offline FRFT + OLA ────────────────────────────────────────────────────────
-async function runFRFT(samples, alpha, bufSize, overlapFactor, token = {}) {
-  const N = bufSize;
-  const H = Math.max(1, Math.floor(N / overlapFactor)); // integer hop size
-  const L = samples.length;
-
-  if (!WasmModule) {
-    setStatus('Loading WASM…', 'busy');
-    WasmModule = await FRFTModule({
-      locateFile: (path, prefix) => prefix + path + '?v=' + window._wasmCacheBust,
-    });
-  }
-
-  const proc = new WasmModule.FRFTProcessor();
-  proc.prepare(N);
-
-  // Cache the pointer offsets — these stay fixed even when the heap grows.
-  const inRPtr  = proc.inputRealPtr();
-  const inIPtr  = proc.inputImagPtr();
-  const outRPtr = proc.outputRealPtr();
-
-  // proc.process() can trigger WASM heap growth (internal FFT scratch allocs).
-  // Growth replaces HEAPF64.buffer with a new ArrayBuffer and detaches the old
-  // one, so any TypedArray views into the old buffer throw on next access.
-  // Solution: track the current buffer and rebuild views whenever it changes.
-  let heapBuf = WasmModule.HEAPF64.buffer;
-  let heapInR  = new Float64Array(heapBuf, inRPtr,  N);
-  let heapInI  = new Float64Array(heapBuf, inIPtr,  N);
-  let heapOutR = new Float64Array(heapBuf, outRPtr, N);
-
-  function remapHeap() {
-    const buf = WasmModule.HEAPF64.buffer;
-    if (buf !== heapBuf) {
-      heapBuf  = buf;
-      heapInR  = new Float64Array(buf, inRPtr,  N);
-      heapInI  = new Float64Array(buf, inIPtr,  N);
-      heapOutR = new Float64Array(buf, outRPtr, N);
-    }
-  }
-
-  // Hann window for all overlap factors (symmetric, N-1 denominator).
-  // win[0] = win[N-1] = 0 exactly, so synthesis-windowed output is silent at
-  // frame edges regardless of what the FRFT produces there — matching the
-  // Max/MSP behaviour where windows visibly taper to zero at R=1.
-  const win = new Float32Array(N);
-  for (let i = 0; i < N; i++)
-    win[i] = 0.5 - 0.5 * Math.cos(2.0 * Math.PI * i / (N - 1));
-
-  // Scalar WOLA norm — same formula as frft-processor.js AudioWorklet.
-  // Summing win² across R overlapping positions within one hop then dividing
-  // by H gives a single constant divisor for every output sample.
-  // This avoids per-sample division (which amplifies FRFT leakage at the
-  // near-zero window edges and causes starburst artifacts at R=1).
-  let wNorm = 0;
-  for (let p = 0; p < H; p++) {
-    for (let k = 0; k < overlapFactor; k++) {
-      const wi = p + k * H;
-      if (wi < N) wNorm += win[wi] * win[wi];
-    }
-  }
-  wNorm /= H;   // ≈ 3/8 for Hann at R=1, larger for higher R
-
-  const output = new Float32Array(L);
-
-  // Pre-roll: start (R-1) hops before sample 0 so every sample in [0,L) is
-  // covered by exactly R overlapping windows before normalization.
-  const firstFrame = -(overlapFactor - 1) * H;
-
-  let totalFrames = 0;
-  for (let fs = firstFrame; fs < L; fs += H) totalFrames++;
-  let framesDone = 0;
-
-  const CHUNK = 64;
-
-  for (let frameStart = firstFrame; frameStart < L; frameStart += H) {
-    remapHeap(); // remap if a previous proc.process() grew the heap
-
-    // Zero-pad input for out-of-bounds positions
-    for (let i = 0; i < N; i++) {
-      const idx = frameStart + i;
-      heapInR[i] = (idx >= 0 && idx < L ? samples[idx] : 0.0) * win[i];
-    }
-    heapInI.fill(0.0);
-
-    proc.process(N, alpha);
-    remapHeap(); // remap immediately after process before reading output
-
-    // Diagnostic (first frame only): log N/2 vs neighbours to check the
-    // bizdec boundary-doubling correction is being applied.
-    if (framesDone === 0) {
-      const mid = N >> 1;
-      console.log(`[FRFT diag] N=${N} α=${alpha} | out[${mid-1}]=${heapOutR[mid-1].toFixed(4)} out[${mid}]=${heapOutR[mid].toFixed(4)} out[${mid+1}]=${heapOutR[mid+1].toFixed(4)}`);
-      let maxVal = 0, maxIdx = 0;
-      for (let k = 0; k < N; k++) { const v = Math.abs(heapOutR[k]); if (v > maxVal) { maxVal = v; maxIdx = k; } }
-      console.log(`[FRFT diag] peak=${maxVal.toFixed(4)} at index ${maxIdx} (N/2=${mid})`);
-    }
-
-    // WOLA accumulation: apply synthesis window so edge samples (win=0) are
-    // silenced regardless of what the FRFT produces there.
-    for (let i = 0; i < N; i++) {
-      const w = win[i];
-      if (w < 1e-10) continue;            // zero-weight edges → silence
-      const idx = frameStart + i;
-      if (idx >= 0 && idx < L) {
-        output[idx] += heapOutR[i] * w;   // synthesis-windowed, no per-sample norm
-      }
-    }
-
-    framesDone++;
-    if (framesDone % CHUNK === 0) {
-      if (token.cancelled) { proc.delete(); return null; }
-      setProgress(framesDone / totalFrames);
-      await new Promise(r => setTimeout(r, 0));
-    }
-  }
-
-  // Normalise by the scalar wNorm (same constant for every sample).
-  for (let i = 0; i < L; i++) output[i] /= wNorm;
-
-  // Peak-normalise to prevent clipping — FRFT does not preserve amplitude.
-  let peak = 0;
-  for (let i = 0; i < L; i++) { const a = Math.abs(output[i]); if (a > peak) peak = a; }
-  if (peak > 1e-8) for (let i = 0; i < L; i++) output[i] /= peak;
-
-  // Trim edges where fewer than overlapFactor frames contributed.
-  // (R-1)*H samples on each side had zero-padded pre/post-roll input.
-  const trimAmt = (overlapFactor - 1) * H;
-  const trimEnd = L - trimAmt;
-
-  proc.delete();
-  setProgress(1);
-  return trimAmt > 0 && trimEnd > trimAmt ? output.slice(trimAmt, trimEnd) : output;
-}
-
-// ── Process button — force immediate re-run ───────────────────────────────────
-processBtn.addEventListener('click', () => {
-  dryBuf = null; // force source regeneration too
-  scheduleProcess(true);
-});
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 const STFT_HOP = 512;  // must match computeSTFT
@@ -864,8 +767,8 @@ function stopPlayback() {
   if (audioCtx)  { audioCtx.close(); audioCtx = null; }
   masterGain   = null;
   playingWhich = null;
-  playDryBtn.textContent = '▶ Source'; playDryBtn.className = 'btn-ok';
-  playWetBtn.textContent = '▶ FRFT';   playWetBtn.className = 'btn-ok';
+  playDryBtn.textContent   = '▶ Source'; playDryBtn.className = 'btn-ok';
+  playWetLabel.textContent = '▶ FRFT';   playWetBtn.className = 'btn-ok';
 }
 
 function startPlayback(samples, which) {
@@ -892,18 +795,22 @@ function startPlayback(samples, which) {
 
   playingWhich = which;
   if (which === 'dry') {
-    playDryBtn.textContent = '■ Source'; playDryBtn.className = 'btn-playing';
+    playDryBtn.textContent   = '■ Source'; playDryBtn.className = 'btn-playing';
   } else {
-    playWetBtn.textContent = '■ FRFT';   playWetBtn.className = 'btn-playing';
+    playWetLabel.textContent = '■ FRFT';   playWetBtn.className = 'btn-playing';
   }
 }
 
 playDryBtn.addEventListener('click', () => {
+  activeTab = 'dry';
+  renderActiveTab();
   if (playingWhich === 'dry') stopPlayback();
   else if (trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry');
 });
 
 playWetBtn.addEventListener('click', () => {
+  activeTab = 'wet';
+  renderActiveTab();
   if (playingWhich === 'wet') stopPlayback();
   else if (wetBuf) startPlayback(wetBuf, 'wet');
 });
@@ -1110,6 +1017,20 @@ function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
     ctx.fillText(label, 5, textY);
   }
 }
+
+// ── Worker init (runs immediately; auto-process fires on 'ready') ─────────────
+(function initWorker() {
+  const cacheBust  = window._wasmCacheBust;
+  // Absolute URLs so the worker can resolve them regardless of its own path.
+  const jsUrl      = new URL('../wasm/dist/frft.js', location.href).href
+                     + '?v=' + cacheBust;
+  const wasmBaseUrl = new URL('../wasm/dist/', location.href).href;
+
+  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href);
+  frftWorker.onmessage = handleWorkerMessage;
+  frftWorker.onerror   = (e) => setStatus('Worker load error: ' + e.message, 'err');
+  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });
+})();
 </script>
 </body>
 </html>
