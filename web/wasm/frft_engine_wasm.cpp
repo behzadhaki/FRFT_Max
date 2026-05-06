@@ -180,21 +180,19 @@ bool FRFTEngine::compute(const double* real_in, const double* imag_in,
                   work_buffer5_.begin());
 
         bizdec(work_buffer5_, size * 2, work_buffer1_);
-        work_buffer1_[0] *= 2.0;
     }
 
-    ifftshift(work_buffer1_, size, work_buffer2_);
-
+    // Output in centered order (no ifftshift): DC at N/2, Nyquist artifact at 0.
+    // The Hann synthesis window has win[0]=0, so the Nyquist artifact is
+    // suppressed for free.  Main signal energy near N/2 gets full window weight.
     for (int i = 0; i < size; ++i) {
-        real_out[i] = work_buffer2_[i].real();
-        imag_out[i] = work_buffer2_[i].imag();
+        real_out[i] = work_buffer1_[i].real();
+        imag_out[i] = work_buffer1_[i].imag();
     }
 
-    if (std::abs(a_param) < 1e-10 || std::abs(std::abs(a_param) - 2.0) < 1e-10) {
-        int mid_index = size / 2;
-        real_out[mid_index] = 0.5 * (real_out[mid_index - 1] + real_out[mid_index + 1]);
-        imag_out[mid_index] = 0.5 * (imag_out[mid_index - 1] + imag_out[mid_index + 1]);
-    }
+    // Interpolate the Nyquist boundary artifact at position 0 in centered output.
+    real_out[0] = 0.5 * (real_out[size - 1] + real_out[1]);
+    imag_out[0] = 0.5 * (imag_out[size - 1] + imag_out[1]);
 
     return true;
 }

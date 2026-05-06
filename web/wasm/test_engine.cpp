@@ -211,6 +211,68 @@ static bool test_reversal() {
 }
 
 // ============================================================================
+// Test 5: KissFFT direct — full N-point spectrum + correct bin ordering
+//
+// Bypasses FRFTEngine entirely and calls kiss_fft directly.
+// For a real cosine at bin k0:  X[k0] = N/2, X[N-k0] = N/2, rest ≈ 0
+// For a real sine  at bin k0:  X[k0] = -i·N/2, X[N-k0] = +i·N/2
+// If kiss_fft returned only N/2+1 bins (like kiss_fftr), the negative-
+// frequency bin N-k0 would be absent and the test would fail.
+// ============================================================================
+
+static bool test_kissfft_spectrum() {
+    std::cout << "\n[5] KissFFT direct: full N-point spectrum and bin ordering\n";
+    bool all_ok = true;
+
+    const int    N  = 16;
+    const int    k0 = 3;    // arbitrary non-DC, non-Nyquist bin
+    const double expected = N / 2.0;
+
+    kiss_fft_cfg cfg = kiss_fft_alloc(N, 0, nullptr, nullptr);
+    std::vector<kiss_fft_cpx> in(N), out(N);
+
+    // ── Cosine at bin k0 ──────────────────────────────────────────────────
+    for (int n = 0; n < N; ++n) {
+        in[n].r = std::cos(2.0 * M_PI * k0 * n / N);
+        in[n].i = 0.0;
+    }
+    kiss_fft(cfg, in.data(), out.data());
+
+    double mag_pos = std::sqrt(out[k0].r*out[k0].r + out[k0].i*out[k0].i);
+    double mag_neg = std::sqrt(out[N-k0].r*out[N-k0].r + out[N-k0].i*out[N-k0].i);
+
+    double max_other = 0.0;
+    for (int k = 0; k < N; ++k) {
+        if (k == k0 || k == N-k0) continue;
+        double m = std::sqrt(out[k].r*out[k].r + out[k].i*out[k].i);
+        max_other = std::max(max_other, m);
+    }
+
+    all_ok &= check("cos: bin k0   magnitude = N/2  (positive-freq bin present)",
+                    std::abs(mag_pos - expected), 1e-9);
+    all_ok &= check("cos: bin N-k0 magnitude = N/2  (negative-freq bin present — full spectrum)",
+                    std::abs(mag_neg - expected), 1e-9);
+    all_ok &= check("cos: all other bins ≈ 0  (no ordering / leakage errors)",
+                    max_other, 1e-9);
+
+    // ── Sine at bin k0 ────────────────────────────────────────────────────
+    // Expected: X[k0] = -i·N/2,  X[N-k0] = +i·N/2
+    for (int n = 0; n < N; ++n) {
+        in[n].r = std::sin(2.0 * M_PI * k0 * n / N);
+        in[n].i = 0.0;
+    }
+    kiss_fft(cfg, in.data(), out.data());
+
+    all_ok &= check("sin: bin k0   real ≈ 0",          std::abs(out[k0].r),           1e-9);
+    all_ok &= check("sin: bin k0   imag = -N/2",        std::abs(out[k0].i + expected), 1e-9);
+    all_ok &= check("sin: bin N-k0 real ≈ 0",          std::abs(out[N-k0].r),         1e-9);
+    all_ok &= check("sin: bin N-k0 imag = +N/2",        std::abs(out[N-k0].i - expected), 1e-9);
+
+    kiss_fft_free(cfg);
+    return all_ok;
+}
+
+// ============================================================================
 
 int main() {
     std::cout << "FRFT Engine Test: KissFFT (wasm) vs FFTW (original)\n";
@@ -221,6 +283,7 @@ int main() {
     failed += !test_round_trip();
     failed += !test_additivity();
     failed += !test_reversal();
+    failed += !test_kissfft_spectrum();
 
     std::cout << "\n" << std::string(60, '=') << "\n";
     if (failed == 0) {

@@ -220,14 +220,24 @@ node.setBufSize(1024);
 | `1` | Standard FFT (frequency domain) |
 | `2` | Time-reversal |
 
-## Stage 5 — Demo pages  *(coming soon)*
+## Stage 5 — Demo page
 
-Static HTML pages in `web/demos/` for interactive browser demos.
-Serve locally with:
+`web/demos/index.html` — single-page interactive demo.
+
+### Features
+
+- **Three audio sources**: sine wave (440 Hz), frequency sweep (100–4000 Hz), or file upload
+- **α slider** (−2 to +2) with live parameter changes while audio is running
+- **Quick-set buttons**: −1 (Inv. FFT), 0 (passthrough), 0.5 (mid), 1 (FFT), 2 (reversal)
+- **Block size selector**: 128 / 256 / 512 / 1024 / 2048 samples
+- **Dual oscilloscope**: input (dry) and output (FRFT) waveforms side by side
+
+### Run locally
 
 ```bash
+cd web
 python3 -m http.server 8000
-# then open http://localhost:8000/demos/
+# open http://localhost:8000/demos/
 ```
 
-(Browsers block AudioWorklets on `file://` — a local server is required.)
+Browsers block AudioWorklets on `file://` — a local server is required.
