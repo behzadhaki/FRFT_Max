@@ -6,23 +6,14 @@
 <title>FRFT Audio</title>
 <script>
   window._wasmCacheBust = Date.now();
-  // Apply ?w=NNN&h=NNN&dur=NNN URL params and set initial font size
+  // Apply ?w=NNN&h=NNN&dur=NNN URL params
   (function () {
     const sp = new URLSearchParams(location.search);
     const w  = sp.get('w'), h = sp.get('h');
-    const el = document.documentElement;
-    const s  = el.style;
+    const s  = document.documentElement.style;
 
-    const fw = w ? Math.max(200, +w) : null;
-    const fh = h ? Math.max(100, +h) : null;
-    if (fw) s.width  = fw + 'px';
-    if (fh) s.height = fh + 'px';
-
-    // Compute font size immediately from params so there's no flash on load
-    const bw = fw || window.innerWidth  || 800;
-    const bh = fh || window.innerHeight || 450;
-    const raw = Math.min(bw * 0.014, bh * 0.025);
-    s.setProperty('--base-font', Math.max(8, Math.min(14, raw)) + 'px');
+    if (w) s.width  = Math.max(200, +w) + 'px';
+    if (h) s.height = Math.max(100, +h) + 'px';
 
     const d = parseFloat(sp.get('dur'));
     if (d > 0) window._initDur = d;
@@ -30,6 +21,9 @@
 </script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Force form elements to inherit the cascade — browsers don't do this by default */
+  button, input, select, textarea { font: inherit; }
 
   :root {
     --bg:        #1a1a1a;
@@ -40,27 +34,26 @@
     --accent:    #c8902a;   /* amber/gold */
     --accent-lo: #7a5418;   /* dim gold for inset buttons */
     --text:      #d0d0d0;
-    --muted:     #686868;
+    --muted:     #aaaaaa;
     --ok:        #c8902a;   /* gold for "playing" state too */
     --warn:      #c8902a;
     --red:       #cc4444;
   }
 
-  html { font-size: var(--base-font, 12px); }
+  html { font-size: 12px; }
 
   html, body {
     width: 100%; height: 100%;
     background: var(--bg);
     color: var(--text);
     font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
-    font-size: 1rem;
     overflow: hidden;
   }
 
   /* ── Two-column grid ── */
   .layout {
     display: grid;
-    grid-template-columns: 2fr 3fr;
+    grid-template-columns: 200px 1fr;
     grid-template-rows: 1fr;
     align-items: stretch;
     gap: 0.4em;
@@ -87,7 +80,11 @@
     align-self: stretch;
   }
 
-  /* ── Cards — inset panel look ── */
+  /* Left column: Source 45%, FRFT Parameters 55% */
+  .left-col .card:first-child { flex: 45; }
+  .left-col .card:last-child  { flex: 55; }
+
+  /* ── Cards — inset panel, flex column ── */
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -95,23 +92,42 @@
     padding: 0.55em 0.75em;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.03),
                 0 1px 3px rgba(0,0,0,0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+    min-height: 0;
   }
 
-  .card h2 {
+  .card h1 {
     font-size: 0.65em; font-weight: 700;
     color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.10em;
-    margin-bottom: 0.6em;
+    flex-shrink: 0; flex-grow: 0;  /* always its natural height, never part of row division */
   }
 
-  /* ── Form rows ── */
-  .row { display: flex; align-items: center; gap: 0.45em; margin-bottom: 0.45em; min-width: 0; }
-  .row:last-child { margin-bottom: 0; }
-  label.lbl { width: 5em; flex-shrink: 0; color: var(--muted); font-size: 0.82em; letter-spacing: 0.02em; }
+  /* rows-wrap takes all remaining card height after the h2 */
+  .rows-wrap {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    gap: 0.3em;
+  }
+
+  /* ── Form rows — each takes an equal share of rows-wrap height ── */
+  .row {
+    display: flex; align-items: stretch;
+    gap: 0.45em; min-width: 0; min-height: 0;
+    flex: 1;
+  }
+  /* Labels vertically centre their text inside the stretched row */
+  label.lbl {
+    width: 5em; flex-shrink: 0;
+    color: var(--muted); font-size: 0.82em; letter-spacing: 0.02em;
+    display: flex; align-items: center;
+  }
 
   select, input[type="file"] {
     flex: 1; min-width: 0;
-    height: 1.8em;
+    height: 100%;              /* fill the row height reliably across browsers */
     background: var(--bg);
     border: 1px solid var(--border2);
     border-radius: 3px;
@@ -126,30 +142,31 @@
 
   input[type="number"] {
     flex-shrink: 0;
-    height: 1.8em;
+    height: 100%;              /* fill the row height reliably across browsers */
     background: var(--bg);
     border: 1px solid var(--border2);
     border-radius: 3px;
-    color: var(--accent);
+    color: var(--text);
     font-size: 0.88em; font-weight: 700;
     font-variant-numeric: tabular-nums;
-    padding: 0 0.3em;
+    padding: 0 0.45em;
     outline: none;
-    text-align: right;
+    text-align: left;
+    -webkit-appearance: none;
     -moz-appearance: textfield;
+    appearance: textfield;
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
   }
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
   input[type="number"]:focus { border-color: var(--accent); }
 
-  #alphaNum { width: 4em; }
   #freqNum  { width: 4.5em; }
   #durNum   { width: 3.5em; }
 
   /* ── Buttons ── */
   button {
-    height: 1.6em;
+    height: 100%;              /* fills the flex row */
     padding: 0 0.75em;
     border-radius: 3px;
     font-size: 0.82em; font-weight: 700; letter-spacing: 0.03em;
@@ -163,6 +180,7 @@
 
   .controls-row button { flex-shrink: 0; }
   #status               { flex-shrink: 0; }
+  #playBtn              { width: 2.5em; justify-content: center; }
   button:disabled { opacity: .3; cursor: default; }
 
   /* Gold-bordered play buttons */
@@ -192,28 +210,46 @@
   }
   #status.err { color: var(--red); }
 
-  /* ── FRFT button progress-fill + pulse ── */
-  @keyframes frft-pulse {
-    0%, 100% { width:  6%; opacity: 0.4; }
-    50%       { width: 45%; opacity: 0.7; }
+  /* ── Source / FRFT toggle tabs ── */
+  .tab-group { display: flex; flex-shrink: 0; }
+  .tab {
+    height: 100%; padding: 0 0.7em;
+    background: var(--surface2);
+    color: var(--muted);
+    border: 1px solid var(--border2);
+    border-radius: 0;
+    font-size: 0.80em; font-weight: 600;
+    cursor: pointer;
+  }
+  .tab:first-child { border-radius: 3px; }
+  .tab:last-child  { border-radius: 3px; }
+  .tab.active {
+    background: var(--accent-lo);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   /* ── Right-column pieces ── */
   .controls-row {
     display: flex;
-    align-items: center;
+    align-items: stretch;      /* children fill the row height */
     gap: 0.4em;
-    flex-shrink: 0;
+    flex: 1; min-height: 0;    /* shares right-col height with spec-area */
   }
 
-  .spectrum-bar {
-    flex: 1; min-width: 0;
-    align-self: stretch;
-    position: relative;
+  /* Make controls-row children (buttons, tabs, status) centre their content */
+  .controls-row > *, .tab { display: flex; align-items: center; }
+
+  /* ── Spectrum + spectrogram side-by-side ── */
+  .spec-area {
+    flex: 6; min-height: 0;    /* ~6× taller than controls-row */
+    display: flex;
+    gap: 0.4em;
   }
-  .spectrum-bar canvas {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
+
+  #spectrumCanvas {
+    flex-shrink: 0;
+    width: 2.5em;
     display: block;
     border-radius: 3px;
     background: var(--bg);
@@ -222,7 +258,7 @@
   }
 
   #specWrap {
-    flex: 1; min-height: 0;
+    flex: 1; min-height: 0; min-width: 0;
     position: relative;
   }
   #specWrap canvas {
@@ -245,64 +281,69 @@
 
     <!-- Source -->
     <div class="card">
-      <h2>Source</h2>
-      <!-- Row 1: source type (full width) -->
-      <div class="row">
-        <select id="srcType">
-          <option value="sine">Sine wave</option>
-          <option value="sweep">Sweep 200→4000 Hz</option>
-          <option value="file">Audio file</option>
-        </select>
-      </div>
-      <!-- Row 2: duration + frequency on one line (sine/sweep only) -->
-      <div class="row" id="durRow">
-        <label class="lbl">Duration</label>
-        <input type="number" id="durNum" min="1" max="600" step="1" value="3">
-        <span style="color:var(--muted);font-size:0.85em;white-space:nowrap">s</span>
-        <span id="freqRow" style="display:inline-flex;align-items:center;gap:0.5em;flex:1;min-width:0">
-          <label class="lbl" style="width:auto;flex-shrink:0">Freq</label>
-          <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
-          <span id="freqHz" style="color:var(--muted);font-size:0.85em;white-space:nowrap">Hz</span>
-        </span>
-      </div>
-      <!-- Row 4: file picker (file mode only) -->
-      <div class="row" id="fileRow" style="display:none">
-        <input type="file" id="fileInput" accept="audio/*">
+      <h1>Source</h1>
+      <div class="rows-wrap">
+        <!-- Row 1: source type -->
+        <div class="row">
+          <label class="lbl">Type</label>
+          <select id="srcType">
+            <option value="sine">Sine wave</option>
+            <option value="sweep">Sweep 200→4000 Hz</option>
+            <option value="file">Audio file</option>
+          </select>
+        </div>
+        <!-- Row 2: duration + frequency on one line (sine/sweep only) -->
+        <div class="row" id="durRow">
+          <label class="lbl">Duration</label>
+          <input type="number" id="durNum" min="1" max="600" step="1" value="3">
+          <span id="freqRow" style="display:flex;align-items:stretch;gap:0.5em;flex:1;min-width:0">
+            <label class="lbl" style="width:auto;flex-shrink:0">Freq</label>
+            <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
+          </span>
+        </div>
+        <!-- Row 3: file picker (file mode only) -->
+        <div class="row" id="fileRow" style="display:none">
+          <input type="file" id="fileInput" accept="audio/*">
+        </div>
       </div>
     </div>
 
     <!-- FRFT Parameters -->
     <div class="card">
-      <h2>FRFT Parameters</h2>
-      <div class="row">
-        <label class="lbl">α (order)</label>
-        <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="0.10">
-      </div>
-      <div class="row">
-        <label class="lbl">Block size</label>
-        <select id="bufSizeSel">
-          <option value="16">16</option>
-          <option value="32">32</option>
-          <option value="64">64</option>
-          <option value="128">128</option>
-          <option value="256">256</option>
-          <option value="512">512</option>
-          <option value="1024">1024</option>
-          <option value="2048">2048</option>
-          <option value="4096">4096</option>
-          <option value="8192">8192</option>
-          <option value="16384" selected>16384</option>
-          <option value="32768">32768</option>
-          <option value="65536">65536</option>
-          <option value="131072">131072</option>
-          <option value="all">All</option>
-        </select>
-        <label class="lbl" style="width:auto;flex-shrink:0">Overlap</label>
-        <select id="overlap" style="flex:0 0 auto; width:58px">
-          <option value="1">×1</option>
-          <option value="2">×2</option>
-          <option value="4" selected>×4</option>
-        </select>
+      <h1>FRFT Parameters</h1>
+      <div class="rows-wrap">
+        <div class="row">
+          <label class="lbl">α (order)</label>
+          <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="0.10" style="flex:1;width:auto">
+        </div>
+        <div class="row">
+          <label class="lbl">Block size</label>
+          <select id="bufSizeSel">
+            <option value="16">16</option>
+            <option value="32">32</option>
+            <option value="64">64</option>
+            <option value="128">128</option>
+            <option value="256">256</option>
+            <option value="512">512</option>
+            <option value="1024">1024</option>
+            <option value="2048">2048</option>
+            <option value="4096">4096</option>
+            <option value="8192">8192</option>
+            <option value="16384" selected>16384</option>
+            <option value="32768">32768</option>
+            <option value="65536">65536</option>
+            <option value="131072">131072</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="lbl">Overlap</label>
+          <select id="overlap">
+            <option value="1">×1</option>
+            <option value="2">×2</option>
+            <option value="4" selected>×4</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -311,28 +352,23 @@
   <!-- ── Right column ─────────────────────────────────────────── -->
   <div class="right-col">
 
-    <!-- Playback buttons + spectrum bar, all on one line -->
+    <!-- Playback controls -->
     <div class="controls-row">
-      <button class="btn-ok"      id="playDryBtn" disabled>▶ Source</button>
-      <button class="btn-ok"      id="playWetBtn" disabled
-              style="position:relative;overflow:hidden">
-        <span id="frftFill"
-              style="position:absolute;left:0;top:0;bottom:0;width:0%;
-                     background:rgba(200,144,42,0.22);pointer-events:none;
-                     transition:width .1s linear"></span>
-        <span id="playWetLabel">▶ FRFT</span>
-      </button>
-      <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
-      <span id="status">loading…</span>
-      <!-- spectrum fills remaining width of this row -->
-      <div class="spectrum-bar">
-        <canvas id="spectrumCanvas" width="600" height="44"></canvas>
+      <button class="btn-ok" id="playBtn" disabled>▶</button>
+      <div class="tab-group">
+        <button class="tab" id="tabDry">Source</button>
+        <button class="tab active" id="tabWet">FRFT</button>
       </div>
+      <span id="status">loading…</span>
+      <button class="btn-neutral" id="downloadBtn" disabled style="margin-left:auto">⬇</button>
     </div>
 
-    <!-- Spectrogram — fills remaining height, resized by ResizeObserver -->
-    <div id="specWrap">
-      <canvas id="specCanvas" width="1200" height="400"></canvas>
+    <!-- Vertical spectrum strip + spectrogram side by side -->
+    <div class="spec-area">
+      <canvas id="spectrumCanvas" width="40" height="400"></canvas>
+      <div id="specWrap">
+        <canvas id="specCanvas" width="1200" height="400"></canvas>
+      </div>
     </div>
 
   </div><!-- /right-col -->
@@ -375,20 +411,19 @@ const fileInput    = document.getElementById('fileInput');
 if (window._initDur) {
   durNum.value = Math.max(1, Math.min(600, window._initDur));
 }
-const alphaNum     = document.getElementById('alphaNum');
-const bufSizeSel   = document.getElementById('bufSizeSel');
-const overlapSel   = document.getElementById('overlap');
-const statusEl     = document.getElementById('status');
-const playDryBtn   = document.getElementById('playDryBtn');
-const playWetBtn   = document.getElementById('playWetBtn');
-const playWetLabel = document.getElementById('playWetLabel');
-const frftFill     = document.getElementById('frftFill');
-const downloadBtn  = document.getElementById('downloadBtn');
+const alphaNum    = document.getElementById('alphaNum');
+const bufSizeSel  = document.getElementById('bufSizeSel');
+const overlapSel  = document.getElementById('overlap');
+const statusEl    = document.getElementById('status');
+const playBtn     = document.getElementById('playBtn');
+const tabDry      = document.getElementById('tabDry');
+const tabWet      = document.getElementById('tabWet');
+const downloadBtn = document.getElementById('downloadBtn');
 const specCanvas      = document.getElementById('specCanvas');
 const spectrumCanvas  = document.getElementById('spectrumCanvas');
 const specWrap        = document.getElementById('specWrap');
 
-// ── ResizeObserver: keep specCanvas pixel-crisp as container resizes ──────────
+// ── ResizeObserver: keep canvases pixel-crisp as container resizes ────────────
 const specRO = new ResizeObserver(() => {
   const rect = specWrap.getBoundingClientRect();
   const w = Math.max(1, Math.floor(rect.width));
@@ -398,6 +433,12 @@ const specRO = new ResizeObserver(() => {
     specCanvas.height = h;
     if (wetSTFT) renderActiveTab();
     else clearSpectrogram();
+  }
+  // Keep vertical spectrum strip pixel-dimensions in sync
+  const sw = Math.max(1, Math.floor(spectrumCanvas.getBoundingClientRect().width));
+  if (spectrumCanvas.width !== sw || spectrumCanvas.height !== h) {
+    spectrumCanvas.width  = sw;
+    spectrumCanvas.height = h;
   }
 });
 specRO.observe(specWrap);
@@ -418,8 +459,7 @@ function scheduleProcess(immediate = false) {
   clearSpectrum();
   setFrftProgress(0);
   downloadBtn.disabled = true;
-  playDryBtn.disabled  = true;
-  playWetBtn.disabled  = true;
+  playBtn.disabled     = true;
   wetBuf = null; trimmedDryBuf = null;
   setStatus('pending…');
   if (immediate) autoProcess();
@@ -496,12 +536,11 @@ function handleWorkerMessage(e) {
     renderActiveTab();
 
     setFrftProgress(1);
-    playDryBtn.disabled = false; playDryBtn.className = 'btn-ok';
-    playWetBtn.disabled = false; playWetBtn.className = 'btn-ok';
-    playDryBtn.textContent   = '▶ Source';
-    playWetLabel.textContent = '▶ FRFT';
+    playBtn.disabled     = false;
+    playBtn.className    = 'btn-ok';
+    playBtn.textContent  = '▶';
     downloadBtn.disabled = false;
-    setStatus('done', 'ok');
+    setStatus('');
     return;
   }
 
@@ -558,18 +597,35 @@ function renderActiveTab() {
   if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin);
 }
 
-// ── Play buttons also act as tab selectors ───────────────────────────────────
-playDryBtn.addEventListener('click', () => {
-  activeTab = 'dry';
+function setActiveTabs(tab) {
+  activeTab = tab;
+  tabDry.classList.toggle('active', tab === 'dry');
+  tabWet.classList.toggle('active', tab === 'wet');
   renderActiveTab();
-  if (playingWhich === 'dry') stopPlayback();
-  else if (trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry');
+}
+
+// ── Play button ───────────────────────────────────────────────────────────────
+playBtn.addEventListener('click', () => {
+  if (playingWhich !== null) {
+    stopPlayback();
+  } else {
+    const buf = activeTab === 'dry' ? trimmedDryBuf : wetBuf;
+    if (buf) startPlayback(buf, activeTab);
+  }
 });
-playWetBtn.addEventListener('click', () => {
-  activeTab = 'wet';
-  renderActiveTab();
-  if (playingWhich === 'wet') stopPlayback();
-  else if (wetBuf) startPlayback(wetBuf, 'wet');
+
+// ── Tab switchers (switch view; if playing, continue from same position) ─────
+tabDry.addEventListener('click', () => {
+  const elapsed = playingWhich !== null
+    ? Math.max(0, audioCtx.currentTime - playbackStartTime) : null;
+  setActiveTabs('dry');
+  if (elapsed !== null && trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry', elapsed);
+});
+tabWet.addEventListener('click', () => {
+  const elapsed = playingWhich !== null
+    ? Math.max(0, audioCtx.currentTime - playbackStartTime) : null;
+  setActiveTabs('wet');
+  if (elapsed !== null && wetBuf) startPlayback(wetBuf, 'wet', elapsed);
 });
 
 // ── Download ──────────────────────────────────────────────────────────────────
@@ -588,21 +644,11 @@ function setStatus(text, cls = '') {
 
 function setFrftProgress(frac) {
   if (frac <= 0) {
-    frftFill.style.transition = 'none';
-    frftFill.style.width      = '';
-    frftFill.style.animation  = 'frft-pulse 1.2s ease-in-out infinite';
-    playWetLabel.textContent  = '⋯';
+    setStatus('processing…');
   } else if (frac < 1) {
-    frftFill.style.animation  = '';
-    frftFill.style.transition = 'width .1s linear';
-    frftFill.style.width      = (frac * 100).toFixed(1) + '%';
-    playWetLabel.textContent  = `⋯ ${Math.round(frac * 100)}%`;
-  } else {
-    frftFill.style.animation  = '';
-    frftFill.style.transition = 'none';
-    frftFill.style.width      = '0%';
-    playWetLabel.textContent  = '▶ FRFT';
+    setStatus(`processing… ${Math.round(frac * 100)}%`);
   }
+  // frac === 1 is handled by the 'result' handler which sets its own status
 }
 
 function clearSpectrogram() {
@@ -670,27 +716,22 @@ function updateSpectrum() {
   const W     = spectrumCanvas.width;
   const H     = spectrumCanvas.height;
 
-  function sampleDB(px) {
-    const kf  = px / (W - 1) * topBin;
-    const lo  = Math.floor(kf);
-    const hi  = Math.min(lo + 1, NUM_BINS - 1);
-    const mix = kf - lo;
-    return magDB[frameIdx * NUM_BINS + lo] * (1 - mix) +
-           magDB[frameIdx * NUM_BINS + hi] * mix;
-  }
-
   const imgData = ctx2d.createImageData(W, H);
   const px4     = imgData.data;
 
-  for (let x = 0; x < W; x++) {
-    const db     = sampleDB(x);
-    const t      = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+  // Vertical strip: y = row (0 = top = high freq, H-1 = bottom = low freq),
+  // x = amplitude bar growing from the RIGHT edge toward the left,
+  // so energy is visually adjacent to the spectrogram on the right.
+  for (let y = 0; y < H; y++) {
+    const ki  = Math.round((1 - (y + 0.5) / H) * topBin);
+    const db  = magDB[frameIdx * NUM_BINS + Math.min(ki, NUM_BINS - 1)];
+    const t   = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
     const [r, g, b] = spectrogramColor(t);
-    const barTop = Math.round((1 - t) * (H - 1));
+    const barW = Math.round(t * W);   // how many pixels from the right are lit
 
-    for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
       const idx = (y * W + x) * 4;
-      if (y >= barTop) {
+      if (x >= W - barW) {
         px4[idx] = r; px4[idx+1] = g; px4[idx+2] = b; px4[idx+3] = 255;
       } else {
         px4[idx] = 10; px4[idx+1] = 10; px4[idx+2] = 10; px4[idx+3] = 255;
@@ -706,12 +747,21 @@ function stopPlayback() {
   if (audioCtx)  { audioCtx.close(); audioCtx = null; }
   masterGain   = null;
   playingWhich = null;
-  playDryBtn.textContent   = '▶ Source'; playDryBtn.className = 'btn-ok';
-  playWetLabel.textContent = '▶ FRFT';   playWetBtn.className = 'btn-ok';
+  playBtn.textContent = '▶';
+  playBtn.className   = 'btn-ok';
 }
 
-function startPlayback(samples, which) {
-  stopPlayback();
+function startPlayback(samples, which, offset = 0) {
+  // Tear down any existing playback without resetting spectrum/button yet
+  if (activeSrc) { try { activeSrc.stop(); } catch {} activeSrc = null; }
+  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  masterGain = null;
+
+  // Clamp offset to valid range
+  const maxOffset = samples.length / sampleRate;
+  offset = Math.max(0, Math.min(offset, maxOffset - 0.01));
+
   audioCtx   = new AudioContext({ sampleRate });
   masterGain = audioCtx.createGain();
   masterGain.gain.value = 0.5;
@@ -723,20 +773,17 @@ function startPlayback(samples, which) {
   activeSrc        = audioCtx.createBufferSource();
   activeSrc.buffer = audioBuf;
   activeSrc.connect(masterGain);
-  activeSrc.start();
+  activeSrc.start(0, offset);
   activeSrc.onended = stopPlayback;
 
   const stft = which === 'dry' ? drySTFT : wetSTFT;
-  playbackStartTime   = audioCtx.currentTime;
+  playbackStartTime   = audioCtx.currentTime - offset;
   playbackTotalFrames = stft ? stft.numFrames : Math.ceil(samples.length / STFT_HOP);
   playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
 
-  playingWhich = which;
-  if (which === 'dry') {
-    playDryBtn.textContent   = '■ Source'; playDryBtn.className = 'btn-playing';
-  } else {
-    playWetLabel.textContent = '■ FRFT';   playWetBtn.className = 'btn-playing';
-  }
+  playingWhich      = which;
+  playBtn.textContent = '■';
+  playBtn.className   = 'btn-playing';
 }
 
 // ── WAV download ──────────────────────────────────────────────────────────────
@@ -906,16 +953,6 @@ function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
 
 
 
-// ── Dynamic font size (responds to both ?w/?h params and live iframe resizes) ──
-function updateBaseFont() {
-  const el  = document.documentElement;
-  const w   = el.clientWidth  || window.innerWidth  || 800;
-  const h   = el.clientHeight || window.innerHeight || 450;
-  const raw = Math.min(w * 0.014, h * 0.025);
-  el.style.setProperty('--base-font', Math.max(8, Math.min(14, raw)) + 'px');
-}
-updateBaseFont();
-new ResizeObserver(updateBaseFont).observe(document.documentElement);
 
 // ── Worker init (fires scheduleProcess on 'ready') ────────────────────────────
 (function initWorker() {
