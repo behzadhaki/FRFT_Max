@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embed Tester</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #f0f0f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #333;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  h1 { font-size: 16px; font-weight: 600; color: #111; }
+  p  { color: #666; font-size: 12px; }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+
+  .controls label { font-size: 12px; color: #555; }
+
+  .controls input[type="number"] {
+    width: 72px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 4px 7px;
+    font-size: 13px;
+    outline: none;
+  }
+  .controls input[type="number"]:focus { border-color: #4a9eff; }
+
+  .controls button {
+    padding: 5px 14px;
+    background: #4a9eff;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .controls button:hover { background: #2d84f0; }
+
+  .frame-wrap {
+    border: 2px dashed #bbb;
+    border-radius: 6px;
+    background: #fff;
+    display: inline-block; /* shrink-wrap to iframe size */
+    line-height: 0;        /* no extra gap below iframe */
+  }
+
+  iframe {
+    display: block;
+    border: none;
+  }
+
+  .url-display {
+    font-size: 11px;
+    color: #888;
+    font-family: monospace;
+    background: #f7f7f7;
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    padding: 5px 10px;
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+
+<h1>embed.html — iframe tester</h1>
+<p>Adjust width / height and hit Apply to reload the embed with matching <code>?w=&amp;h=</code> params.</p>
+
+<div class="controls">
+  <label>Width</label>
+  <input type="number" id="wInput" value="900" min="200" step="10">
+  <label>Height</label>
+  <input type="number" id="hInput" value="420" min="100" step="10">
+  <button id="applyBtn">Apply</button>
+</div>
+
+<div class="url-display" id="urlDisplay"></div>
+
+<div class="frame-wrap" id="frameWrap">
+  <iframe id="embedFrame" width="900" height="420"></iframe>
+</div>
+
+<script>
+  const wInput    = document.getElementById('wInput');
+  const hInput    = document.getElementById('hInput');
+  const applyBtn  = document.getElementById('applyBtn');
+  const frame     = document.getElementById('embedFrame');
+  const frameWrap = document.getElementById('frameWrap');
+  const urlDisplay = document.getElementById('urlDisplay');
+
+  function apply() {
+    const w = Math.max(200, parseInt(wInput.value) || 900);
+    const h = Math.max(100, parseInt(hInput.value) || 420);
+    wInput.value = w;
+    hInput.value = h;
+
+    const url = `embed.html?w=${w}&h=${h}`;
+    frame.width  = w;
+    frame.height = h;
+    frame.src    = url;
+    urlDisplay.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
+  }
+
+  applyBtn.addEventListener('click', apply);
+
+  // Allow Enter in either input
+  [wInput, hInput].forEach(el => el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') apply();
+  }));
+
+  // Load on first paint
+  apply();
+</script>
+</body>
+</html>

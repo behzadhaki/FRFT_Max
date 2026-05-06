@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRFT Audio</title>
+<script>
+  window._wasmCacheBust = Date.now();
+  // Apply ?w=NNN&h=NNN&dur=NNN URL params and set initial font size
+  (function () {
+    const sp = new URLSearchParams(location.search);
+    const w  = sp.get('w'), h = sp.get('h');
+    const el = document.documentElement;
+    const s  = el.style;
+
+    const fw = w ? Math.max(200, +w) : null;
+    const fh = h ? Math.max(100, +h) : null;
+    if (fw) s.width  = fw + 'px';
+    if (fh) s.height = fh + 'px';
+
+    // Compute font size immediately from params so there's no flash on load
+    const bw = fw || window.innerWidth  || 800;
+    const bh = fh || window.innerHeight || 450;
+    const raw = Math.min(bw * 0.014, bh * 0.025);
+    s.setProperty('--base-font', Math.max(8, Math.min(14, raw)) + 'px');
+
+    const d = parseFloat(sp.get('dur'));
+    if (d > 0) window._initDur = d;
+  })();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111;
+    --surface: #1c1c1e;
+    --border:  #2c2c2e;
+    --accent:  #4a9eff;
+    --text:    #e5e5e7;
+    --muted:   #8e8e93;
+    --ok:      #34c759;
+    --warn:    #ff9f0a;
+  }
+
+  /* --base-font is set by JS (head script + ResizeObserver) so it tracks
+     the HTML element's actual rendered size — works for both ?w/?h params
+     and plain iframe resizes. */
+  html {
+    font-size: var(--base-font, 12px);
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 1rem;
+    overflow: hidden;
+  }
+
+  /* ── Two-column grid ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    grid-template-rows: 1fr;
+    align-items: stretch;
+    gap: 0.45em;
+    padding: 0.45em;
+    height: 100%;
+  }
+
+  .left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
+    align-self: stretch;
+  }
+
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    min-width: 0;
+    min-height: 0;
+    align-self: stretch;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.7em;
+    padding: 0.65em 0.85em;
+  }
+
+  /* Header row inside a card: title + optional action button */
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.65em;
+  }
+  .card-header h2 { margin-bottom: 0; }
+
+  .card h2, .card-header h2 {
+    font-size: 0.75em; font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.07em;
+  }
+  .card > h2 { margin-bottom: 0.65em; }
+
+  /* ── Form rows ── */
+  .row { display: flex; align-items: center; gap: 0.5em; margin-bottom: 0.5em; min-width: 0; }
+  .row:last-child { margin-bottom: 0; }
+  label.lbl { width: 5.5em; flex-shrink: 0; color: var(--muted); font-size: 0.9em; }
+
+  select, input[type="file"] {
+    flex: 1;
+    min-width: 0;
+    height: 2em;             /* explicit em height overrides browser defaults */
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 0 0.5em;
+    font-size: 0.9em;
+    outline: none;
+    cursor: pointer;
+  }
+  select:focus { border-color: var(--accent); }
+
+  input[type="number"] {
+    flex-shrink: 0;
+    height: 2em;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 0.9em; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 0 0.35em;
+    outline: none;
+    text-align: right;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type="number"]:focus { border-color: var(--accent); }
+
+  /* fixed-character widths scale with the dynamic base font */
+  #alphaNum { width: 4em; }
+  #freqNum  { width: 4.5em; }
+  #durNum   { width: 3.5em; }
+
+  /* ── Buttons ── */
+  button {
+    height: 2em;
+    padding: 0 1em;          /* vertical space comes from height, not padding */
+    border-radius: 7px; border: none;
+    font-size: 1em; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+    white-space: nowrap;
+  }
+
+  /* Controls-row buttons must not shrink — they have overflow:hidden which
+     clips text when the flex engine squishes them */
+  .controls-row button { flex-shrink: 0; }
+  #status               { flex-shrink: 0; }
+  button:disabled { opacity: .35; cursor: default; }
+  .btn-neutral { background: var(--border); color: var(--text); }
+  .btn-ok      { background: #1a3a24; color: var(--ok);   border: 1px solid var(--ok); }
+  .btn-playing { background: #3a1a1a; color: #ff453a;    border: 1px solid #ff453a; }
+
+  /* ── Quick-alpha buttons ── */
+  .alphaRow { display: flex; gap: 0.3em; margin-top: 0.4em; }
+  .alphaBtn {
+    flex: 1; height: 1.8em; padding: 0; font-size: 0.85em; font-weight: 600;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 5px; cursor: pointer; color: var(--muted);
+  }
+  .alphaBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Status pill ── */
+  #status {
+    font-size: 0.85em; padding: 0.2em 0.6em;
+    border-radius: 16px; border: 1px solid var(--border);
+    color: var(--muted); white-space: nowrap;
+  }
+  #status.ok   { color: var(--ok);   border-color: var(--ok); }
+  #status.busy { color: var(--warn); border-color: var(--warn); }
+  #status.err  { color: #ff453a;     border-color: #ff453a; }
+
+  /* ── FRFT button progress-fill + pulse ── */
+  @keyframes frft-pulse {
+    0%, 100% { width:  6%; opacity: 0.55; }
+    50%       { width: 45%; opacity: 0.90; }
+  }
+
+  /* ── Right-column pieces ── */
+  .controls-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    flex-shrink: 0;
+  }
+
+  /* Spectrum bar lives inside .controls-row and fills leftover width */
+  .spectrum-bar {
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;  /* match the button height automatically */
+    position: relative;
+  }
+  .spectrum-bar canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: block;
+    border-radius: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+
+  /* Spectrogram fills remaining height */
+  #specWrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+  }
+  #specWrap canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: block;
+    border-radius: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Left column ──────────────────────────────────────────── -->
+  <div class="left-col">
+
+    <!-- Source -->
+    <div class="card">
+      <h2>Source</h2>
+      <!-- Row 1: source type (full width) -->
+      <div class="row">
+        <select id="srcType">
+          <option value="sine">Sine wave</option>
+          <option value="sweep">Sweep 200→4000 Hz</option>
+          <option value="file">Audio file</option>
+        </select>
+      </div>
+      <!-- Row 2: duration (sine/sweep only) -->
+      <div class="row" id="durRow">
+        <label class="lbl">Duration</label>
+        <input type="number" id="durNum" min="1" max="600" step="1" value="10">
+        <span style="color:var(--muted);font-size:0.85em;white-space:nowrap">s</span>
+      </div>
+      <!-- Row 3: frequency (sine only) -->
+      <div class="row" id="freqRow">
+        <label class="lbl">Frequency</label>
+        <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
+        <span id="freqHz" style="color:var(--muted);font-size:0.85em;white-space:nowrap">Hz</span>
+      </div>
+      <!-- Row 4: file picker (file mode only) -->
+      <div class="row" id="fileRow" style="display:none">
+        <input type="file" id="fileInput" accept="audio/*">
+      </div>
+    </div>
+
+    <!-- FRFT Parameters -->
+    <div class="card">
+      <h2>FRFT Parameters</h2>
+      <div class="row">
+        <label class="lbl">α (order)</label>
+        <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="1">
+      </div>
+      <div class="alphaRow">
+        <button class="alphaBtn" data-a="0">0</button>
+        <button class="alphaBtn" data-a="1">1 (FFT)</button>
+        <button class="alphaBtn" data-a="2">2 (rev)</button>
+        <button class="alphaBtn" data-a="3">3 (iFFT)</button>
+      </div>
+      <div style="height:0.5em"></div>
+      <div class="row">
+        <label class="lbl">Block size</label>
+        <select id="bufSizeSel">
+          <option value="16">16</option>
+          <option value="32">32</option>
+          <option value="64">64</option>
+          <option value="128">128</option>
+          <option value="256">256</option>
+          <option value="512">512</option>
+          <option value="1024">1024</option>
+          <option value="2048">2048</option>
+          <option value="4096" selected>4096</option>
+          <option value="8192">8192</option>
+          <option value="16384">16384</option>
+          <option value="32768">32768</option>
+          <option value="65536">65536</option>
+          <option value="131072">131072</option>
+          <option value="all">All</option>
+        </select>
+        <select id="overlap" style="flex:0 0 auto; width:58px">
+          <option value="1">×1</option>
+          <option value="2">×2</option>
+          <option value="4" selected>×4</option>
+        </select>
+      </div>
+    </div>
+
+  </div><!-- /left-col -->
+
+  <!-- ── Right column ─────────────────────────────────────────── -->
+  <div class="right-col">
+
+    <!-- Playback buttons + spectrum bar, all on one line -->
+    <div class="controls-row">
+      <button class="btn-ok"      id="playDryBtn" disabled>▶ Source</button>
+      <button class="btn-ok"      id="playWetBtn" disabled
+              style="position:relative;overflow:hidden">
+        <span id="frftFill"
+              style="position:absolute;left:0;top:0;bottom:0;width:0%;
+                     background:rgba(52,199,89,0.25);pointer-events:none;
+                     transition:width .1s linear"></span>
+        <span id="playWetLabel">▶ FRFT</span>
+      </button>
+      <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
+      <span id="status">loading…</span>
+      <!-- spectrum fills remaining width of this row -->
+      <div class="spectrum-bar">
+        <canvas id="spectrumCanvas" width="600" height="44"></canvas>
+      </div>
+    </div>
+
+    <!-- Spectrogram — fills remaining height, resized by ResizeObserver -->
+    <div id="specWrap">
+      <canvas id="specCanvas" width="1200" height="400"></canvas>
+    </div>
+
+  </div><!-- /right-col -->
+
+</div><!-- /layout -->
+
+<script>
+// ── Worker + job tracking ─────────────────────────────────────────────────────
+let frftWorker   = null;
+let workerReady  = false;
+let currentJobId = 0;
+
+let dryBuf        = null;
+let wetBuf        = null;
+let trimmedDryBuf = null;
+let sampleRate    = 44100;
+
+// Spectrogram state
+let drySTFT      = null;
+let wetSTFT      = null;
+let sharedTopBin = 0;
+let activeTab    = 'wet';
+
+// Playback state
+let audioCtx            = null;
+let activeSrc           = null;
+let masterGain          = null;
+let playingWhich        = null;
+let playheadInterval    = null;
+let playbackStartTime   = 0;
+let playbackTotalFrames = 0;
+
+// ── DOM ───────────────────────────────────────────────────────────────────────
+const srcType      = document.getElementById('srcType');
+const durNum       = document.getElementById('durNum');
+const freqNum      = document.getElementById('freqNum');
+const fileInput    = document.getElementById('fileInput');
+
+// Apply ?dur= URL param if provided
+if (window._initDur) {
+  durNum.value = Math.max(1, Math.min(600, window._initDur));
+}
+const alphaNum     = document.getElementById('alphaNum');
+const bufSizeSel   = document.getElementById('bufSizeSel');
+const overlapSel   = document.getElementById('overlap');
+const statusEl     = document.getElementById('status');
+const playDryBtn   = document.getElementById('playDryBtn');
+const playWetBtn   = document.getElementById('playWetBtn');
+const playWetLabel = document.getElementById('playWetLabel');
+const frftFill     = document.getElementById('frftFill');
+const downloadBtn  = document.getElementById('downloadBtn');
+const specCanvas      = document.getElementById('specCanvas');
+const spectrumCanvas  = document.getElementById('spectrumCanvas');
+const specWrap        = document.getElementById('specWrap');
+
+// ── ResizeObserver: keep specCanvas pixel-crisp as container resizes ──────────
+const specRO = new ResizeObserver(() => {
+  const rect = specWrap.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height));
+  if (specCanvas.width !== w || specCanvas.height !== h) {
+    specCanvas.width  = w;
+    specCanvas.height = h;
+    if (wetSTFT) renderActiveTab();
+    else clearSpectrogram();
+  }
+});
+specRO.observe(specWrap);
+
+// ── Auto-processing: debounce + worker cancellation ──────────────────────────
+const DEBOUNCE_MS   = 400;
+let   debounceTimer = null;
+
+function invalidateSource() { dryBuf = null; scheduleProcess(); }
+function invalidateFRFT()   { scheduleProcess(); }
+
+function scheduleProcess(immediate = false) {
+  currentJobId++;
+  if (workerReady) frftWorker.postMessage({ type: 'cancel' });
+  clearTimeout(debounceTimer);
+  stopPlayback();
+  clearSpectrogram();
+  clearSpectrum();
+  setFrftProgress(0);
+  downloadBtn.disabled = true;
+  playDryBtn.disabled  = true;
+  playWetBtn.disabled  = true;
+  wetBuf = null; trimmedDryBuf = null;
+  setStatus('pending…');
+  if (immediate) autoProcess();
+  else debounceTimer = setTimeout(autoProcess, DEBOUNCE_MS);
+}
+
+async function autoProcess() {
+  if (!workerReady) { setStatus('Loading WASM…', 'busy'); return; }
+  const jobId = currentJobId;
+  try {
+    if (!dryBuf) {
+      if (srcType.value === 'file') {
+        if (!fileInput.files[0]) { setStatus('select a file ↑', ''); return; }
+        setStatus('Decoding…', 'busy');
+        dryBuf = await decodeFile(fileInput.files[0]);
+      } else {
+        sampleRate = 44100;
+        dryBuf = generateSignal(srcType.value, parseInt(durNum.value) || 10, sampleRate, parseInt(freqNum.value) || 440);
+      }
+      if (jobId !== currentJobId) return;
+    }
+    const alpha            = parseFloat(alphaNum.value);
+    const overlap          = parseInt(overlapSel.value);
+    const isAll            = bufSizeSel.value === 'all';
+    const bufSize          = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
+    const effectiveOverlap = isAll ? 1 : overlap;
+    setStatus('Processing…', 'busy');
+    frftWorker.postMessage({
+      type: 'process',
+      samples: dryBuf,
+      alpha, bufSize,
+      overlapFactor: effectiveOverlap,
+      jobId,
+    });
+  } catch (err) {
+    console.error(err);
+    setStatus(err.message || 'Error', 'err');
+  }
+}
+
+// ── Worker message handler ────────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
+
+  if (type === 'ready') {
+    workerReady = true;
+    scheduleProcess(true);
+    return;
+  }
+
+  if (type === 'progress') {
+    if (e.data.jobId === currentJobId) setFrftProgress(e.data.value);
+    return;
+  }
+
+  if (type === 'result') {
+    if (e.data.jobId !== currentJobId) return;
+
+    wetBuf = e.data.output;
+
+    // Trim dryBuf to the same OLA-valid window the worker used
+    const isAll            = bufSizeSel.value === 'all';
+    const bufSize          = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
+    const effectiveOverlap = isAll ? 1 : parseInt(overlapSel.value);
+    const H                = Math.max(1, Math.floor(bufSize / effectiveOverlap));
+    const trimAmt          = (effectiveOverlap - 1) * H;
+    trimmedDryBuf = trimAmt > 0 && dryBuf.length > 2 * trimAmt
+      ? dryBuf.slice(trimAmt, dryBuf.length - trimAmt)
+      : dryBuf;
+
+    drySTFT      = computeSTFT(trimmedDryBuf);
+    wetSTFT      = computeSTFT(wetBuf);
+    sharedTopBin = Math.max(drySTFT.topBin, wetSTFT.topBin);
+    renderActiveTab();
+
+    setFrftProgress(1);
+    playDryBtn.disabled = false; playDryBtn.className = 'btn-ok';
+    playWetBtn.disabled = false; playWetBtn.className = 'btn-ok';
+    playDryBtn.textContent   = '▶ Source';
+    playWetLabel.textContent = '▶ FRFT';
+    downloadBtn.disabled = false;
+    setStatus('done', 'ok');
+    return;
+  }
+
+  if (type === 'error') {
+    console.error('Worker error:', e.data.message);
+    setStatus(e.data.message || 'Worker error', 'err');
+  }
+}
+
+// ── Source type toggle ────────────────────────────────────────────────────────
+srcType.addEventListener('change', () => {
+  const isSine = srcType.value === 'sine';
+  const isFile = srcType.value === 'file';
+  document.getElementById('durRow').style.display   = isFile ? 'none' : '';
+  document.getElementById('freqRow').style.display  = isSine ? '' : 'none';
+  document.getElementById('fileRow').style.display  = isFile ? '' : 'none';
+  if (!isFile) invalidateSource();
+});
+
+// ── Duration controls ─────────────────────────────────────────────────────────
+durNum.addEventListener('change', () => {
+  durNum.value = Math.max(1, Math.min(600, parseInt(durNum.value) || 10));
+  invalidateSource();
+});
+
+// ── Frequency controls ────────────────────────────────────────────────────────
+freqNum.addEventListener('change', () => {
+  freqNum.value = Math.max(20, Math.min(20000, parseInt(freqNum.value) || 440));
+  invalidateSource();
+});
+
+// ── Alpha controls ────────────────────────────────────────────────────────────
+alphaNum.addEventListener('change', () => {
+  alphaNum.value = Math.max(0, Math.min(4, parseFloat(alphaNum.value) || 0)).toFixed(2);
+  invalidateFRFT();
+});
+document.querySelectorAll('.alphaBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    alphaNum.value = parseFloat(btn.dataset.a).toFixed(2);
+    invalidateFRFT();
+  });
+});
+
+// ── Block size + overlap ──────────────────────────────────────────────────────
+bufSizeSel.addEventListener('change', () => {
+  overlapSel.disabled = bufSizeSel.value === 'all';
+  invalidateFRFT();
+});
+overlapSel.addEventListener('change', invalidateFRFT);
+
+// ── File selection ────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', () => {
+  dryBuf = null;
+  scheduleProcess(true);
+});
+
+// ── Render whichever tab is active ───────────────────────────────────────────
+function renderActiveTab() {
+  const stft = activeTab === 'dry' ? drySTFT : wetSTFT;
+  if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin);
+}
+
+// ── Play buttons also act as tab selectors ───────────────────────────────────
+playDryBtn.addEventListener('click', () => {
+  activeTab = 'dry';
+  renderActiveTab();
+  if (playingWhich === 'dry') stopPlayback();
+  else if (trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry');
+});
+playWetBtn.addEventListener('click', () => {
+  activeTab = 'wet';
+  renderActiveTab();
+  if (playingWhich === 'wet') stopPlayback();
+  else if (wetBuf) startPlayback(wetBuf, 'wet');
+});
+
+// ── Download ──────────────────────────────────────────────────────────────────
+downloadBtn.addEventListener('click', () => {
+  if (!trimmedDryBuf || !wetBuf) return;
+  const alpha = parseFloat(alphaNum.value).toFixed(2);
+  downloadWAV(trimmedDryBuf, sampleRate, 'source.wav');
+  downloadWAV(wetBuf,        sampleRate, `frft_alpha${alpha}.wav`);
+});
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className   = cls;
+}
+
+function setFrftProgress(frac) {
+  if (frac <= 0) {
+    frftFill.style.transition = 'none';
+    frftFill.style.width      = '';
+    frftFill.style.animation  = 'frft-pulse 1.2s ease-in-out infinite';
+    playWetLabel.textContent  = '⋯';
+  } else if (frac < 1) {
+    frftFill.style.animation  = '';
+    frftFill.style.transition = 'width .1s linear';
+    frftFill.style.width      = (frac * 100).toFixed(1) + '%';
+    playWetLabel.textContent  = `⋯ ${Math.round(frac * 100)}%`;
+  } else {
+    frftFill.style.animation  = '';
+    frftFill.style.transition = 'none';
+    frftFill.style.width      = '0%';
+    playWetLabel.textContent  = '▶ FRFT';
+  }
+}
+
+function clearSpectrogram() {
+  const ctx2d = specCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, specCanvas.width, specCanvas.height);
+}
+
+// ── Built-in signal generation ────────────────────────────────────────────────
+function generateSignal(type, seconds, sr, freq) {
+  const n   = Math.floor(seconds * sr);
+  const buf = new Float32Array(n);
+  if (type === 'sine') {
+    for (let i = 0; i < n; i++)
+      buf[i] = Math.sin(2 * Math.PI * freq * i / sr);
+  } else if (type === 'sweep') {
+    const f0 = 200, f1 = 4000;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      buf[i] = Math.sin(2 * Math.PI * (f0 + (f1 - f0) * (t / seconds)) * t);
+    }
+  }
+  return buf;
+}
+
+// ── Decode audio file ─────────────────────────────────────────────────────────
+async function decodeFile(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const ctx      = new AudioContext();
+  const decoded  = await ctx.decodeAudioData(arrayBuf);
+  const mono     = new Float32Array(decoded.length);
+  for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+    const chData = decoded.getChannelData(ch);
+    for (let i = 0; i < decoded.length; i++)
+      mono[i] += chData[i] / decoded.numberOfChannels;
+  }
+  sampleRate = decoded.sampleRate;
+  await ctx.close();
+  return mono;
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+const STFT_HOP = 512;
+
+function clearSpectrum() {
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  const ctx2d = spectrumCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+}
+
+function updateSpectrum() {
+  if (!audioCtx) return;
+  const stft = playingWhich === 'dry' ? drySTFT : wetSTFT;
+  if (!stft) return;
+
+  const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx = Math.min(stft.numFrames - 1,
+                            Math.floor(elapsed * sampleRate / STFT_HOP));
+
+  const { magDB, NUM_BINS, dBmax, dBmin } = stft;
+  const topBin = sharedTopBin;
+
+  const ctx2d = spectrumCanvas.getContext('2d');
+  const W     = spectrumCanvas.width;
+  const H     = spectrumCanvas.height;
+
+  function sampleDB(px) {
+    const kf  = px / (W - 1) * topBin;
+    const lo  = Math.floor(kf);
+    const hi  = Math.min(lo + 1, NUM_BINS - 1);
+    const mix = kf - lo;
+    return magDB[frameIdx * NUM_BINS + lo] * (1 - mix) +
+           magDB[frameIdx * NUM_BINS + hi] * mix;
+  }
+
+  const imgData = ctx2d.createImageData(W, H);
+  const px4     = imgData.data;
+
+  for (let x = 0; x < W; x++) {
+    const db     = sampleDB(x);
+    const t      = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+    const [r, g, b] = spectrogramColor(t);
+    const barTop = Math.round((1 - t) * (H - 1));
+
+    for (let y = 0; y < H; y++) {
+      const idx = (y * W + x) * 4;
+      if (y >= barTop) {
+        px4[idx] = r; px4[idx+1] = g; px4[idx+2] = b; px4[idx+3] = 255;
+      } else {
+        px4[idx] = 10; px4[idx+1] = 10; px4[idx+2] = 10; px4[idx+3] = 255;
+      }
+    }
+  }
+  ctx2d.putImageData(imgData, 0, 0);
+}
+
+function stopPlayback() {
+  clearSpectrum();
+  if (activeSrc) { try { activeSrc.stop(); } catch {} activeSrc = null; }
+  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+  masterGain   = null;
+  playingWhich = null;
+  playDryBtn.textContent   = '▶ Source'; playDryBtn.className = 'btn-ok';
+  playWetLabel.textContent = '▶ FRFT';   playWetBtn.className = 'btn-ok';
+}
+
+function startPlayback(samples, which) {
+  stopPlayback();
+  audioCtx   = new AudioContext({ sampleRate });
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.5;
+  masterGain.connect(audioCtx.destination);
+
+  const audioBuf = audioCtx.createBuffer(1, samples.length, sampleRate);
+  audioBuf.copyToChannel(samples, 0);
+
+  activeSrc        = audioCtx.createBufferSource();
+  activeSrc.buffer = audioBuf;
+  activeSrc.connect(masterGain);
+  activeSrc.start();
+  activeSrc.onended = stopPlayback;
+
+  const stft = which === 'dry' ? drySTFT : wetSTFT;
+  playbackStartTime   = audioCtx.currentTime;
+  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(samples.length / STFT_HOP);
+  playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
+
+  playingWhich = which;
+  if (which === 'dry') {
+    playDryBtn.textContent   = '■ Source'; playDryBtn.className = 'btn-playing';
+  } else {
+    playWetLabel.textContent = '■ FRFT';   playWetBtn.className = 'btn-playing';
+  }
+}
+
+// ── WAV download ──────────────────────────────────────────────────────────────
+function downloadWAV(samples, sr, filename) {
+  const numSamples = samples.length;
+  const dataBytes  = numSamples * 2;
+  const buf        = new ArrayBuffer(44 + dataBytes);
+  const v          = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off+i, s.charCodeAt(i)); };
+  str(0,  'RIFF'); v.setUint32(4,  36 + dataBytes, true);
+  str(8,  'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16,    true);
+  v.setUint16(20, 1,     true);
+  v.setUint16(22, 1,     true);
+  v.setUint32(24, sr,    true);
+  v.setUint32(28, sr*2,  true);
+  v.setUint16(32, 2,     true);
+  v.setUint16(34, 16,    true);
+  str(36, 'data'); v.setUint32(40, dataBytes, true);
+  let off = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    off += 2;
+  }
+  const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
+  URL.revokeObjectURL(url);
+}
+
+// ── FFT (radix-2 Cooley-Tukey, in-place) ─────────────────────────────────────
+function fftInPlace(re, im, N) {
+  let j = 0;
+  for (let i = 1; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+          t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= N; len <<= 1) {
+    const half = len >> 1;
+    const ang  = -2 * Math.PI / len;
+    const wcos = Math.cos(ang), wsin = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let wr = 1, wi = 0;
+      for (let k = 0; k < half; k++) {
+        const tr = wr*re[i+k+half] - wi*im[i+k+half];
+        const ti = wr*im[i+k+half] + wi*re[i+k+half];
+        re[i+k+half] = re[i+k] - tr; im[i+k+half] = im[i+k] - ti;
+        re[i+k] += tr; im[i+k] += ti;
+        const nwr = wr*wcos - wi*wsin;
+        wi = wr*wsin + wi*wcos; wr = nwr;
+      }
+    }
+  }
+}
+
+// ── Plasma colormap (same as index.html) ─────────────────────────────────────
+function spectrogramColor(t) {
+  const stops = [
+    [  5,   5,  25],
+    [100,   0, 150],
+    [200,  50, 100],
+    [255, 140,  20],
+    [255, 255, 100],
+  ];
+  const s  = t * (stops.length - 1);
+  const lo = Math.floor(s);
+  const hi = Math.min(lo + 1, stops.length - 1);
+  const f  = s - lo;
+  return [
+    Math.round(stops[lo][0] + f*(stops[hi][0]-stops[lo][0])),
+    Math.round(stops[lo][1] + f*(stops[hi][1]-stops[lo][1])),
+    Math.round(stops[lo][2] + f*(stops[hi][2]-stops[lo][2])),
+  ];
+}
+
+// ── STFT computation ──────────────────────────────────────────────────────────
+function computeSTFT(samples) {
+  const FFT_SIZE = 1024;
+  const HOP      = 512;
+  const NUM_BINS = FFT_SIZE >> 1;
+
+  const win = new Float32Array(FFT_SIZE);
+  for (let i = 0; i < FFT_SIZE; i++)
+    win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_SIZE - 1));
+
+  const numFrames = samples && samples.length >= FFT_SIZE
+    ? Math.max(1, Math.floor((samples.length - FFT_SIZE) / HOP) + 1) : 0;
+
+  const magDB = new Float32Array(numFrames * NUM_BINS);
+  const re    = new Float64Array(FFT_SIZE);
+  const im    = new Float64Array(FFT_SIZE);
+  let   dBmax = -Infinity;
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * HOP;
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const idx = start + i;
+      re[i] = (idx < samples.length ? samples[idx] : 0.0) * win[i];
+      im[i] = 0.0;
+    }
+    fftInPlace(re, im, FFT_SIZE);
+    for (let k = 0; k < NUM_BINS; k++) {
+      const mag = Math.sqrt(re[k]*re[k] + im[k]*im[k]) / FFT_SIZE;
+      const db  = 20 * Math.log10(mag + 1e-10);
+      magDB[f * NUM_BINS + k] = db;
+      if (db > dBmax) dBmax = db;
+    }
+  }
+
+  const dBmin     = dBmax - 80;
+  const threshold = dBmax - 60;
+  let   topBin    = 0;
+  for (let k = 0; k < NUM_BINS; k++)
+    for (let f = 0; f < numFrames; f++)
+      if (magDB[f * NUM_BINS + k] >= threshold) { topBin = k; break; }
+  topBin = Math.min(topBin + 1, NUM_BINS - 1);
+
+  return { magDB, numFrames, NUM_BINS, dBmax, dBmin, topBin };
+}
+
+// ── STFT spectrogram rendering ────────────────────────────────────────────────
+function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
+  const cW  = canvas.width;
+  const cH  = canvas.height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, cW, cH);
+
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin } = stftData;
+  if (numFrames === 0) return;
+
+  const topBin = topBinOverride >= 0 ? topBinOverride : stftData.topBin;
+
+  const imgData = ctx.createImageData(cW, cH);
+  const d       = imgData.data;
+
+  for (let px = 0; px < cW; px++) {
+    const fi = Math.min(numFrames - 1, Math.round(px / (cW - 1) * (numFrames - 1)));
+    for (let py = 0; py < cH; py++) {
+      const ki = Math.round((1 - (py + 0.5) / cH) * topBin);
+      const db = magDB[fi * NUM_BINS + ki];
+      const t  = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+      const [r, g, b] = spectrogramColor(t);
+      const pi = (py * cW + px) * 4;
+      d[pi] = r; d[pi+1] = g; d[pi+2] = b; d[pi+3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Single label: highest visible frequency in the top-left corner
+  const nyquist = sr / 2;
+  const topFreq = (topBin / (NUM_BINS - 1)) * nyquist;
+  const topLabel = topFreq >= 1000
+    ? (topFreq / 1000 % 1 === 0 ? (topFreq/1000)+'k' : (topFreq/1000).toFixed(1)+'k')
+    : Math.round(topFreq)+'';
+  const fontSize = Math.max(9, Math.round(cH * 0.07));
+  ctx.font      = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  ctx.fillStyle = 'rgba(220,220,220,0.70)';
+  ctx.fillText(topLabel + ' Hz', 5, fontSize + 3);
+}
+
+
+
+// ── Dynamic font size (responds to both ?w/?h params and live iframe resizes) ──
+function updateBaseFont() {
+  const el  = document.documentElement;
+  const w   = el.clientWidth  || window.innerWidth  || 800;
+  const h   = el.clientHeight || window.innerHeight || 450;
+  const raw = Math.min(w * 0.014, h * 0.025);
+  el.style.setProperty('--base-font', Math.max(8, Math.min(14, raw)) + 'px');
+}
+updateBaseFont();
+new ResizeObserver(updateBaseFont).observe(document.documentElement);
+
+// ── Worker init (fires scheduleProcess on 'ready') ────────────────────────────
+(function initWorker() {
+  const cb         = window._wasmCacheBust;
+  const jsUrl      = new URL('../wasm/dist/frft.js', location.href).href + '?v=' + cb;
+  const wasmBaseUrl = new URL('../wasm/dist/', location.href).href;
+
+  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href);
+  frftWorker.onmessage = handleWorkerMessage;
+  frftWorker.onerror   = (e) => setStatus('Worker error: ' + e.message, 'err');
+  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });
+})();
+</script>
+</body>
+</html>
