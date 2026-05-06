@@ -132,15 +132,35 @@ async function computeFRFT(samples, alpha, bufSize, overlapFactor, jobId) {
         }
         heapInI.fill(0.0);
 
-        proc.process(N, alpha);
-        remapHeap();
+        // α ≡ 0 (mod 4) → identity: bypass FRFT to avoid the engine's
+        // internal fftshift producing a N/2-circularly-shifted output.
+        const amod = ((alpha % 4) + 4) % 4;
+        const isId = amod < 1e-9 || amod > 4 - 1e-9;
 
-        for (let i = 0; i < N; i++) {
-            const w = win[i];
-            if (w < 1e-10) continue;
-            const idx = frameStart + i;
-            if (idx >= 0 && idx < L)
-                output[idx] += heapOutR[i] * w;
+        if (isId) {
+            // heapInR already holds win[i]*samples[idx]; apply synthesis window
+            // (same Hann) so WOLA normalisation is consistent: win²[i] / wNorm.
+            for (let i = 0; i < N; i++) {
+                const idx = frameStart + i;
+                if (idx >= 0 && idx < L)
+                    output[idx] += heapInR[i] * win[i];
+            }
+        } else {
+            proc.process(N, alpha);
+            remapHeap();
+
+            // The engine applies fftshift to its input before computing FRFT,
+            // so engine_output = fftshift(FRFT_α(windowed_input)).
+            // Applying fftshift to the output recovers FRFT_α(windowed_input).
+            // For even N, fftshift is self-inverse: fftshift(y)[i] = y[(i+N/2)%N].
+            const half = N >> 1;
+            for (let i = 0; i < N; i++) {
+                const w = win[i];
+                if (w < 1e-10) continue;
+                const idx = frameStart + i;
+                if (idx >= 0 && idx < L)
+                    output[idx] += heapOutR[(i + half) % N] * w;
+            }
         }
 
         framesDone++;

@@ -1026,7 +1026,7 @@ function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
                      + '?v=' + cacheBust;
   const wasmBaseUrl = new URL('../wasm/dist/', location.href).href;
 
-  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href);
+  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cacheBust);
   frftWorker.onmessage = handleWorkerMessage;
   frftWorker.onerror   = (e) => setStatus('Worker load error: ' + e.message, 'err');
   frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });

@@ -939,7 +939,7 @@ new ResizeObserver(updateBaseFont).observe(document.documentElement);
   const jsUrl      = new URL('../wasm/dist/frft.js', location.href).href + '?v=' + cb;
   const wasmBaseUrl = new URL('../wasm/dist/', location.href).href;
 
-  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href);
+  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cb);
   frftWorker.onmessage = handleWorkerMessage;
   frftWorker.onerror   = (e) => setStatus('Worker error: ' + e.message, 'err');
   frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });
