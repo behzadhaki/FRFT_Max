@@ -142,34 +142,29 @@ class FRFTAudioProcessor extends AudioWorkletProcessor {
             this._frame[i] = this._inRing[(start + i) % N];
         }
 
-        // Apply Hamming window → WASM heap; imaginary = 0
+        // Pre-apply fftshift to the windowed frame so the engine's internal
+        // fftshift cancels it: engine sees win*frame in natural order.
+        const half = N >> 1;
         for (let i = 0; i < N; i++) {
-            this._heapInR[i] = this._frame[i] * this._win[i];
+            this._heapInR[(i + half) % N] = this._frame[i] * this._win[i];
         }
         this._heapInI.fill(0);
 
-        // α ≡ 0 (mod 4) → identity: bypass FRFT to avoid the engine's
-        // internal fftshift producing a N/2-circularly-shifted output.
+        // α ≡ 0 (mod 4) → identity bypass.
         const amod = ((this._alpha % 4) + 4) % 4;
         const isId = amod < 1e-9 || amod > 4 - 1e-9;
 
         if (isId) {
-            // heapInR already holds win[i]*frame[i]; apply synthesis window
-            // for consistent WOLA normalisation: win²[i] / norm.
             for (let i = 0; i < N; i++) {
-                this._ola[i] += this._heapInR[i] * this._win[i];
+                this._ola[i] += this._heapInR[(i + half) % N] * this._win[i];
             }
         } else {
             // FRFT
             this._proc.process(N, this._alpha);
 
-            // The engine applies fftshift to its input before computing FRFT,
-            // so engine_output = fftshift(FRFT_α(windowed_input)).
-            // Applying fftshift to the output recovers FRFT_α(windowed_input).
-            // For even N, fftshift is self-inverse: fftshift(y)[i] = y[(i+N/2)%N].
-            const half = N >> 1;
+            // Engine output is in natural order — read directly.
             for (let i = 0; i < N; i++) {
-                this._ola[i] += this._heapOutR[(i + half) % N] * this._win[i];
+                this._ola[i] += this._heapOutR[i] * this._win[i];
             }
         }
 

@@ -1029,7 +1029,7 @@ function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
   frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cacheBust);
   frftWorker.onmessage = handleWorkerMessage;
   frftWorker.onerror   = (e) => setStatus('Worker load error: ' + e.message, 'err');
-  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });
+  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl, cacheBust: cacheBust });
 })();
 </script>
 </body>

@@ -942,7 +942,7 @@ new ResizeObserver(updateBaseFont).observe(document.documentElement);
   frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cb);
   frftWorker.onmessage = handleWorkerMessage;
   frftWorker.onerror   = (e) => setStatus('Worker error: ' + e.message, 'err');
-  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl });
+  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl, cacheBust: cb });
 })();
 </script>
 </body>
