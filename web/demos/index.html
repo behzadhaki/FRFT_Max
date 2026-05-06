@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRFT Audio Demo</title>
+<script>
+  // Inject frft.js with a timestamp query so every page load bypasses cache.
+  // Trigger the initial auto-process once the module is ready.
+  window._wasmCacheBust = Date.now();
+  const _s = document.createElement('script');
+  _s.src = '../wasm/dist/frft.js?v=' + window._wasmCacheBust;
+  _s.onload = () => scheduleProcess(true);
+  document.head.appendChild(_s);
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111;
+    --surface: #1c1c1e;
+    --border:  #2c2c2e;
+    --accent:  #4a9eff;
+    --text:    #e5e5e7;
+    --muted:   #8e8e93;
+    --ok:      #34c759;
+    --warn:    #ff9f0a;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    gap: 20px;
+  }
+
+  header { text-align: center; }
+  header h1 { font-size: 22px; font-weight: 600; }
+  header p  { color: var(--muted); margin-top: 6px; font-size: 13px; max-width: 520px; line-height: 1.5; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    width: 100%;
+    max-width: 640px;
+  }
+  .card h2 {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 14px;
+  }
+
+  .row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .row:last-child { margin-bottom: 0; }
+  label.lbl { width: 96px; flex-shrink: 0; color: var(--muted); font-size: 13px; }
+
+  select, input[type="file"] {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 8px;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+  }
+  select:focus { border-color: var(--accent); }
+
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  input[type="number"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 3px 6px;
+    outline: none;
+    text-align: right;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type="number"]:focus { border-color: var(--accent); }
+
+  /* alpha numbox width */
+  #alphaNum { width: 60px; }
+
+  /* freq numbox width */
+  #freqNum { width: 68px; }
+
+
+  button {
+    padding: 8px 20px;
+    border-radius: 8px; border: none;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  button:disabled { opacity: .35; cursor: default; }
+  .btn-primary  { background: var(--accent); color: #fff; }
+  .btn-neutral  { background: var(--border); color: var(--text); }
+  .btn-ok       { background: #1a3a24; color: var(--ok);   border: 1px solid var(--ok); }
+  .btn-playing  { background: #3a1a1a; color: #ff453a;    border: 1px solid #ff453a; }
+
+  /* All-size toggle */
+  .all-label {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
+  }
+  .all-label input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+
+  /* progress bar */
+  .progress-wrap { height: 4px; background: var(--border); border-radius: 2px; flex: 1; overflow: hidden; }
+  .progress-bar  { height: 100%; background: var(--accent); width: 0%; transition: width .1s; }
+
+  /* status pill */
+  #status {
+    font-size: 12px; padding: 3px 10px;
+    border-radius: 20px; border: 1px solid var(--border);
+    color: var(--muted); white-space: nowrap;
+  }
+  #status.ok   { color: var(--ok);   border-color: var(--ok); }
+  #status.busy { color: var(--warn); border-color: var(--warn); }
+  #status.err  { color: #ff453a;     border-color: #ff453a; }
+
+  /* quick-alpha buttons */
+  .alphaRow { display: flex; gap: 6px; margin-top: 6px; }
+  .alphaBtn {
+    flex: 1; padding: 6px 0; font-size: 12px; font-weight: 600;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; color: var(--muted);
+  }
+  .alphaBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* spectrogram tabs */
+  .tab-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab-btn {
+    padding: 5px 16px; border-radius: 6px;
+    font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border);
+    background: transparent; color: var(--muted);
+    cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+  }
+  .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab-btn:not(.active):hover { border-color: var(--accent); color: var(--accent); }
+
+  canvas {
+    width: 100%; height: 220px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; display: block;
+  }
+
+  /* playbackCard starts hidden via inline style; shown after first process */
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FRFT Audio Demo</h1>
+  <p>Load or generate a signal, set parameters, then process. The entire buffer is
+     transformed offline with Hamming windowing + overlap-add. Adjust the mix to
+     morph between the original and the FRFT version.</p>
+</header>
+
+<!-- ── Source ── -->
+<div class="card">
+  <h2>Source</h2>
+  <div class="row">
+    <select id="srcType" style="flex:0 0 auto">
+      <option value="sine">Sine wave</option>
+      <option value="sweep">Sweep 200→4000 Hz</option>
+      <option value="file">Audio file</option>
+    </select>
+    <input type="range"  id="freqSlider" min="20" max="20000" step="1" value="440">
+    <input type="number" id="freqNum"    min="20" max="20000" step="1" value="440">
+    <span id="freqHz" style="color:var(--muted);font-size:12px;white-space:nowrap">Hz</span>
+    <input type="file"   id="fileInput"  accept="audio/*" style="display:none;flex:1">
+  </div>
+</div>
+
+<!-- ── FRFT parameters ── -->
+<div class="card">
+  <h2>FRFT Parameters</h2>
+  <div class="row">
+    <label class="lbl">α (order)</label>
+    <input type="range"  id="alpha"    min="-2" max="2" step="0.01" value="0.05">
+    <input type="number" id="alphaNum" min="-2" max="2" step="0.01" value="0.05">
+  </div>
+  <div class="alphaRow">
+    <button class="alphaBtn" data-a="-1">−1 (inv. FFT)</button>
+    <button class="alphaBtn" data-a="0">0 (pass through)</button>
+    <button class="alphaBtn" data-a="1">1 (FFT)</button>
+    <button class="alphaBtn" data-a="2">2 (reversed)</button>
+  </div>
+  <div style="height:14px"></div>
+  <canvas id="alphaViz" width="560" height="220"
+          style="width:100%;height:auto;display:block;border-radius:8px;background:var(--bg)">
+  </canvas>
+  <div style="height:14px"></div>
+  <div class="row">
+    <label class="lbl">Block size</label>
+    <select id="bufSizeSel">
+      <option value="16">16</option>
+      <option value="32">32</option>
+      <option value="64">64</option>
+      <option value="128">128</option>
+      <option value="256">256</option>
+      <option value="512">512</option>
+      <option value="1024">1024</option>
+      <option value="2048">2048</option>
+      <option value="4096" selected>4096</option>
+      <option value="8192">8192</option>
+      <option value="16384">16384</option>
+      <option value="32768">32768</option>
+      <option value="65536">65536</option>
+      <option value="131072">131072</option>
+      <option value="all">All (No windowing)</option>
+    </select>
+    <select id="overlap" style="flex:0 0 auto; width:70px">
+      <option value="1">×1</option>
+      <option value="2">×2</option>
+      <option value="4" selected>×4</option>
+    </select>
+  </div>
+</div>
+
+<!-- Process controls kept in DOM for JS references but not shown -->
+<div style="display:none">
+  <button id="processBtn">Process</button>
+  <div class="progress-bar" id="progressBar"></div>
+  <span id="status"></span>
+</div>
+
+<!-- ── Playback + Spectrogram (shown after processing) ── -->
+<div class="card" id="playbackCard" style="display:none">
+  <h2>Playback</h2>
+  <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:14px">
+    <button class="btn-ok"      id="playDryBtn"  disabled>▶ Source</button>
+    <button class="btn-ok"      id="playWetBtn"  disabled>▶ FRFT</button>
+    <button class="btn-neutral" id="downloadBtn" disabled>⬇ Download</button>
+    <div style="flex:1;position:relative">
+      <canvas id="spectrumCanvas" width="600" height="40"
+        style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;
+               border-radius:8px;border:1px solid var(--border);background:var(--bg)"></canvas>
+    </div>
+  </div>
+  <div class="tab-bar">
+    <button class="tab-btn"        id="tabDry">Original</button>
+    <button class="tab-btn active" id="tabWet">FRFT (α = <span id="alphaLabel">0.50</span>)</button>
+  </div>
+  <canvas id="specCanvas" width="1200" height="400"></canvas>
+</div>
+
+<script>
+// ── WASM module (loaded once) ────────────────────────────────────────────────
+let WasmModule      = null;
+let dryBuf          = null;
+let wetBuf          = null;
+let trimmedDryBuf   = null;  // dryBuf cropped to the OLA-valid region
+let sampleRate      = 44100;
+
+// Spectrogram state
+let drySTFT       = null;
+let wetSTFT       = null;
+let sharedTopBin  = 0;
+let activeTab     = 'wet';
+
+// Playback state
+let audioCtx            = null;
+let activeSrc           = null;
+let masterGain          = null;
+let playingWhich        = null;
+let playheadInterval    = null;
+let playbackStartTime   = 0;   // audioCtx.currentTime when playback began
+let playbackTotalFrames = 0;   // total STFT frames for the playing buffer
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const srcType     = document.getElementById('srcType');
+const freqSlider  = document.getElementById('freqSlider');
+const freqNum     = document.getElementById('freqNum');
+const fileInput   = document.getElementById('fileInput');
+const alphaSlider = document.getElementById('alpha');
+const alphaNum    = document.getElementById('alphaNum');
+const bufSizeSel  = document.getElementById('bufSizeSel');
+const overlapSel  = document.getElementById('overlap');
+const processBtn  = document.getElementById('processBtn');
+const progressBar = document.getElementById('progressBar');
+const statusEl    = document.getElementById('status');
+const playbackCard= document.getElementById('playbackCard');
+const playDryBtn  = document.getElementById('playDryBtn');
+const playWetBtn  = document.getElementById('playWetBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const specCanvas      = document.getElementById('specCanvas');
+const spectrumCanvas  = document.getElementById('spectrumCanvas');
+const tabDry          = document.getElementById('tabDry');
+const tabWet          = document.getElementById('tabWet');
+const alphaLabel      = document.getElementById('alphaLabel');
+
+// ── Auto-processing: debounce + cancellation ─────────────────────────────────
+const DEBOUNCE_MS   = 400;
+let   debounceTimer = null;
+let   activeToken   = null; // { cancelled: bool } for the running job
+
+// Call when source signal must be regenerated (type / freq / duration / file)
+function invalidateSource() {
+  dryBuf = null;
+  scheduleProcess();
+}
+
+// Call when only FRFT params changed — reuse cached dryBuf
+function invalidateFRFT() {
+  scheduleProcess();
+}
+
+function scheduleProcess(immediate = false) {
+  // Cancel any in-flight run
+  if (activeToken) activeToken.cancelled = true;
+  clearTimeout(debounceTimer);
+  stopPlayback();
+  downloadBtn.disabled = true;
+  wetBuf = null;
+  trimmedDryBuf = null;
+  setProgress(0);
+  setStatus('pending…');
+
+  if (immediate) {
+    autoProcess();
+  } else {
+    debounceTimer = setTimeout(autoProcess, DEBOUNCE_MS);
+  }
+}
+
+async function autoProcess() {
+  const token = { cancelled: false };
+  activeToken = token;
+  processBtn.disabled = true;
+
+  try {
+    // 1. Generate / decode source if needed
+    if (!dryBuf) {
+      if (srcType.value === 'file') {
+        if (!fileInput.files[0]) { setStatus('no file', 'err'); return; }
+        setStatus('Decoding…', 'busy');
+        dryBuf = await decodeFile(fileInput.files[0]);
+      } else {
+        sampleRate = 44100;
+        const freq = parseInt(freqNum.value) || 440;
+        dryBuf = generateSignal(srcType.value, 10, sampleRate, freq);
+      }
+      if (token.cancelled) return;
+    }
+
+    // 2. FRFT
+    const alpha    = parseFloat(alphaSlider.value);
+    const overlap  = parseInt(overlapSel.value);
+    const isAll    = bufSizeSel.value === 'all';
+    const bufSize  = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
+    const effectiveOverlap = isAll ? 1 : overlap;
+
+    setStatus('Processing…', 'busy');
+    const result = await runFRFT(dryBuf, alpha, bufSize, effectiveOverlap, token);
+    if (token.cancelled || result === null) return;
+
+    wetBuf = result;
+
+    // Trim the dry buffer to match the OLA-valid region that runFRFT already
+    // cropped from the wet output.  trim = (R-1)*H samples on each side.
+    const H_trim   = Math.max(1, Math.floor(bufSize / effectiveOverlap));
+    const trimAmt  = (effectiveOverlap - 1) * H_trim;
+    trimmedDryBuf  = trimAmt > 0 && dryBuf.length > 2 * trimAmt
+                       ? dryBuf.slice(trimAmt, dryBuf.length - trimAmt)
+                       : dryBuf;
+
+    // Compute both STFTs, sync Y axis, render the active tab.
+    alphaLabel.textContent = alpha.toFixed(2);
+    drySTFT      = computeSTFT(trimmedDryBuf);
+    wetSTFT      = computeSTFT(wetBuf);
+    sharedTopBin = Math.max(drySTFT.topBin, wetSTFT.topBin);
+    renderActiveTab();
+
+    playbackCard.style.display = 'block';
+    playDryBtn.disabled  = false;  playDryBtn.className = 'btn-ok';
+    playWetBtn.disabled  = false;  playWetBtn.className = 'btn-ok';
+    playDryBtn.textContent = '▶ Source';
+    playWetBtn.textContent = '▶ FRFT';
+    downloadBtn.disabled = false;
+    setStatus('done', 'ok');
+
+  } catch (err) {
+    if (!token.cancelled) {
+      console.error(err);
+      setStatus(err.message || 'Error', 'err');
+    }
+  } finally {
+    if (activeToken === token) activeToken = null;
+    processBtn.disabled = false;
+  }
+}
+
+// ── Source type toggle ────────────────────────────────────────────────────────
+srcType.addEventListener('change', () => {
+  const isSine = srcType.value === 'sine';
+  const isFile = srcType.value === 'file';
+  freqSlider.style.display = isSine ? '' : 'none';
+  freqNum.style.display    = isSine ? '' : 'none';
+  document.getElementById('freqHz').style.display = isSine ? '' : 'none';
+  fileInput.style.display  = isFile ? '' : 'none';
+  invalidateSource();
+});
+
+// ── Frequency controls (sine mode) ───────────────────────────────────────────
+freqSlider.addEventListener('input', () => {
+  freqNum.value = freqSlider.value;
+  invalidateSource();
+});
+freqNum.addEventListener('change', () => {
+  const v = Math.max(20, Math.min(20000, parseInt(freqNum.value) || 440));
+  freqNum.value    = v;
+  freqSlider.value = v;
+  invalidateSource();
+});
+
+// ── Alpha controls ────────────────────────────────────────────────────────────
+alphaSlider.addEventListener('input', () => {
+  const v = parseFloat(alphaSlider.value);
+  alphaNum.value = v.toFixed(2);
+  drawAlphaViz(v);
+  invalidateFRFT();
+});
+alphaNum.addEventListener('change', () => {
+  const v = Math.max(-2, Math.min(2, parseFloat(alphaNum.value) || 0));
+  alphaNum.value    = v.toFixed(2);
+  alphaSlider.value = v;
+  drawAlphaViz(v);
+  invalidateFRFT();
+});
+document.querySelectorAll('.alphaBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const v = parseFloat(btn.dataset.a);
+    alphaSlider.value = v;
+    alphaNum.value    = v.toFixed(2);
+    drawAlphaViz(v);
+    invalidateFRFT();
+  });
+});
+
+// ── Block size dropdown ───────────────────────────────────────────────────────
+bufSizeSel.addEventListener('change', () => {
+  overlapSel.disabled = bufSizeSel.value === 'all';
+  invalidateFRFT();
+});
+
+// ── Other source / FRFT parameters ───────────────────────────────────────────
+overlapSel.addEventListener('change', invalidateFRFT);
+fileInput.addEventListener('change',  invalidateSource);
+
+// ── Spectrogram tabs ──────────────────────────────────────────────────────────
+function renderActiveTab() {
+  const stft = activeTab === 'dry' ? drySTFT : wetSTFT;
+  if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin);
+}
+
+tabDry.addEventListener('click', () => {
+  activeTab = 'dry';
+  tabDry.classList.add('active');
+  tabWet.classList.remove('active');
+  renderActiveTab();
+});
+
+tabWet.addEventListener('click', () => {
+  activeTab = 'wet';
+  tabWet.classList.add('active');
+  tabDry.classList.remove('active');
+  renderActiveTab();
+});
+
+
+// ── Alpha visualisation ───────────────────────────────────────────────────────
+function drawAlphaViz(alpha) {
+  const canvas = document.getElementById('alphaViz');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W   = canvas.width;    // 560
+  const H   = canvas.height;   // 220
+  const cx  = W / 2;
+  const cy  = H / 2;
+  const r   = 82;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Axes ──
+  const axPad = 18;
+  ctx.strokeStyle = '#3a3a3c';
+  ctx.lineWidth = 1;
+  // horizontal
+  ctx.beginPath(); ctx.moveTo(axPad, cy); ctx.lineTo(W - axPad, cy); ctx.stroke();
+  // vertical
+  ctx.beginPath(); ctx.moveTo(cx, axPad); ctx.lineTo(cx, H - axPad); ctx.stroke();
+  // arrow heads
+  const ah = 5;
+  ctx.beginPath();
+  ctx.moveTo(W - axPad, cy); ctx.lineTo(W - axPad - ah, cy - ah);
+  ctx.moveTo(W - axPad, cy); ctx.lineTo(W - axPad - ah, cy + ah);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, axPad); ctx.lineTo(cx - ah, axPad + ah);
+  ctx.moveTo(cx, axPad); ctx.lineTo(cx + ah, axPad + ah);
+  ctx.stroke();
+
+  // ── Dashed diagonal (α-domain) ──
+  ctx.save();
+  ctx.strokeStyle = '#3a3a3c';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.82, cy + r * 0.82);
+  ctx.lineTo(cx + r * 0.82, cy - r * 0.82);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── Circle ──
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+  ctx.stroke();
+
+  // ── Axis domain labels ──
+  ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#8e8e93';
+  ctx.textAlign = 'center';
+  ctx.fillText('Frequency domain', cx, axPad - 4);
+  ctx.fillText('Inverse frequency domain', cx, H - 3);
+  ctx.textAlign = 'left';
+  ctx.fillText('Time domain', cx + r + 10, cy - 5);
+  ctx.textAlign = 'right';
+  ctx.fillText('Inverse time domain', cx - r - 10, cy - 5);
+
+  // ── Cardinal dots + labels ──
+  const cardinals = [
+    { a:  0, dx:  8, dy:  4, align: 'left'   },
+    { a:  1, dx:  8, dy: -4, align: 'left'   },
+    { a:  2, dx: -8, dy:  4, align: 'right'  },
+    { a: -1, dx:  0, dy: 13, align: 'center' },
+  ];
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  cardinals.forEach(({ a, dx, dy, align }) => {
+    const px = cx + r * Math.cos(a * Math.PI / 2);
+    const py = cy - r * Math.sin(a * Math.PI / 2);
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = '#e5e5e7';
+    ctx.fill();
+    ctx.fillStyle = '#e5e5e7';
+    ctx.textAlign = align;
+    ctx.fillText(`α=${a}`, px + dx, py + dy);
+  });
+
+  // ── Current α — spoke ──
+  const angle = alpha * Math.PI / 2;
+  const dotX  = cx + r * Math.cos(angle);
+  const dotY  = cy - r * Math.sin(angle);
+
+  ctx.strokeStyle = '#ff9f0a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(dotX, dotY);
+  ctx.stroke();
+
+  // Arc from α=0 to current α
+  if (Math.abs(alpha) > 0.01) {
+    ctx.strokeStyle = 'rgba(255,159,10,0.35)';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, -angle, alpha < 0);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+  }
+
+  // ── Current α — dot ──
+  ctx.beginPath();
+  ctx.arc(dotX, dotY, 6, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ff9f0a';
+  ctx.fill();
+}
+
+// Initial draw
+drawAlphaViz(parseFloat(alphaSlider.value));
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className   = cls;
+}
+function setProgress(frac) {
+  progressBar.style.width = (frac * 100).toFixed(1) + '%';
+}
+
+// ── Generate built-in signals ─────────────────────────────────────────────────
+function generateSignal(type, seconds, sr, freq) {
+  const n   = Math.floor(seconds * sr);
+  const buf = new Float32Array(n);
+  if (type === 'sine') {
+    for (let i = 0; i < n; i++)
+      buf[i] = Math.sin(2 * Math.PI * freq * i / sr);
+  } else if (type === 'sweep') {
+    const f0 = 200, f1 = 4000;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const f = f0 + (f1 - f0) * (t / seconds);
+      buf[i] = Math.sin(2 * Math.PI * f * t);
+    }
+  }
+  return buf;
+}
+
+// ── Decode audio file ─────────────────────────────────────────────────────────
+async function decodeFile(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const ctx      = new AudioContext();
+  const decoded  = await ctx.decodeAudioData(arrayBuf);
+  const mono     = new Float32Array(decoded.length);
+  for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+    const chData = decoded.getChannelData(ch);
+    for (let i = 0; i < decoded.length; i++)
+      mono[i] += chData[i] / decoded.numberOfChannels;
+  }
+  sampleRate = decoded.sampleRate;
+  await ctx.close();
+  return mono;
+}
+
+// ── Offline FRFT + OLA ────────────────────────────────────────────────────────
+async function runFRFT(samples, alpha, bufSize, overlapFactor, token = {}) {
+  const N = bufSize;
+  const H = Math.max(1, Math.floor(N / overlapFactor)); // integer hop size
+  const L = samples.length;
+
+  if (!WasmModule) {
+    setStatus('Loading WASM…', 'busy');
+    WasmModule = await FRFTModule({
+      locateFile: (path, prefix) => prefix + path + '?v=' + window._wasmCacheBust,
+    });
+  }
+
+  const proc = new WasmModule.FRFTProcessor();
+  proc.prepare(N);
+
+  // Cache the pointer offsets — these stay fixed even when the heap grows.
+  const inRPtr  = proc.inputRealPtr();
+  const inIPtr  = proc.inputImagPtr();
+  const outRPtr = proc.outputRealPtr();
+
+  // proc.process() can trigger WASM heap growth (internal FFT scratch allocs).
+  // Growth replaces HEAPF64.buffer with a new ArrayBuffer and detaches the old
+  // one, so any TypedArray views into the old buffer throw on next access.
+  // Solution: track the current buffer and rebuild views whenever it changes.
+  let heapBuf = WasmModule.HEAPF64.buffer;
+  let heapInR  = new Float64Array(heapBuf, inRPtr,  N);
+  let heapInI  = new Float64Array(heapBuf, inIPtr,  N);
+  let heapOutR = new Float64Array(heapBuf, outRPtr, N);
+
+  function remapHeap() {
+    const buf = WasmModule.HEAPF64.buffer;
+    if (buf !== heapBuf) {
+      heapBuf  = buf;
+      heapInR  = new Float64Array(buf, inRPtr,  N);
+      heapInI  = new Float64Array(buf, inIPtr,  N);
+      heapOutR = new Float64Array(buf, outRPtr, N);
+    }
+  }
+
+  // Hann window for all overlap factors (symmetric, N-1 denominator).
+  // win[0] = win[N-1] = 0 exactly, so synthesis-windowed output is silent at
+  // frame edges regardless of what the FRFT produces there — matching the
+  // Max/MSP behaviour where windows visibly taper to zero at R=1.
+  const win = new Float32Array(N);
+  for (let i = 0; i < N; i++)
+    win[i] = 0.5 - 0.5 * Math.cos(2.0 * Math.PI * i / (N - 1));
+
+  // Scalar WOLA norm — same formula as frft-processor.js AudioWorklet.
+  // Summing win² across R overlapping positions within one hop then dividing
+  // by H gives a single constant divisor for every output sample.
+  // This avoids per-sample division (which amplifies FRFT leakage at the
+  // near-zero window edges and causes starburst artifacts at R=1).
+  let wNorm = 0;
+  for (let p = 0; p < H; p++) {
+    for (let k = 0; k < overlapFactor; k++) {
+      const wi = p + k * H;
+      if (wi < N) wNorm += win[wi] * win[wi];
+    }
+  }
+  wNorm /= H;   // ≈ 3/8 for Hann at R=1, larger for higher R
+
+  const output = new Float32Array(L);
+
+  // Pre-roll: start (R-1) hops before sample 0 so every sample in [0,L) is
+  // covered by exactly R overlapping windows before normalization.
+  const firstFrame = -(overlapFactor - 1) * H;
+
+  let totalFrames = 0;
+  for (let fs = firstFrame; fs < L; fs += H) totalFrames++;
+  let framesDone = 0;
+
+  const CHUNK = 64;
+
+  for (let frameStart = firstFrame; frameStart < L; frameStart += H) {
+    remapHeap(); // remap if a previous proc.process() grew the heap
+
+    // Zero-pad input for out-of-bounds positions
+    for (let i = 0; i < N; i++) {
+      const idx = frameStart + i;
+      heapInR[i] = (idx >= 0 && idx < L ? samples[idx] : 0.0) * win[i];
+    }
+    heapInI.fill(0.0);
+
+    proc.process(N, alpha);
+    remapHeap(); // remap immediately after process before reading output
+
+    // Diagnostic (first frame only): log N/2 vs neighbours to check the
+    // bizdec boundary-doubling correction is being applied.
+    if (framesDone === 0) {
+      const mid = N >> 1;
+      console.log(`[FRFT diag] N=${N} α=${alpha} | out[${mid-1}]=${heapOutR[mid-1].toFixed(4)} out[${mid}]=${heapOutR[mid].toFixed(4)} out[${mid+1}]=${heapOutR[mid+1].toFixed(4)}`);
+      let maxVal = 0, maxIdx = 0;
+      for (let k = 0; k < N; k++) { const v = Math.abs(heapOutR[k]); if (v > maxVal) { maxVal = v; maxIdx = k; } }
+      console.log(`[FRFT diag] peak=${maxVal.toFixed(4)} at index ${maxIdx} (N/2=${mid})`);
+    }
+
+    // WOLA accumulation: apply synthesis window so edge samples (win=0) are
+    // silenced regardless of what the FRFT produces there.
+    for (let i = 0; i < N; i++) {
+      const w = win[i];
+      if (w < 1e-10) continue;            // zero-weight edges → silence
+      const idx = frameStart + i;
+      if (idx >= 0 && idx < L) {
+        output[idx] += heapOutR[i] * w;   // synthesis-windowed, no per-sample norm
+      }
+    }
+
+    framesDone++;
+    if (framesDone % CHUNK === 0) {
+      if (token.cancelled) { proc.delete(); return null; }
+      setProgress(framesDone / totalFrames);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  // Normalise by the scalar wNorm (same constant for every sample).
+  for (let i = 0; i < L; i++) output[i] /= wNorm;
+
+  // Peak-normalise to prevent clipping — FRFT does not preserve amplitude.
+  let peak = 0;
+  for (let i = 0; i < L; i++) { const a = Math.abs(output[i]); if (a > peak) peak = a; }
+  if (peak > 1e-8) for (let i = 0; i < L; i++) output[i] /= peak;
+
+  // Trim edges where fewer than overlapFactor frames contributed.
+  // (R-1)*H samples on each side had zero-padded pre/post-roll input.
+  const trimAmt = (overlapFactor - 1) * H;
+  const trimEnd = L - trimAmt;
+
+  proc.delete();
+  setProgress(1);
+  return trimAmt > 0 && trimEnd > trimAmt ? output.slice(trimAmt, trimEnd) : output;
+}
+
+// ── Process button — force immediate re-run ───────────────────────────────────
+processBtn.addEventListener('click', () => {
+  dryBuf = null; // force source regeneration too
+  scheduleProcess(true);
+});
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+const STFT_HOP = 512;  // must match computeSTFT
+
+function clearSpectrum() {
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  const ctx2d = spectrumCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+}
+
+function updateSpectrum() {
+  if (!audioCtx) return;
+  const stft = playingWhich === 'dry' ? drySTFT : wetSTFT;
+  if (!stft) return;
+
+  const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx = Math.min(stft.numFrames - 1,
+                            Math.floor(elapsed * sampleRate / STFT_HOP));
+
+  const { magDB, NUM_BINS, dBmax, dBmin } = stft;
+  const topBin = sharedTopBin;
+
+  const ctx2d = spectrumCanvas.getContext('2d');
+  const W     = spectrumCanvas.width;
+  const H     = spectrumCanvas.height;
+
+  // Helper: linearly interpolate dB value between adjacent bins
+  function sampleDB(px) {
+    const kf  = px / (W - 1) * topBin;
+    const lo  = Math.floor(kf);
+    const hi  = Math.min(lo + 1, NUM_BINS - 1);
+    const mix = kf - lo;
+    return magDB[frameIdx * NUM_BINS + lo] * (1 - mix) +
+           magDB[frameIdx * NUM_BINS + hi] * mix;
+  }
+
+  // Render via ImageData using same plasma colormap as the spectrogram.
+  // Each column: filled bar from bottom up to amplitude height, plasma-colored
+  // by the dB value at that frequency; above the bar → near-black background.
+  const imgData = ctx2d.createImageData(W, H);
+  const px4     = imgData.data;
+
+  for (let x = 0; x < W; x++) {
+    const db  = sampleDB(x);
+    const t   = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+    const [r, g, b] = spectrogramColor(t);
+    const barTop = Math.round((1 - t) * (H - 1)); // y where bar starts
+
+    for (let y = 0; y < H; y++) {
+      const idx = (y * W + x) * 4;
+      if (y >= barTop) {
+        // Inside the bar: plasma color, full opacity
+        px4[idx]     = r;
+        px4[idx + 1] = g;
+        px4[idx + 2] = b;
+        px4[idx + 3] = 255;
+      } else {
+        // Above bar: near-black background
+        px4[idx]     = 10;
+        px4[idx + 1] = 10;
+        px4[idx + 2] = 10;
+        px4[idx + 3] = 255;
+      }
+    }
+  }
+
+  ctx2d.putImageData(imgData, 0, 0);
+}
+
+function stopPlayback() {
+  clearSpectrum();
+  if (activeSrc) { try { activeSrc.stop(); } catch {} activeSrc = null; }
+  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+  masterGain   = null;
+  playingWhich = null;
+  playDryBtn.textContent = '▶ Source'; playDryBtn.className = 'btn-ok';
+  playWetBtn.textContent = '▶ FRFT';   playWetBtn.className = 'btn-ok';
+}
+
+function startPlayback(samples, which) {
+  stopPlayback();
+  audioCtx   = new AudioContext({ sampleRate });
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.5;
+  masterGain.connect(audioCtx.destination);
+
+  const audioBuf = audioCtx.createBuffer(1, samples.length, sampleRate);
+  audioBuf.copyToChannel(samples, 0);
+
+  activeSrc        = audioCtx.createBufferSource();
+  activeSrc.buffer = audioBuf;
+  activeSrc.connect(masterGain);
+  activeSrc.start();
+  activeSrc.onended = stopPlayback;
+
+  // Determine which STFT the active tab is showing
+  const stft = (which === 'dry' ? drySTFT : wetSTFT);
+  playbackStartTime   = audioCtx.currentTime;
+  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(samples.length / STFT_HOP);
+  playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
+
+  playingWhich = which;
+  if (which === 'dry') {
+    playDryBtn.textContent = '■ Source'; playDryBtn.className = 'btn-playing';
+  } else {
+    playWetBtn.textContent = '■ FRFT';   playWetBtn.className = 'btn-playing';
+  }
+}
+
+playDryBtn.addEventListener('click', () => {
+  if (playingWhich === 'dry') stopPlayback();
+  else if (trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry');
+});
+
+playWetBtn.addEventListener('click', () => {
+  if (playingWhich === 'wet') stopPlayback();
+  else if (wetBuf) startPlayback(wetBuf, 'wet');
+});
+
+// ── Download both outputs as WAV ──────────────────────────────────────────────
+downloadBtn.addEventListener('click', () => {
+  if (!trimmedDryBuf || !wetBuf) return;
+  const alpha = parseFloat(alphaSlider.value).toFixed(2);
+  downloadWAV(trimmedDryBuf, sampleRate, `source.wav`);
+  downloadWAV(wetBuf,        sampleRate, `frft_alpha${alpha}.wav`);
+});
+
+function downloadWAV(samples, sr, filename) {
+  const numSamples  = samples.length;
+  const dataBytes   = numSamples * 2; // 16-bit PCM
+  const buf         = new ArrayBuffer(44 + dataBytes);
+  const v           = new DataView(buf);
+
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+
+  str(0,  'RIFF');
+  v.setUint32(4,  36 + dataBytes, true);
+  str(8,  'WAVE');
+  str(12, 'fmt ');
+  v.setUint32(16, 16,   true);  // chunk size
+  v.setUint16(20, 1,    true);  // PCM
+  v.setUint16(22, 1,    true);  // mono
+  v.setUint32(24, sr,   true);  // sample rate
+  v.setUint32(28, sr * 2, true); // byte rate
+  v.setUint16(32, 2,    true);  // block align
+  v.setUint16(34, 16,   true);  // bits per sample
+  str(36, 'data');
+  v.setUint32(40, dataBytes, true);
+
+  let off = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    off += 2;
+  }
+
+  const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── FFT (radix-2 Cooley-Tukey, in-place) ────────────────────────────────────
+function fftInPlace(re, im, N) {
+  let j = 0;
+  for (let i = 1; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+          t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= N; len <<= 1) {
+    const half = len >> 1;
+    const ang  = -2 * Math.PI / len;
+    const wcos = Math.cos(ang), wsin = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let wr = 1, wi = 0;
+      for (let k = 0; k < half; k++) {
+        const tr = wr * re[i+k+half] - wi * im[i+k+half];
+        const ti = wr * im[i+k+half] + wi * re[i+k+half];
+        re[i+k+half] = re[i+k] - tr;
+        im[i+k+half] = im[i+k] - ti;
+        re[i+k] += tr;
+        im[i+k] += ti;
+        const nwr = wr * wcos - wi * wsin;
+        wi = wr * wsin + wi * wcos;
+        wr = nwr;
+      }
+    }
+  }
+}
+
+// Plasma-like colormap: 0 = near-black, 1 = bright yellow
+function spectrogramColor(t) {
+  const stops = [
+    [  5,   5,  25],   // 0.00 — near black
+    [100,   0, 150],   // 0.25 — deep violet
+    [200,  50, 100],   // 0.50 — magenta/pink
+    [255, 140,  20],   // 0.75 — orange
+    [255, 255, 100],   // 1.00 — bright yellow
+  ];
+  const s  = t * (stops.length - 1);
+  const lo = Math.floor(s);
+  const hi = Math.min(lo + 1, stops.length - 1);
+  const f  = s - lo;
+  return [
+    Math.round(stops[lo][0] + f * (stops[hi][0] - stops[lo][0])),
+    Math.round(stops[lo][1] + f * (stops[hi][1] - stops[lo][1])),
+    Math.round(stops[lo][2] + f * (stops[hi][2] - stops[lo][2])),
+  ];
+}
+
+// ── STFT computation ─────────────────────────────────────────────────────────
+// Returns { magDB, numFrames, NUM_BINS, dBmax, dBmin, topBin }
+// topBin = highest bin where any frame exceeds dBmax-60 (clipped Y axis).
+function computeSTFT(samples) {
+  const FFT_SIZE = 1024;
+  const HOP      = 512;
+  const NUM_BINS = FFT_SIZE >> 1;
+
+  const win = new Float32Array(FFT_SIZE);
+  for (let i = 0; i < FFT_SIZE; i++)
+    win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_SIZE - 1));
+
+  const numFrames = samples && samples.length >= FFT_SIZE
+    ? Math.max(1, Math.floor((samples.length - FFT_SIZE) / HOP) + 1)
+    : 0;
+
+  const magDB = new Float32Array(numFrames * NUM_BINS);
+  const re    = new Float64Array(FFT_SIZE);
+  const im    = new Float64Array(FFT_SIZE);
+  let   dBmax = -Infinity;
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * HOP;
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const idx = start + i;
+      re[i] = (idx < samples.length ? samples[idx] : 0.0) * win[i];
+      im[i] = 0.0;
+    }
+    fftInPlace(re, im, FFT_SIZE);
+    for (let k = 0; k < NUM_BINS; k++) {
+      const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / FFT_SIZE;
+      const db  = 20 * Math.log10(mag + 1e-10);
+      magDB[f * NUM_BINS + k] = db;
+      if (db > dBmax) dBmax = db;
+    }
+  }
+
+  const dBmin     = dBmax - 80;
+  const threshold = dBmax - 60;
+
+  // Find highest bin with any energy above the -60 dB threshold.
+  let topBin = 0;
+  for (let k = 0; k < NUM_BINS; k++) {
+    for (let f = 0; f < numFrames; f++) {
+      if (magDB[f * NUM_BINS + k] >= threshold) { topBin = k; break; }
+    }
+  }
+  topBin = Math.min(topBin + 1, NUM_BINS - 1);  // one bin of headroom
+
+  return { magDB, numFrames, NUM_BINS, dBmax, dBmin, topBin };
+}
+
+// ── STFT spectrogram rendering ────────────────────────────────────────────────
+// topBinOverride: if >= 0, use it instead of stftData.topBin (for shared axis).
+function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1) {
+  const cW  = canvas.width;
+  const cH  = canvas.height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, cW, cH);
+
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin } = stftData;
+  if (numFrames === 0) return;
+
+  const topBin = topBinOverride >= 0 ? topBinOverride : stftData.topBin;
+
+  // Render pixels — Y axis spans 0 Hz (bottom) to topBin (top), linear
+  const imgData = ctx.createImageData(cW, cH);
+  const d       = imgData.data;
+
+  for (let px = 0; px < cW; px++) {
+    const fi = Math.min(numFrames - 1, Math.round(px / (cW - 1) * (numFrames - 1)));
+    for (let py = 0; py < cH; py++) {
+      const ki  = Math.round((1 - (py + 0.5) / cH) * topBin);
+      const db  = magDB[fi * NUM_BINS + ki];
+      const t   = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+      const [r, g, b] = spectrogramColor(t);
+      const pi  = (py * cW + px) * 4;
+      d[pi]     = r;
+      d[pi + 1] = g;
+      d[pi + 2] = b;
+      d[pi + 3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Frequency grid lines + labels scaled to topBin
+  const nyquist   = sr / 2;
+  const topFreq   = (topBin / (NUM_BINS - 1)) * nyquist;
+  const numLines  = 4;
+  ctx.font        = '20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle   = 'rgba(220,220,220,0.75)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth   = 1;
+  for (let li = 0; li <= numLines; li++) {
+    const freq = (li / numLines) * topFreq;
+    const y    = Math.round((1 - freq / topFreq) * (cH - 1));
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cW, y); ctx.stroke();
+    const label = freq >= 1000
+      ? (freq / 1000 % 1 === 0 ? (freq / 1000) + 'k' : (freq / 1000).toFixed(1) + 'k')
+      : Math.round(freq) + '';
+    const textY = (y < cH - 18) ? y + 18 : y - 4;
+    ctx.fillText(label, 5, textY);
+  }
+}
+</script>
+</body>
+</html>
