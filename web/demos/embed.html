@@ -157,10 +157,10 @@
 
   /* ── Buttons ── */
   button {
-    height: 2em;
-    padding: 0 1em;          /* vertical space comes from height, not padding */
-    border-radius: 7px; border: none;
-    font-size: 1em; font-weight: 600;
+    height: 1.6em;
+    padding: 0 0.7em;
+    border-radius: 5px; border: none;
+    font-size: 0.85em; font-weight: 600;
     cursor: pointer; transition: opacity .15s;
     white-space: nowrap;
   }
@@ -174,24 +174,15 @@
   .btn-ok      { background: #1a3a24; color: var(--ok);   border: 1px solid var(--ok); }
   .btn-playing { background: #3a1a1a; color: #ff453a;    border: 1px solid #ff453a; }
 
-  /* ── Quick-alpha buttons ── */
-  .alphaRow { display: flex; gap: 0.3em; margin-top: 0.4em; }
-  .alphaBtn {
-    flex: 1; height: 1.8em; padding: 0; font-size: 0.85em; font-weight: 600;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: 5px; cursor: pointer; color: var(--muted);
-  }
-  .alphaBtn:hover { border-color: var(--accent); color: var(--accent); }
-
-  /* ── Status pill ── */
+  /* ── Status text ── */
   #status {
-    font-size: 0.85em; padding: 0.2em 0.6em;
-    border-radius: 16px; border: 1px solid var(--border);
+    font-size: 0.85em; padding: 0;
+    border: none; background: none;
     color: var(--muted); white-space: nowrap;
   }
-  #status.ok   { color: var(--ok);   border-color: var(--ok); }
-  #status.busy { color: var(--warn); border-color: var(--warn); }
-  #status.err  { color: #ff453a;     border-color: #ff453a; }
+  #status.ok   { color: var(--muted); }
+  #status.busy { color: var(--muted); }
+  #status.err  { color: #ff453a; }
 
   /* ── FRFT button progress-fill + pulse ── */
   @keyframes frft-pulse {
@@ -257,17 +248,16 @@
           <option value="file">Audio file</option>
         </select>
       </div>
-      <!-- Row 2: duration (sine/sweep only) -->
+      <!-- Row 2: duration + frequency on one line (sine/sweep only) -->
       <div class="row" id="durRow">
         <label class="lbl">Duration</label>
-        <input type="number" id="durNum" min="1" max="600" step="1" value="10">
+        <input type="number" id="durNum" min="1" max="600" step="1" value="3">
         <span style="color:var(--muted);font-size:0.85em;white-space:nowrap">s</span>
-      </div>
-      <!-- Row 3: frequency (sine only) -->
-      <div class="row" id="freqRow">
-        <label class="lbl">Frequency</label>
-        <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
-        <span id="freqHz" style="color:var(--muted);font-size:0.85em;white-space:nowrap">Hz</span>
+        <span id="freqRow" style="display:inline-flex;align-items:center;gap:0.5em;flex:1;min-width:0">
+          <label class="lbl" style="width:auto;flex-shrink:0">Freq</label>
+          <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
+          <span id="freqHz" style="color:var(--muted);font-size:0.85em;white-space:nowrap">Hz</span>
+        </span>
       </div>
       <!-- Row 4: file picker (file mode only) -->
       <div class="row" id="fileRow" style="display:none">
@@ -280,15 +270,8 @@
       <h2>FRFT Parameters</h2>
       <div class="row">
         <label class="lbl">α (order)</label>
-        <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="1">
+        <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="0.10">
       </div>
-      <div class="alphaRow">
-        <button class="alphaBtn" data-a="0">0</button>
-        <button class="alphaBtn" data-a="1">1 (FFT)</button>
-        <button class="alphaBtn" data-a="2">2 (rev)</button>
-        <button class="alphaBtn" data-a="3">3 (iFFT)</button>
-      </div>
-      <div style="height:0.5em"></div>
       <div class="row">
         <label class="lbl">Block size</label>
         <select id="bufSizeSel">
@@ -300,14 +283,15 @@
           <option value="512">512</option>
           <option value="1024">1024</option>
           <option value="2048">2048</option>
-          <option value="4096" selected>4096</option>
+          <option value="4096">4096</option>
           <option value="8192">8192</option>
-          <option value="16384">16384</option>
+          <option value="16384" selected>16384</option>
           <option value="32768">32768</option>
           <option value="65536">65536</option>
           <option value="131072">131072</option>
           <option value="all">All</option>
         </select>
+        <label class="lbl" style="width:auto;flex-shrink:0">Overlap</label>
         <select id="overlap" style="flex:0 0 auto; width:58px">
           <option value="1">×1</option>
           <option value="2">×2</option>
@@ -526,7 +510,7 @@ srcType.addEventListener('change', () => {
   const isSine = srcType.value === 'sine';
   const isFile = srcType.value === 'file';
   document.getElementById('durRow').style.display   = isFile ? 'none' : '';
-  document.getElementById('freqRow').style.display  = isSine ? '' : 'none';
+  document.getElementById('freqRow').style.display  = isSine ? 'inline-flex' : 'none';
   document.getElementById('fileRow').style.display  = isFile ? '' : 'none';
   if (!isFile) invalidateSource();
 });
@@ -547,12 +531,6 @@ freqNum.addEventListener('change', () => {
 alphaNum.addEventListener('change', () => {
   alphaNum.value = Math.max(0, Math.min(4, parseFloat(alphaNum.value) || 0)).toFixed(2);
   invalidateFRFT();
-});
-document.querySelectorAll('.alphaBtn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    alphaNum.value = parseFloat(btn.dataset.a).toFixed(2);
-    invalidateFRFT();
-  });
 });
 
 // ── Block size + overlap ──────────────────────────────────────────────────────
