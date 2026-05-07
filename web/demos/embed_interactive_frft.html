@@ -301,6 +301,13 @@
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
   }
 
+  /* Playhead — between specCanvas and zoomOverlay, pointer-events off */
+  #playheadCanvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
   /* Zoom selection overlay — sits on top of specCanvas, handles all mouse */
   #zoomOverlay {
     position: absolute; top: 0; left: 0;
@@ -417,6 +424,7 @@
       <canvas id="spectrumCanvas" width="40" height="400"></canvas>
       <div id="specWrap">
         <canvas id="specCanvas" width="1200" height="400"></canvas>
+        <canvas id="playheadCanvas"></canvas>
         <canvas id="zoomOverlay"></canvas>
       </div>
     </div>
@@ -480,6 +488,7 @@ const tabWet      = document.getElementById('tabWet');
 const tabBoth     = document.getElementById('tabBoth');
 const downloadBtn = document.getElementById('downloadBtn');
 const specCanvas      = document.getElementById('specCanvas');
+const playheadCanvas  = document.getElementById('playheadCanvas');
 const spectrumCanvas  = document.getElementById('spectrumCanvas');
 const specWrap        = document.getElementById('specWrap');
 
@@ -494,6 +503,11 @@ const specRO = new ResizeObserver(() => {
     specCanvas.height = h;
     if (wetSTFT) renderActiveTab();
     else clearSpectrogram();
+  }
+  if (playheadCanvas.width !== w || playheadCanvas.height !== h) {
+    playheadCanvas.width  = w;
+    playheadCanvas.height = h;
+    drawPlayhead();
   }
   // Spectrum strip — same height, its own CSS width × dpr
   const sw = Math.max(1, Math.floor(spectrumCanvas.getBoundingClientRect().width * dpr));
@@ -807,6 +821,40 @@ function clearSpectrum() {
   ctx2d.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
 }
 
+// ── Playhead ──────────────────────────────────────────────────────────────────
+function clearPlayhead() {
+  const ctx2d = playheadCanvas.getContext('2d');
+  ctx2d.clearRect(0, 0, playheadCanvas.width, playheadCanvas.height);
+}
+
+function drawPlayhead() {
+  if (!audioCtx) { clearPlayhead(); return; }
+  const stft = playingWhich === 'dry' ? drySTFT : playingWhich === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) { clearPlayhead(); return; }
+
+  const W = playheadCanvas.width;
+  const H = playheadCanvas.height;
+  const ctx2d = playheadCanvas.getContext('2d');
+  ctx2d.clearRect(0, 0, W, H);
+
+  const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx = elapsed * sampleRate / STFT_HOP;
+
+  const fStart = zoomView ? zoomView.t0 : 0;
+  const fEnd   = zoomView ? zoomView.t1 : stft.numFrames - 1;
+  if (fEnd === fStart) return;
+
+  const x = Math.round((frameIdx - fStart) / (fEnd - fStart) * (W - 1));
+  if (x < 0 || x >= W) return;
+
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx2d.lineWidth   = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  ctx2d.beginPath();
+  ctx2d.moveTo(x + 0.5, 0);
+  ctx2d.lineTo(x + 0.5, H);
+  ctx2d.stroke();
+}
+
 function updateSpectrum() {
   if (!audioCtx) return;
   const stft = playingWhich === 'dry' ? drySTFT : playingWhich === 'wet' ? wetSTFT : mixSTFT;
@@ -844,10 +892,13 @@ function updateSpectrum() {
     }
   }
   ctx2d.putImageData(imgData, 0, 0);
+
+  drawPlayhead();
 }
 
 function stopPlayback() {
   clearSpectrum();
+  clearPlayhead();
   if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
   if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
   if (audioCtx)   { audioCtx.close(); audioCtx = null; }
