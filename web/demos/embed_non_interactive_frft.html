@@ -14,11 +14,14 @@
     if (w) s.width  = Math.max(200, +w) + 'px';
     if (h) s.height = Math.max(100, +h) + 'px';
 
-    const raw_bs = (sp.get('blocksize') || '16384').toLowerCase();
-    const type   = (sp.get('type') || 'sweep').toLowerCase();
+    const raw_bs   = (sp.get('blocksize') || '16384').toLowerCase();
+    const urlParam = sp.get('url') || null;
+    // url= implies type=file
+    const type = urlParam ? 'file' : (sp.get('type') || 'sweep').toLowerCase();
     const hs = sp.get('halfspec');
     window._p = {
       type:      type,
+      url:       urlParam,
       dur:       Math.max(0.1, parseFloat(sp.get('dur'))    || (type === 'sweep' ? 10 : 3)),
       freq:      Math.max(20,  parseFloat(sp.get('freq'))   || 440),
       alpha:     parseFloat(sp.get('alpha'))  != null ? parseFloat(sp.get('alpha'))  : 0.10,
@@ -123,22 +126,6 @@
   }
   #status.err { color: var(--red); }
 
-  /* ── Param display label ── */
-  #paramDisplay {
-    flex: 1;
-    font-size: 0.80em;
-    font-weight: 700;
-    color: var(--muted);
-    text-align: right;
-    padding: 0 0.3em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
   /* ── Source / FRFT toggle tabs ── */
   .tab-group { display: flex; flex-shrink: 0; }
   .tab {
@@ -205,19 +192,62 @@
     cursor: crosshair;
   }
 
-  /* ── Pipeline diagram ── */
-  .pipeline-wrap {
-    display: flex; align-items: center; justify-content: center;
-    gap: 0.25em; flex-wrap: wrap; padding: 0.1em 0;
+  /* ── File input button ── */
+  #fileLabel {
+    display: none;           /* shown only in file mode */
+    align-items: center;
+    height: 100%;
+    padding: 0 0.7em;
+    background: var(--surface2);
+    color: var(--muted);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    font-size: 0.82em; font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: filter .12s;
   }
-  .pb {
-    background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 3px; padding: 0.18em 0.45em;
-    font-size: 0.72em; font-family: "SF Mono","Fira Mono",monospace;
-    color: var(--text); white-space: nowrap; line-height: 1.4;
+  #fileLabel:hover { filter: brightness(1.2); }
+  #fileLabel.has-file {
+    color: var(--accent);
+    border-color: var(--accent-lo);
+    background: #2a2218;
   }
-  .pb.key { border-color: var(--accent); color: var(--accent); }
-  .pa { color: var(--border2); font-size: 0.72em; flex-shrink: 0; user-select: none; }
+  #fileInput { display: none; }
+
+  /* ── Settings panel ── */
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    flex-wrap: wrap;
+  }
+  .st-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25em;
+    white-space: nowrap;
+  }
+  .st-key {
+    font-size: 0.68em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .st-val {
+    font-size: 0.78em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .st-val.accent { color: var(--accent); }
+  .st-sep {
+    color: var(--border2);
+    font-size: 0.7em;
+    flex-shrink: 0;
+    user-select: none;
+  }
 </style>
 </head>
 <body>
@@ -232,9 +262,10 @@
         <button class="tab" id="tabDry">Source</button>
         <button class="tab active" id="tabWet">FRFT</button>
       </div>
+      <label id="fileLabel" for="fileInput">📂 Choose file</label>
+      <input type="file" id="fileInput" accept="audio/*">
       <span id="status">loading…</span>
-      <span id="paramDisplay"></span>
-      <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
+      <button class="btn-neutral" id="downloadBtn" disabled style="margin-left:auto">⬇</button>
     </div>
   </div>
 
@@ -247,29 +278,8 @@
     </div>
   </div>
 
-  <!-- Pipeline diagram (static, shown based on halfspec param) -->
-  <div class="card" style="padding:0.35em 0.75em; flex:none;">
-    <div id="pipelineFull" class="pipeline-wrap">
-      <span class="pb">x[n]</span><span class="pa">→</span>
-      <span class="pb">Hann</span><span class="pa">→</span>
-      <span class="pb key">FRFT(α)</span><span class="pa">→</span>
-      <span class="pb">Re{·}</span><span class="pa">→</span>
-      <span class="pb">Hann</span><span class="pa">→</span>
-      <span class="pb">OLA</span><span class="pa">→</span>
-      <span class="pb">y[n]</span>
-    </div>
-    <div id="pipelineHalf" class="pipeline-wrap" style="display:none">
-      <span class="pb">x[n]</span><span class="pa">→</span>
-      <span class="pb">Hann</span><span class="pa">→</span>
-      <span class="pb">FFT</span><span class="pa">→</span>
-      <span class="pb">½ spec</span><span class="pa">→</span>
-      <span class="pb key">FRFT(α)</span><span class="pa">→</span>
-      <span class="pb">Re-IFFT</span><span class="pa">→</span>
-      <span class="pb">Hann</span><span class="pa">→</span>
-      <span class="pb">OLA</span><span class="pa">→</span>
-      <span class="pb">y[n]</span>
-    </div>
-  </div>
+  <!-- Settings panel -->
+  <div class="card" style="padding:0.35em 0.75em; flex:none;" id="settingsPanel"></div>
 
 </div><!-- /layout -->
 
@@ -307,26 +317,34 @@ const playBtn     = document.getElementById('playBtn');
 const tabDry      = document.getElementById('tabDry');
 const tabWet      = document.getElementById('tabWet');
 const downloadBtn = document.getElementById('downloadBtn');
+const fileLabel   = document.getElementById('fileLabel');
+const fileInput   = document.getElementById('fileInput');
 const specCanvas      = document.getElementById('specCanvas');
 const spectrumCanvas  = document.getElementById('spectrumCanvas');
 const specWrap        = document.getElementById('specWrap');
 
-// ── Param display label ───────────────────────────────────────────────────────
-(function buildParamLabel() {
-  const p     = window._p;
-  const alpha = isNaN(p.alpha) ? 0.10 : p.alpha;
-  const isAll = p.blocksize === 'all';
+// Show file picker button only in manual file mode (no url= param)
+if (window._p.type === 'file' && !window._p.url) {
+  fileLabel.style.display = 'flex';
+}
 
-  const srcPart   = p.type === 'sine' ? `${p.freq}Hz Sine` : 'Sweep';
-  const alphaPart = `α=${+alpha.toFixed(5)}`;
-  const blockPart = isAll
-    ? 'applied to entire signal'
-    : `w=${p.blocksize}, hop=${Math.round(parseInt(p.blocksize) / p.overlap)}`;
-
-  const modePart = p.halfspec ? 'half-spectrum' : 'full-spectrum';
-  document.getElementById('paramDisplay').textContent =
-    `${srcPart}, ${alphaPart}, ${blockPart}, ${modePart}`;
-})();
+// File selection → decode + process
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  dryBuf = null;
+  fileLabel.textContent = '📂 ' + file.name;
+  fileLabel.classList.add('has-file');
+  updateSettingsPanelSource(file.name);
+  setStatus('Decoding…');
+  try {
+    dryBuf = await decodeFile(file);
+  } catch (err) {
+    setStatus('Decode error', 'err');
+    return;
+  }
+  scheduleProcess();
+});
 
 // ── ResizeObserver: keep canvases pixel-crisp (dpr-aware) ────────────────────
 const specRO = new ResizeObserver(() => {
@@ -366,19 +384,41 @@ function scheduleProcess() {
 
 async function autoProcess() {
   if (!workerReady) { setStatus('Loading WASM…', 'busy'); return; }
+  const p = window._p;
+
+  // File mode
+  if (p.type === 'file') {
+    if (!dryBuf && p.url) {
+      // ── Direct URL path ───────────────────────────────────────────
+      setStatus('Fetching…');
+      try {
+        dryBuf = await fetchAndDecode(p.url);
+        const fname = p.url.split('/').pop().split('?')[0];
+        updateSettingsPanelSource(fname);
+      } catch (err) {
+        setStatus('Fetch failed: ' + (err.message || err), 'err');
+        return;
+      }
+
+    } else if (!dryBuf) {
+      setStatus('choose a file ↑');
+      return;
+    }
+  }
+
   const jobId = currentJobId;
   try {
-    const p = window._p;
-    sampleRate = 44100;
-    dryBuf = generateSignal(p.type, p.dur, sampleRate, p.freq);
+    if (p.type !== 'file') {
+      sampleRate = 44100;
+      dryBuf = generateSignal(p.type, p.dur, sampleRate, p.freq);
+    }
     if (jobId !== currentJobId) return;
 
     const alpha            = isNaN(p.alpha) ? 0.10 : p.alpha;
     const isAll            = p.blocksize === 'all';
     const bufSize          = isAll ? dryBuf.length : parseInt(p.blocksize);
     const effectiveOverlap = isAll ? 1 : p.overlap;
-
-    const halfSpectrum = p.halfspec;
+    const halfSpectrum     = p.halfspec;
     setStatus('Processing…', 'busy');
     frftWorker.postMessage({
       type: 'process',
@@ -403,6 +443,8 @@ function handleWorkerMessage(e) {
     if (workerRestarting) {
       workerRestarting = false;
       setStatus('WASM restarted — reload with smaller block size', 'err');
+    } else if (window._p.type === 'file' && !window._p.url) {
+      setStatus('choose a file ↑');
     } else {
       scheduleProcess();
     }
@@ -553,6 +595,31 @@ function generateSignal(type, seconds, sr, freq) {
     }
   }
   return buf;
+}
+
+// ── Audio decode helpers ──────────────────────────────────────────────────────
+async function decodeArrayBuffer(arrayBuf) {
+  const ctx     = new AudioContext();
+  const decoded = await ctx.decodeAudioData(arrayBuf);
+  const mono    = new Float32Array(decoded.length);
+  for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+    const chData = decoded.getChannelData(ch);
+    for (let i = 0; i < decoded.length; i++)
+      mono[i] += chData[i] / decoded.numberOfChannels;
+  }
+  sampleRate = decoded.sampleRate;
+  await ctx.close();
+  return mono;
+}
+
+async function decodeFile(file) {
+  return decodeArrayBuffer(await file.arrayBuffer());
+}
+
+async function fetchAndDecode(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return decodeArrayBuffer(await resp.arrayBuffer());
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
@@ -1028,12 +1095,67 @@ function initWorker() {
 
 initWorker();
 
-// ── Pipeline diagram: show correct variant based on halfspec param ────────────
-(function () {
-  const half = window._p && window._p.halfspec;
-  document.getElementById('pipelineFull').style.display = half ? 'none' : '';
-  document.getElementById('pipelineHalf').style.display = half ? ''     : 'none';
-})();
+// ── Settings panel ────────────────────────────────────────────────────────────
+function buildSettingsPanel(srcLabelOverride) {
+  const p     = window._p;
+  const alpha = isNaN(p.alpha) ? 0.10 : p.alpha;
+  const isAll = p.blocksize === 'all';
+
+  let srcLabel;
+  if (srcLabelOverride) {
+    srcLabel = srcLabelOverride;
+  } else if (p.type === 'file') {
+    srcLabel = 'Audio file';
+  } else if (p.type === 'sine') {
+    srcLabel = `${p.freq} Hz Sine, ${p.dur}s`;
+  } else {
+    srcLabel = `Sweep, ${p.dur}s`;
+  }
+
+  const alphaStr   = `${+alpha.toFixed(5)}`;
+  const blockStr   = isAll ? 'all' : p.blocksize;
+  const hopStr     = isAll ? '—' : `${Math.round(parseInt(p.blocksize) / p.overlap)}`;
+  const overlapStr = isAll ? '—' : `×${p.overlap}`;
+  const modeStr    = p.halfspec ? 'half-spectrum' : 'full-spectrum';
+
+  const items = [
+    { key: 'Source',  val: srcLabel },
+    { key: 'α',       val: alphaStr, accent: true },
+    { key: 'Block',   val: blockStr },
+    { key: 'Hop',     val: hopStr },
+    { key: 'Overlap', val: overlapStr },
+    { key: 'Mode',    val: modeStr },
+  ];
+
+  const panel = document.getElementById('settingsPanel');
+  panel.innerHTML = '';               // clear before rebuilding
+  const row = document.createElement('div');
+  row.className = 'settings-row';
+
+  items.forEach((item, i) => {
+    const el = document.createElement('span');
+    el.className = 'st-item';
+    el.innerHTML =
+      `<span class="st-key">${item.key}</span>` +
+      `<span class="st-val${item.accent ? ' accent' : ''}">${item.val}</span>`;
+    row.appendChild(el);
+    if (i < items.length - 1) {
+      const sep = document.createElement('span');
+      sep.className = 'st-sep';
+      sep.textContent = '·';
+      row.appendChild(sep);
+    }
+  });
+
+  panel.appendChild(row);
+}
+buildSettingsPanel();
+
+function updateSettingsPanelSource(filename) {
+  // Truncate long filenames for display
+  const label = filename.length > 30 ? filename.slice(0, 28) + '…' : filename;
+  buildSettingsPanel(label);
+}
 </script>
 </body>
 </html>

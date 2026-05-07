@@ -241,3 +241,126 @@ python3 -m http.server 8000
 ```
 
 Browsers block AudioWorklets on `file://` — a local server is required.
+
+---
+
+## Stage 6 — Embed widgets
+
+Two self-contained iframe-friendly pages in `web/demos/`:
+
+| File | Purpose |
+|------|---------|
+| `embed_interactive_frft.html` | Full controls — source, FRFT params, playback, download |
+| `embed_non_interactive_frft.html` | Display-only — params via URL, auto-processes on load |
+| `test-embed.html` | Local harness for testing both embeds at arbitrary sizes |
+
+Both pages are transparent-background, dark-themed, and resize to whatever `width`/`height` the parent `<iframe>` sets.
+
+---
+
+### Interactive embed
+
+All FRFT parameters are exposed as in-page controls. The user can change anything and the result reprocesses automatically.
+
+**Embed:**
+```html
+<iframe src="embed_interactive_frft.html?w=600&h=260"
+        width="600" height="260" frameborder="0"></iframe>
+```
+
+**URL params:**
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `w` | — | Frame width in px (also sets `<html>` width) |
+| `h` | — | Frame height in px |
+| `dur` | `3` | Initial duration in seconds for generated signals |
+
+Everything else (source type, frequency, α, block size, overlap, mode) is controlled interactively inside the embed.
+
+**Features:**
+- Source: sine wave, frequency sweep, or audio file upload
+- FRFT mode: full-spectrum or half-spectrum
+- α, block size (16 → 131072 or "all"), overlap factor
+- Source / FRFT spectrogram tabs with drag-to-zoom
+- Play / stop with live spectrum strip
+- Download ZIP (source WAV + FRFT WAV + both spectrograms as PNG)
+
+---
+
+### Non-interactive embed
+
+All parameters come from the URL. The embed auto-processes on load and shows the result — no user controls.
+
+**Embed:**
+```html
+<iframe src="embed_non_interactive_frft.html?type=sweep&dur=10&alpha=0.1&blocksize=16384&overlap=4"
+        width="500" height="200" frameborder="0"></iframe>
+```
+
+**URL params:**
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `w` | — | Frame width in px |
+| `h` | — | Frame height in px |
+| `type` | `sweep` | Signal source: `sweep`, `sine`, or `file` |
+| `dur` | `10` (sweep) / `3` (sine) | Duration in seconds |
+| `freq` | `440` | Frequency in Hz (sine only) |
+| `alpha` | `0.10` | Fractional order (0 – 4) |
+| `blocksize` | `16384` | FRFT block size, or `all` for one-shot |
+| `overlap` | `4` | Overlap factor (1, 2, 4 …) |
+| `halfspec` | `0` | `1` to enable half-spectrum mode |
+| `url` | — | URL of an audio file to fetch and process (see below) |
+
+A bottom settings bar shows all active parameters.
+
+---
+
+#### Source modes
+
+**Generated signals**
+
+```
+?type=sweep&dur=10&alpha=0.1&blocksize=16384&overlap=4
+?type=sine&freq=880&dur=5&alpha=0.5
+```
+
+**File from your assets folder**
+
+Pass a relative or absolute path via `url=`. No CORS issues since it's same-origin:
+
+```
+?url=../assets/piano.wav&alpha=0.1&blocksize=16384&overlap=4
+?url=/assets/piano.wav&alpha=0.25
+```
+
+**File from an external URL**
+
+The remote server must send `Access-Control-Allow-Origin: *`. Freesound's CDN does this, so you can use preview URLs directly:
+
+```
+?url=https://cdn.freesound.org/previews/414/414090_4921277-hq.mp3&alpha=0.1
+```
+
+To find a Freesound preview URL: open the sound page → right-click the waveform player → **Copy audio address**.
+
+**Manual file picker**
+
+When `type=file` is set without a `url=`, a **📂 Choose file** button appears in the controls bar. The user picks a file and it auto-processes:
+
+```
+?type=file&alpha=0.1&blocksize=16384&overlap=4
+```
+
+---
+
+### Test harness
+
+Open `web/demos/test-embed.html` in a local server. It renders both embeds side by side with controls for width, height, and all URL params, reloading the iframes on demand.
+
+```bash
+cd web
+python3 -m http.server 8000
+# open http://localhost:8000/demos/test-embed.html
+```
