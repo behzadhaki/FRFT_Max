@@ -235,9 +235,10 @@
 
 <script>
 // ── Worker + job tracking ─────────────────────────────────────────────────────
-let frftWorker   = null;
-let workerReady  = false;
-let currentJobId = 0;
+let frftWorker       = null;
+let workerReady      = false;
+let workerRestarting = false;
+let currentJobId     = 0;
 
 let dryBuf        = null;
 let wetBuf        = null;
@@ -356,7 +357,12 @@ function handleWorkerMessage(e) {
 
   if (type === 'ready') {
     workerReady = true;
-    scheduleProcess();
+    if (workerRestarting) {
+      workerRestarting = false;
+      setStatus('WASM restarted — reload with smaller block size', 'err');
+    } else {
+      scheduleProcess();
+    }
     return;
   }
 
@@ -396,7 +402,12 @@ function handleWorkerMessage(e) {
 
   if (type === 'error') {
     console.error('Worker error:', e.data.message);
-    setStatus(e.data.message || 'Worker error', 'err');
+    if ((e.data.message || '').includes('Aborted')) {
+      setStatus('WASM out of memory — reduce block size', 'err');
+      restartWorker();
+    } else {
+      setStatus(e.data.message || 'Worker error', 'err');
+    }
   }
 }
 
@@ -437,12 +448,30 @@ tabWet.addEventListener('click', () => {
   if (elapsed !== null && wetBuf) startPlayback(wetBuf, 'wet', elapsed);
 });
 
-// ── Download ──────────────────────────────────────────────────────────────────
-downloadBtn.addEventListener('click', () => {
+// ── Download ZIP ──────────────────────────────────────────────────────────────
+downloadBtn.addEventListener('click', async () => {
   if (!trimmedDryBuf || !wetBuf) return;
   const alpha = (isNaN(window._p.alpha) ? 0.10 : window._p.alpha).toFixed(5);
-  downloadWAV(trimmedDryBuf, sampleRate, 'source.wav');
-  downloadWAV(wetBuf,        sampleRate, `frft_alpha${alpha}.wav`);
+
+  const tmp = document.createElement('canvas');
+  tmp.width  = specCanvas.width;
+  tmp.height = specCanvas.height;
+
+  renderSpectrogram(tmp, drySTFT, sampleRate, sharedTopBin, null);
+  const srcPNG  = await canvasToPNG(tmp);
+  renderSpectrogram(tmp, wetSTFT, sampleRate, sharedTopBin, null);
+  const frftPNG = await canvasToPNG(tmp);
+
+  const zip = buildZip([
+    { name: 'source.wav',                        data: buildWAV(trimmedDryBuf, sampleRate) },
+    { name: `frft_alpha${alpha}.wav`,             data: buildWAV(wetBuf,        sampleRate) },
+    { name: 'source_spectrogram.png',             data: srcPNG  },
+    { name: `frft_alpha${alpha}_spectrogram.png`, data: frftPNG },
+  ]);
+
+  const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+  Object.assign(document.createElement('a'), { href: url, download: `frft_alpha${alpha}.zip` }).click();
+  URL.revokeObjectURL(url);
 });
 
 // ── Status helpers ────────────────────────────────────────────────────────────
@@ -484,7 +513,7 @@ function generateSignal(type, seconds, sr, freq) {
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
-const STFT_HOP = 512;
+const STFT_HOP = 256;   // must match HOP in computeSTFT (FFT_SIZE/8 = 2048/8)
 
 function clearSpectrum() {
   if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
@@ -574,8 +603,8 @@ function startPlayback(samples, which, offset = 0) {
   playBtn.className   = 'btn-playing';
 }
 
-// ── WAV download ──────────────────────────────────────────────────────────────
-function downloadWAV(samples, sr, filename) {
+// ── WAV builder (returns Uint8Array) ─────────────────────────────────────────
+function buildWAV(samples, sr) {
   const numSamples = samples.length;
   const dataBytes  = numSamples * 2;
   const buf        = new ArrayBuffer(44 + dataBytes);
@@ -583,13 +612,13 @@ function downloadWAV(samples, sr, filename) {
   const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off+i, s.charCodeAt(i)); };
   str(0,  'RIFF'); v.setUint32(4,  36 + dataBytes, true);
   str(8,  'WAVE'); str(12, 'fmt ');
-  v.setUint32(16, 16,    true);
-  v.setUint16(20, 1,     true);
-  v.setUint16(22, 1,     true);
-  v.setUint32(24, sr,    true);
-  v.setUint32(28, sr*2,  true);
-  v.setUint16(32, 2,     true);
-  v.setUint16(34, 16,    true);
+  v.setUint32(16, 16,   true);
+  v.setUint16(20, 1,    true);
+  v.setUint16(22, 1,    true);
+  v.setUint32(24, sr,   true);
+  v.setUint32(28, sr*2, true);
+  v.setUint16(32, 2,    true);
+  v.setUint16(34, 16,   true);
   str(36, 'data'); v.setUint32(40, dataBytes, true);
   let off = 44;
   for (let i = 0; i < numSamples; i++) {
@@ -597,9 +626,102 @@ function downloadWAV(samples, sr, filename) {
     v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     off += 2;
   }
-  const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
-  URL.revokeObjectURL(url);
+  return new Uint8Array(buf);
+}
+
+// ── Canvas → PNG Uint8Array ───────────────────────────────────────────────────
+function canvasToPNG(canvas) {
+  return new Promise(resolve => {
+    canvas.toBlob(blob => blob.arrayBuffer().then(b => resolve(new Uint8Array(b))), 'image/png');
+  });
+}
+
+// ── Minimal ZIP writer (store / no compression) ───────────────────────────────
+function crc32(data) {
+  if (!crc32._t) {
+    crc32._t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      crc32._t[i] = c;
+    }
+  }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) c = crc32._t[(c ^ data[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function buildZip(files) {
+  const enc     = new TextEncoder();
+  const locals  = [];
+  const offsets = [];
+  let   pos     = 0;
+
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const crc  = crc32(f.data);
+    const lh   = new Uint8Array(30 + name.length);
+    const lv   = new DataView(lh.buffer);
+    lv.setUint32(0,  0x04034b50, true);
+    lv.setUint16(4,  20,         true);
+    lv.setUint16(6,  0,          true);
+    lv.setUint16(8,  0,          true); // method: store
+    lv.setUint16(10, 0,          true);
+    lv.setUint16(12, 0,          true);
+    lv.setUint32(14, crc,        true);
+    lv.setUint32(18, f.data.length, true);
+    lv.setUint32(22, f.data.length, true);
+    lv.setUint16(26, name.length,   true);
+    lv.setUint16(28, 0,          true);
+    lh.set(name, 30);
+    offsets.push(pos);
+    locals.push({ lh, data: f.data, name, crc });
+    pos += lh.length + f.data.length;
+  }
+
+  const cdStart = pos;
+  const cdParts = locals.map(({ lh, data, name, crc }, i) => {
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0,  0x02014b50,  true);
+    cv.setUint16(4,  20,          true);
+    cv.setUint16(6,  20,          true);
+    cv.setUint16(8,  0,           true);
+    cv.setUint16(10, 0,           true);
+    cv.setUint16(12, 0,           true);
+    cv.setUint16(14, 0,           true);
+    cv.setUint32(16, crc,         true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint16(30, 0,           true);
+    cv.setUint16(32, 0,           true);
+    cv.setUint16(34, 0,           true);
+    cv.setUint16(36, 0,           true);
+    cv.setUint32(38, 0,           true);
+    cv.setUint32(42, offsets[i],  true);
+    cd.set(name, 46);
+    return cd;
+  });
+
+  const cdSize = cdParts.reduce((s, p) => s + p.length, 0);
+  const eocd   = new Uint8Array(22);
+  const ev     = new DataView(eocd.buffer);
+  ev.setUint32(0,  0x06054b50,    true);
+  ev.setUint16(4,  0,             true);
+  ev.setUint16(6,  0,             true);
+  ev.setUint16(8,  files.length,  true);
+  ev.setUint16(10, files.length,  true);
+  ev.setUint32(12, cdSize,        true);
+  ev.setUint32(16, cdStart,       true);
+  ev.setUint16(20, 0,             true);
+
+  const out = new Uint8Array(cdStart + cdSize + 22);
+  let   p   = 0;
+  for (const { lh, data } of locals) { out.set(lh, p); p += lh.length; out.set(data, p); p += data.length; }
+  for (const cd of cdParts)          { out.set(cd, p); p += cd.length; }
+  out.set(eocd, p);
+  return out;
 }
 
 // ── FFT (radix-2 Cooley-Tukey, in-place) ─────────────────────────────────────
@@ -655,7 +777,7 @@ function spectrogramColor(t) {
 // ── STFT computation ──────────────────────────────────────────────────────────
 function computeSTFT(samples) {
   const FFT_SIZE = 2048;
-  const HOP      = FFT_SIZE >> 2;
+  const HOP      = FFT_SIZE >> 3;
   const NUM_BINS = FFT_SIZE >> 1;
 
   const win = new Float32Array(FFT_SIZE);
@@ -837,17 +959,31 @@ zoomOverlay.addEventListener('dblclick', () => {
   renderActiveTab();
 });
 
-// ── Worker init ───────────────────────────────────────────────────────────────
-(function initWorker() {
+// ── Worker init / restart ─────────────────────────────────────────────────────
+function restartWorker() {
+  workerReady      = false;
+  workerRestarting = true;
+  currentJobId++;
+  if (frftWorker) { try { frftWorker.terminate(); } catch {} frftWorker = null; }
+  setTimeout(initWorker, 300);
+}
+
+function initWorker() {
   const cb          = window._wasmCacheBust;
   const jsUrl       = new URL('../wasm/dist/frft.js', location.href).href + '?v=' + cb;
   const wasmBaseUrl = new URL('../wasm/dist/', location.href).href;
 
   frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cb);
   frftWorker.onmessage = handleWorkerMessage;
-  frftWorker.onerror   = (e) => setStatus('Worker error: ' + e.message, 'err');
+  frftWorker.onerror   = (e) => {
+    console.error('Worker uncaught error:', e.message);
+    setStatus('WASM out of memory — reduce block size', 'err');
+    restartWorker();
+  };
   frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl, cacheBust: cb });
-})();
+}
+
+initWorker();
 </script>
 </body>
 </html>
