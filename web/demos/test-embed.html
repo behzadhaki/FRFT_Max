@@ -83,7 +83,7 @@
 </head>
 <body>
 
-<h1>embed.html — iframe tester</h1>
+<h1>embed_interactive_frft.html — iframe tester</h1>
 <p>Adjust width / height and hit Apply to reload the embed with matching <code>?w=&amp;h=</code> params.</p>
 
 <div class="controls">
@@ -100,21 +100,53 @@
   <iframe id="embedFrame" width="600" height="220"></iframe>
 </div>
 
+<hr style="border:none;border-top:1px solid #ccc;margin:8px 0;">
+
+<h1>embed_non_interactive_frft.html — iframe tester</h1>
+<p>Params are passed via URL. Hit Apply to reload.</p>
+
+<div class="controls">
+  <label>Width</label>
+  <input type="number" id="wInput2" value="400" min="200" step="10">
+  <label>Height</label>
+  <input type="number" id="hInput2" value="220" min="100" step="10">
+  <label>Type</label>
+  <select id="typeInput">
+    <option value="sweep" selected>sweep</option>
+    <option value="sine">sine</option>
+  </select>
+  <label>Dur (s)</label>
+  <input type="number" id="durInput" value="10" min="1" max="600" step="1">
+  <label>Freq (Hz)</label>
+  <input type="number" id="freqInput" value="440" min="20" max="20000" step="1">
+  <label>α</label>
+  <input type="number" id="alphaInput" value="0.10" min="0" max="4" step="0.00001">
+  <label>Block</label>
+  <input type="text" id="blocksizeInput" value="16384" style="width:72px;border:1px solid #ccc;border-radius:5px;padding:4px 7px;font-size:13px;outline:none;">
+  <label>Overlap</label>
+  <input type="number" id="overlapInput" value="4" min="1" max="32" step="1">
+  <button id="applyBtn2">Apply</button>
+</div>
+
+<div class="url-display" id="urlDisplay2"></div>
+
+<div class="frame-wrap" id="frameWrap2">
+  <iframe id="embedFrame2" width="400" height="220"></iframe>
+</div>
+
 <script>
   const wInput    = document.getElementById('wInput');
   const hInput    = document.getElementById('hInput');
   const applyBtn  = document.getElementById('applyBtn');
   const frame     = document.getElementById('embedFrame');
-  const frameWrap = document.getElementById('frameWrap');
   const urlDisplay = document.getElementById('urlDisplay');
 
   function apply() {
-    const w = Math.max(200, parseInt(wInput.value) || 900);
-    const h = Math.max(100, parseInt(hInput.value) || 420);
+    const w = Math.max(200, parseInt(wInput.value) || 600);
+    const h = Math.max(100, parseInt(hInput.value) || 220);
     wInput.value = w;
     hInput.value = h;
-
-    const url = `embed.html?w=${w}&h=${h}`;
+    const url = `embed_interactive_frft.html?w=${w}&h=${h}&v=${Date.now()}`;
     frame.width  = w;
     frame.height = h;
     frame.src    = url;
@@ -122,14 +154,51 @@
   }
 
   applyBtn.addEventListener('click', apply);
-
-  // Allow Enter in either input
   [wInput, hInput].forEach(el => el.addEventListener('keydown', e => {
     if (e.key === 'Enter') apply();
   }));
-
-  // Load on first paint
   apply();
+
+  // ── Non-interactive tester ────────────────────────────────────────────────
+  const wInput2       = document.getElementById('wInput2');
+  const hInput2       = document.getElementById('hInput2');
+  const typeInput     = document.getElementById('typeInput');
+  const durInput      = document.getElementById('durInput');
+  const freqInput     = document.getElementById('freqInput');
+  const alphaInput    = document.getElementById('alphaInput');
+  const blocksizeInput = document.getElementById('blocksizeInput');
+  const overlapInput  = document.getElementById('overlapInput');
+  const applyBtn2     = document.getElementById('applyBtn2');
+  const frame2        = document.getElementById('embedFrame2');
+  const urlDisplay2   = document.getElementById('urlDisplay2');
+
+  function apply2() {
+    const w = Math.max(200, parseInt(wInput2.value) || 600);
+    const h = Math.max(100, parseInt(hInput2.value) || 160);
+    wInput2.value = w;
+    hInput2.value = h;
+    const params = new URLSearchParams({
+      w, h,
+      type:      typeInput.value,
+      dur:       durInput.value,
+      freq:      freqInput.value,
+      alpha:     alphaInput.value,
+      blocksize: blocksizeInput.value,
+      overlap:   overlapInput.value,
+      v:         Date.now(),
+    });
+    const url = `embed_non_interactive_frft.html?${params}`;
+    frame2.width  = w;
+    frame2.height = h;
+    frame2.src    = url;
+    urlDisplay2.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
+  }
+
+  applyBtn2.addEventListener('click', apply2);
+  [wInput2, hInput2, durInput, freqInput, alphaInput, overlapInput].forEach(el =>
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') apply2(); })
+  );
+  apply2();
 </script>
 </body>
 </html>
