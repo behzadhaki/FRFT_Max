@@ -125,6 +125,11 @@
   <input type="text" id="blocksizeInput" value="16384" style="width:72px;border:1px solid #ccc;border-radius:5px;padding:4px 7px;font-size:13px;outline:none;">
   <label>Overlap</label>
   <input type="number" id="overlapInput" value="4" min="1" max="32" step="1">
+  <label>Half-spec</label>
+  <select id="halfspecInput">
+    <option value="0">No</option>
+    <option value="1">Yes</option>
+  </select>
   <button id="applyBtn2">Apply</button>
 </div>
 
@@ -167,8 +172,9 @@
   const freqInput     = document.getElementById('freqInput');
   const alphaInput    = document.getElementById('alphaInput');
   const blocksizeInput = document.getElementById('blocksizeInput');
-  const overlapInput  = document.getElementById('overlapInput');
-  const applyBtn2     = document.getElementById('applyBtn2');
+  const overlapInput   = document.getElementById('overlapInput');
+  const halfspecInput  = document.getElementById('halfspecInput');
+  const applyBtn2      = document.getElementById('applyBtn2');
   const frame2        = document.getElementById('embedFrame2');
   const urlDisplay2   = document.getElementById('urlDisplay2');
 
@@ -185,6 +191,7 @@
       alpha:     alphaInput.value,
       blocksize: blocksizeInput.value,
       overlap:   overlapInput.value,
+      halfspec:  halfspecInput.value,
       v:         Date.now(),
     });
     const url = `embed_non_interactive_frft.html?${params}`;

@@ -282,6 +282,37 @@
     width: 100%; height: 100%;
     cursor: crosshair;
   }
+
+  /* ── Pipeline diagram ── */
+  .pipeline-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25em;
+    flex-wrap: wrap;
+    padding: 0.1em 0;
+  }
+  .pb {                             /* pipeline box */
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    padding: 0.18em 0.45em;
+    font-size: 0.72em;
+    font-family: "SF Mono", "Fira Mono", monospace;
+    color: var(--text);
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+  .pb.key {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .pa {                             /* pipeline arrow */
+    color: var(--border2);
+    font-size: 0.72em;
+    flex-shrink: 0;
+    user-select: none;
+  }
 </style>
 </head>
 <body>
@@ -324,6 +355,13 @@
     <div class="card">
       <h1>FRFT Parameters</h1>
       <div class="rows-wrap">
+        <div class="row">
+          <label class="lbl">Mode</label>
+          <select id="modeSel">
+            <option value="full">Full spectrum</option>
+            <option value="half">Half spectrum</option>
+          </select>
+        </div>
         <div class="row">
           <label class="lbl">α (order)</label>
           <input type="number" id="alphaNum" min="0" max="4" step="0.00001" value="0.10" style="flex:1;width:auto">
@@ -386,6 +424,32 @@
       </div>
     </div>
 
+    <!-- Pipeline diagram -->
+    <div class="card" style="padding:0.35em 0.75em; flex:none;">
+      <!-- Full-spectrum pipeline -->
+      <div id="pipelineFull" class="pipeline-wrap">
+        <span class="pb">x[n]</span><span class="pa">→</span>
+        <span class="pb">Hann</span><span class="pa">→</span>
+        <span class="pb key">FRFT(α)</span><span class="pa">→</span>
+        <span class="pb">Re{·}</span><span class="pa">→</span>
+        <span class="pb">Hann</span><span class="pa">→</span>
+        <span class="pb">OLA</span><span class="pa">→</span>
+        <span class="pb">y[n]</span>
+      </div>
+      <!-- Half-spectrum pipeline -->
+      <div id="pipelineHalf" class="pipeline-wrap" style="display:none">
+        <span class="pb">x[n]</span><span class="pa">→</span>
+        <span class="pb">Hann</span><span class="pa">→</span>
+        <span class="pb">FFT</span><span class="pa">→</span>
+        <span class="pb">½ spec</span><span class="pa">→</span>
+        <span class="pb key">FRFT(α)</span><span class="pa">→</span>
+        <span class="pb">Re-IFFT</span><span class="pa">→</span>
+        <span class="pb">Hann</span><span class="pa">→</span>
+        <span class="pb">OLA</span><span class="pa">→</span>
+        <span class="pb">y[n]</span>
+      </div>
+    </div>
+
   </div><!-- /right-col -->
 
 </div><!-- /layout -->
@@ -429,6 +493,7 @@ if (window._initDur) {
   durNum.value = Math.max(1, Math.min(600, window._initDur));
 }
 const alphaNum    = document.getElementById('alphaNum');
+const modeSel     = document.getElementById('modeSel');
 const bufSizeSel  = document.getElementById('bufSizeSel');
 const overlapSel  = document.getElementById('overlap');
 const statusEl    = document.getElementById('status');
@@ -505,12 +570,14 @@ async function autoProcess() {
     const isAll            = bufSizeSel.value === 'all';
     const bufSize          = isAll ? dryBuf.length : parseInt(bufSizeSel.value);
     const effectiveOverlap = isAll ? 1 : overlap;
+    const halfSpectrum = modeSel.value === 'half';
     setStatus('Processing…', 'busy');
     frftWorker.postMessage({
       type: 'process',
       samples: dryBuf,
       alpha, bufSize,
       overlapFactor: effectiveOverlap,
+      halfSpectrum,
       jobId,
     });
   } catch (err) {
@@ -608,8 +675,16 @@ alphaNum.addEventListener('change', () => {
 });
 
 // ── Block size + overlap ──────────────────────────────────────────────────────
+function updatePipeline() {
+  const half = modeSel.value === 'half';
+  document.getElementById('pipelineFull').style.display = half ? 'none' : '';
+  document.getElementById('pipelineHalf').style.display = half ? ''     : 'none';
+}
+modeSel.addEventListener('change', () => { updatePipeline(); invalidateFRFT(); });
+updatePipeline();
 bufSizeSel.addEventListener('change', () => {
-  overlapSel.disabled = bufSizeSel.value === 'all';
+  const all = bufSizeSel.value === 'all';
+  overlapSel.disabled = all;
   invalidateFRFT();
 });
 overlapSel.addEventListener('change', invalidateFRFT);

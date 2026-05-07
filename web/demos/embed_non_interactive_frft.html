@@ -16,6 +16,7 @@
 
     const raw_bs = (sp.get('blocksize') || '16384').toLowerCase();
     const type   = (sp.get('type') || 'sweep').toLowerCase();
+    const hs = sp.get('halfspec');
     window._p = {
       type:      type,
       dur:       Math.max(0.1, parseFloat(sp.get('dur'))    || (type === 'sweep' ? 10 : 3)),
@@ -23,6 +24,7 @@
       alpha:     parseFloat(sp.get('alpha'))  != null ? parseFloat(sp.get('alpha'))  : 0.10,
       blocksize: raw_bs,
       overlap:   Math.max(1, parseInt(sp.get('overlap')) || 4),
+      halfspec:  hs === '1' || hs === 'true',
     };
   })();
 </script>
@@ -202,6 +204,20 @@
     width: 100%; height: 100%;
     cursor: crosshair;
   }
+
+  /* ── Pipeline diagram ── */
+  .pipeline-wrap {
+    display: flex; align-items: center; justify-content: center;
+    gap: 0.25em; flex-wrap: wrap; padding: 0.1em 0;
+  }
+  .pb {
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 3px; padding: 0.18em 0.45em;
+    font-size: 0.72em; font-family: "SF Mono","Fira Mono",monospace;
+    color: var(--text); white-space: nowrap; line-height: 1.4;
+  }
+  .pb.key { border-color: var(--accent); color: var(--accent); }
+  .pa { color: var(--border2); font-size: 0.72em; flex-shrink: 0; user-select: none; }
 </style>
 </head>
 <body>
@@ -228,6 +244,30 @@
     <div id="specWrap">
       <canvas id="specCanvas" width="1200" height="400"></canvas>
       <canvas id="zoomOverlay"></canvas>
+    </div>
+  </div>
+
+  <!-- Pipeline diagram (static, shown based on halfspec param) -->
+  <div class="card" style="padding:0.35em 0.75em; flex:none;">
+    <div id="pipelineFull" class="pipeline-wrap">
+      <span class="pb">x[n]</span><span class="pa">→</span>
+      <span class="pb">Hann</span><span class="pa">→</span>
+      <span class="pb key">FRFT(α)</span><span class="pa">→</span>
+      <span class="pb">Re{·}</span><span class="pa">→</span>
+      <span class="pb">Hann</span><span class="pa">→</span>
+      <span class="pb">OLA</span><span class="pa">→</span>
+      <span class="pb">y[n]</span>
+    </div>
+    <div id="pipelineHalf" class="pipeline-wrap" style="display:none">
+      <span class="pb">x[n]</span><span class="pa">→</span>
+      <span class="pb">Hann</span><span class="pa">→</span>
+      <span class="pb">FFT</span><span class="pa">→</span>
+      <span class="pb">½ spec</span><span class="pa">→</span>
+      <span class="pb key">FRFT(α)</span><span class="pa">→</span>
+      <span class="pb">Re-IFFT</span><span class="pa">→</span>
+      <span class="pb">Hann</span><span class="pa">→</span>
+      <span class="pb">OLA</span><span class="pa">→</span>
+      <span class="pb">y[n]</span>
     </div>
   </div>
 
@@ -283,8 +323,9 @@ const specWrap        = document.getElementById('specWrap');
     ? 'applied to entire signal'
     : `w=${p.blocksize}, hop=${Math.round(parseInt(p.blocksize) / p.overlap)}`;
 
+  const modePart = p.halfspec ? 'half-spectrum' : 'full-spectrum';
   document.getElementById('paramDisplay').textContent =
-    `${srcPart}, ${alphaPart}, ${blockPart}`;
+    `${srcPart}, ${alphaPart}, ${blockPart}, ${modePart}`;
 })();
 
 // ── ResizeObserver: keep canvases pixel-crisp (dpr-aware) ────────────────────
@@ -337,12 +378,14 @@ async function autoProcess() {
     const bufSize          = isAll ? dryBuf.length : parseInt(p.blocksize);
     const effectiveOverlap = isAll ? 1 : p.overlap;
 
+    const halfSpectrum = p.halfspec;
     setStatus('Processing…', 'busy');
     frftWorker.postMessage({
       type: 'process',
       samples: dryBuf,
       alpha, bufSize,
       overlapFactor: effectiveOverlap,
+      halfSpectrum,
       jobId,
     });
   } catch (err) {
@@ -984,6 +1027,13 @@ function initWorker() {
 }
 
 initWorker();
+
+// ── Pipeline diagram: show correct variant based on halfspec param ────────────
+(function () {
+  const half = window._p && window._p.halfspec;
+  document.getElementById('pipelineFull').style.display = half ? 'none' : '';
+  document.getElementById('pipelineHalf').style.display = half ? ''     : 'none';
+})();
 </script>
 </body>
 </html>
