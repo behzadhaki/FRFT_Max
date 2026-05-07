@@ -405,6 +405,7 @@
         <div class="tab-group">
           <button class="tab" id="tabDry">Source</button>
           <button class="tab active" id="tabWet">FRFT</button>
+          <button class="tab" id="tabBoth">Both</button>
         </div>
         <span id="status">loading…</span>
         <button class="btn-neutral" id="downloadBtn" disabled style="margin-left:auto">⬇</button>
@@ -440,6 +441,7 @@ let sampleRate    = 44100;
 // Spectrogram state
 let drySTFT      = null;
 let wetSTFT      = null;
+let mixSTFT      = null;   // averaged mix (dry+wet)/2 — used for 'both' tab
 let sharedTopBin = 0;
 let activeTab    = 'wet';
 let zoomView     = null;  // null = full view, or { t0, t1, b0, b1 } in frame/bin indices
@@ -447,7 +449,10 @@ let zoomView     = null;  // null = full view, or { t0, t1, b0, b1 } in frame/bi
 // Playback state
 let audioCtx            = null;
 let activeSrc           = null;
+let activeSrc2          = null;   // wet source (always running during playback)
 let masterGain          = null;
+let dryGain             = null;   // per-source gain for smooth mix switching
+let wetGain             = null;
 let playingWhich        = null;
 let playheadInterval    = null;
 let playbackStartTime   = 0;
@@ -472,6 +477,7 @@ const statusEl    = document.getElementById('status');
 const playBtn     = document.getElementById('playBtn');
 const tabDry      = document.getElementById('tabDry');
 const tabWet      = document.getElementById('tabWet');
+const tabBoth     = document.getElementById('tabBoth');
 const downloadBtn = document.getElementById('downloadBtn');
 const specCanvas      = document.getElementById('specCanvas');
 const spectrumCanvas  = document.getElementById('spectrumCanvas');
@@ -517,6 +523,7 @@ function scheduleProcess(immediate = false) {
   downloadBtn.disabled = true;
   playBtn.disabled     = true;
   wetBuf = null; trimmedDryBuf = null;
+  drySTFT = null; wetSTFT = null; mixSTFT = null;
   setStatus('pending…');
   if (immediate) autoProcess();
   else debounceTimer = setTimeout(autoProcess, DEBOUNCE_MS);
@@ -595,7 +602,8 @@ function handleWorkerMessage(e) {
 
     drySTFT      = computeSTFT(trimmedDryBuf);
     wetSTFT      = computeSTFT(wetBuf);
-    sharedTopBin = Math.max(drySTFT.topBin, wetSTFT.topBin);
+    mixSTFT      = computeMixSTFT(trimmedDryBuf, wetBuf);
+    sharedTopBin = Math.max(drySTFT.topBin, wetSTFT.topBin, mixSTFT.topBin);
     renderActiveTab();
 
     setFrftProgress(1);
@@ -673,7 +681,7 @@ fileInput.addEventListener('change', () => {
 
 // ── Render whichever tab is active ───────────────────────────────────────────
 function renderActiveTab() {
-  const stft = activeTab === 'dry' ? drySTFT : wetSTFT;
+  const stft = activeTab === 'dry' ? drySTFT : activeTab === 'wet' ? wetSTFT : mixSTFT;
   if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin, zoomView);
 }
 
@@ -681,6 +689,7 @@ function setActiveTabs(tab) {
   activeTab = tab;
   tabDry.classList.toggle('active', tab === 'dry');
   tabWet.classList.toggle('active', tab === 'wet');
+  tabBoth.classList.toggle('active', tab === 'both');
   renderActiveTab();
 }
 
@@ -689,23 +698,22 @@ playBtn.addEventListener('click', () => {
   if (playingWhich !== null) {
     stopPlayback();
   } else {
-    const buf = activeTab === 'dry' ? trimmedDryBuf : wetBuf;
-    if (buf) startPlayback(buf, activeTab);
+    if (trimmedDryBuf && wetBuf) startPlayback(activeTab);
   }
 });
 
-// ── Tab switchers (switch view; if playing, continue from same position) ─────
+// ── Tab switchers — instant mix crossfade, no buffer restart ─────────────────
 tabDry.addEventListener('click', () => {
-  const elapsed = playingWhich !== null
-    ? Math.max(0, audioCtx.currentTime - playbackStartTime) : null;
   setActiveTabs('dry');
-  if (elapsed !== null && trimmedDryBuf) startPlayback(trimmedDryBuf, 'dry', elapsed);
+  if (playingWhich !== null) { applyMix('dry'); playingWhich = 'dry'; }
 });
 tabWet.addEventListener('click', () => {
-  const elapsed = playingWhich !== null
-    ? Math.max(0, audioCtx.currentTime - playbackStartTime) : null;
   setActiveTabs('wet');
-  if (elapsed !== null && wetBuf) startPlayback(wetBuf, 'wet', elapsed);
+  if (playingWhich !== null) { applyMix('wet'); playingWhich = 'wet'; }
+});
+tabBoth.addEventListener('click', () => {
+  setActiveTabs('both');
+  if (playingWhich !== null) { applyMix('both'); playingWhich = 'both'; }
 });
 
 // ── Download ZIP ──────────────────────────────────────────────────────────────
@@ -801,7 +809,7 @@ function clearSpectrum() {
 
 function updateSpectrum() {
   if (!audioCtx) return;
-  const stft = playingWhich === 'dry' ? drySTFT : wetSTFT;
+  const stft = playingWhich === 'dry' ? drySTFT : playingWhich === 'wet' ? wetSTFT : mixSTFT;
   if (!stft) return;
 
   const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
@@ -840,45 +848,75 @@ function updateSpectrum() {
 
 function stopPlayback() {
   clearSpectrum();
-  if (activeSrc) { try { activeSrc.stop(); } catch {} activeSrc = null; }
-  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
   masterGain   = null;
+  dryGain      = null;
+  wetGain      = null;
   playingWhich = null;
   playBtn.textContent = '▶';
   playBtn.className   = 'btn-ok';
 }
 
-function startPlayback(samples, which, offset = 0) {
-  // Tear down any existing playback without resetting spectrum/button yet
-  if (activeSrc) { try { activeSrc.stop(); } catch {} activeSrc = null; }
-  if (audioCtx)  { audioCtx.close(); audioCtx = null; }
-  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
-  masterGain = null;
+// Smooth mix crossfade — called when switching tabs during playback.
+function applyMix(which) {
+  if (!dryGain || !wetGain || !audioCtx) return;
+  const t = audioCtx.currentTime, tau = 0.015;
+  dryGain.gain.setTargetAtTime((which === 'dry'  || which === 'both') ? 1 : 0, t, tau);
+  wetGain.gain.setTargetAtTime((which === 'wet'  || which === 'both') ? 1 : 0, t, tau);
+}
 
-  // Clamp offset to valid range
-  const maxOffset = samples.length / sampleRate;
-  offset = Math.max(0, Math.min(offset, maxOffset - 0.01));
+// Always starts BOTH dry + wet sources; initial mix set by `which`.
+function startPlayback(which, offset = 0) {
+  // Tear down any existing playback
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  masterGain = null; dryGain = null; wetGain = null;
+
+  if (!trimmedDryBuf || !wetBuf) return;
+
+  // Clamp offset to valid range using dry buffer as reference
+  offset = Math.max(0, Math.min(offset, trimmedDryBuf.length / sampleRate - 0.01));
 
   audioCtx   = new AudioContext({ sampleRate });
   masterGain = audioCtx.createGain();
   masterGain.gain.value = 0.5;
   masterGain.connect(audioCtx.destination);
 
-  const audioBuf = audioCtx.createBuffer(1, samples.length, sampleRate);
-  audioBuf.copyToChannel(samples, 0);
+  // Per-source gain nodes — set initial levels immediately (no fade needed at start)
+  dryGain = audioCtx.createGain();
+  wetGain = audioCtx.createGain();
+  dryGain.gain.value = (which === 'dry'  || which === 'both') ? 1 : 0;
+  wetGain.gain.value = (which === 'wet'  || which === 'both') ? 1 : 0;
+  dryGain.connect(masterGain);
+  wetGain.connect(masterGain);
 
+  // Dry source
+  const dryAudioBuf = audioCtx.createBuffer(1, trimmedDryBuf.length, sampleRate);
+  dryAudioBuf.copyToChannel(trimmedDryBuf, 0);
   activeSrc        = audioCtx.createBufferSource();
-  activeSrc.buffer = audioBuf;
-  activeSrc.connect(masterGain);
+  activeSrc.buffer = dryAudioBuf;
+  activeSrc.connect(dryGain);
   activeSrc.start(0, offset);
-  activeSrc.onended = stopPlayback;
+  activeSrc.onended = stopPlayback;   // dry is the timing reference
 
-  const stft = which === 'dry' ? drySTFT : wetSTFT;
+  // Wet source (same offset — they stay in sync)
+  const wetAudioBuf = audioCtx.createBuffer(1, wetBuf.length, sampleRate);
+  wetAudioBuf.copyToChannel(wetBuf, 0);
+  activeSrc2        = audioCtx.createBufferSource();
+  activeSrc2.buffer = wetAudioBuf;
+  activeSrc2.connect(wetGain);
+  activeSrc2.start(0, offset);
+
+  const stft = which === 'dry' ? drySTFT : which === 'wet' ? wetSTFT : mixSTFT;
   playbackStartTime   = audioCtx.currentTime - offset;
-  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(samples.length / STFT_HOP);
+  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(trimmedDryBuf.length / STFT_HOP);
   playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
 
-  playingWhich      = which;
+  playingWhich        = which;
   playBtn.textContent = '■';
   playBtn.className   = 'btn-playing';
 }
@@ -1100,6 +1138,14 @@ function computeSTFT(samples) {
   return { magDB, numFrames, NUM_BINS, HOP, dBmax, dBmin, topBin };
 }
 
+// Compute STFT of the averaged mix (dry + wet) / 2 for the 'both' spectrogram view.
+function computeMixSTFT(dryBufIn, wetBufIn) {
+  const len = Math.min(dryBufIn.length, wetBufIn.length);
+  const mix = new Float32Array(len);
+  for (let i = 0; i < len; i++) mix[i] = (dryBufIn[i] + wetBufIn[i]) * 0.5;
+  return computeSTFT(mix);
+}
+
 // ── STFT spectrogram rendering ────────────────────────────────────────────────
 function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = null) {
   const cW  = canvas.width;
@@ -1214,7 +1260,7 @@ zoomOverlay.addEventListener('mouseup', e => {
 
   if (Math.abs(ex - dragStart.x) < 6 || Math.abs(ey - dragStart.y) < 6) return;
 
-  const stft = activeTab === 'dry' ? drySTFT : wetSTFT;
+  const stft = activeTab === 'dry' ? drySTFT : activeTab === 'wet' ? wetSTFT : mixSTFT;
   if (!stft) return;
 
   const { numFrames, NUM_BINS } = stft;
