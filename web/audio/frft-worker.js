@@ -63,14 +63,14 @@ self.onmessage = (e) => {
     }
 
     if (type === 'process') {
-        const { samples, alpha, bufSize, overlapFactor, jobId, halfSpectrum } = e.data;
+        const { samples, alpha, bufSize, overlapFactor, jobId, halfSpectrum, noWindow } = e.data;
         currentJobId = jobId;
 
         (async () => {
             try {
                 const result = await computeFRFT(
                     samples, alpha, bufSize, overlapFactor, jobId,
-                    halfSpectrum === true
+                    halfSpectrum === true, noWindow === true
                 );
                 if (result === null) {
                     self.postMessage({ type: 'cancelled', jobId });
@@ -160,7 +160,7 @@ function realIfft(halfSpecRe, halfSpecIm, halfN, re, im) {
 
 // ── Core computation ──────────────────────────────────────────────────────────
 
-async function computeFRFT(samples, alpha, bufSize, overlapFactor, jobId, halfSpectrum) {
+async function computeFRFT(samples, alpha, bufSize, overlapFactor, jobId, halfSpectrum, noWindow) {
     // frameN  — time-domain window / OLA frame size (= bufSize)
     // fftN    — FFT size for half-spectrum: nextPow2(frameN) so radix-2 works
     //           for any bufSize including non-power-of-2 "all" mode
@@ -198,10 +198,15 @@ async function computeFRFT(samples, alpha, bufSize, overlapFactor, jobId, halfSp
         }
     }
 
-    // Hann analysis + synthesis window (size frameN for both modes)
+    // Analysis + synthesis window (size frameN for both modes).
+    // noWindow → rectangular (no tapering), matching the paper's no-window mode.
     const win = new Float32Array(frameN);
-    for (let i = 0; i < frameN; i++)
-        win[i] = 0.5 - 0.5 * Math.cos(2.0 * Math.PI * i / (frameN - 1));
+    if (noWindow) {
+        win.fill(1.0);
+    } else {
+        for (let i = 0; i < frameN; i++)
+            win[i] = 0.5 - 0.5 * Math.cos(2.0 * Math.PI * i / (frameN - 1));
+    }
 
     // WOLA normalisation (synthesis window size frameN)
     let wNorm = 0;

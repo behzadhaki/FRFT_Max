@@ -146,6 +146,24 @@
     border-color: var(--accent);
   }
 
+  /* Detail-boost toggle */
+  #detailBtn {
+    height: 100%; padding: 0 0.65em;
+    background: var(--surface2);
+    color: var(--muted);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    font-size: 0.78em; font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  #detailBtn.active {
+    background: var(--accent-lo);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
   /* ── Controls row ── */
   .controls-row {
     display: flex;
@@ -153,6 +171,10 @@
     gap: 0.4em;
     flex: 1; min-height: 0;
   }
+  /* While processing: hide every button and the tab group; only status remains */
+  .controls-row.processing > button,
+  .controls-row.processing > .tab-group { display: none; }
+  .controls-row.processing #status { margin-left: 0; }
 
   /* ── Spectrum + spectrogram ── */
   .spec-area {
@@ -273,7 +295,8 @@
       <label id="fileLabel" for="fileInput">📂 Choose file</label>
       <input type="file" id="fileInput" accept="audio/*">
       <span id="status">loading…</span>
-      <button class="btn-neutral" id="downloadBtn" disabled style="margin-left:auto">⬇</button>
+      <button id="detailBtn" style="margin-left:auto" title="Boost low-amplitude detail">Detail</button>
+      <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
     </div>
   </div>
 
@@ -309,6 +332,7 @@ let drySTFT      = null;
 let wetSTFT      = null;
 let mixSTFT      = null;   // averaged mix (dry+wet)/2 — used for 'both' tab
 let sharedTopBin = 0;
+let specGamma = 1.0;  // toggled by detailBtn; 0.3 = detail boost
 let activeTab    = 'wet';
 let zoomView     = null;  // null = full view, or { t0, t1, b0, b1 }
 
@@ -330,6 +354,7 @@ const playBtn     = document.getElementById('playBtn');
 const tabDry      = document.getElementById('tabDry');
 const tabWet      = document.getElementById('tabWet');
 const tabBoth     = document.getElementById('tabBoth');
+const detailBtn   = document.getElementById('detailBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const fileLabel   = document.getElementById('fileLabel');
 const fileInput   = document.getElementById('fileInput');
@@ -351,7 +376,7 @@ fileInput.addEventListener('change', async () => {
   fileLabel.textContent = '📂 ' + file.name;
   fileLabel.classList.add('has-file');
   updateSettingsPanelSource(file.name);
-  setStatus('Decoding…');
+  setStatus('Decoding…', 'busy');
   try {
     dryBuf = await decodeFile(file);
   } catch (err) {
@@ -399,7 +424,7 @@ function scheduleProcess() {
   playBtn.disabled     = true;
   wetBuf = null; trimmedDryBuf = null;
   drySTFT = null; wetSTFT = null; mixSTFT = null;
-  setStatus('pending…');
+  setStatus('pending…', 'busy');
   autoProcess();
 }
 
@@ -411,7 +436,7 @@ async function autoProcess() {
   if (p.type === 'file') {
     if (!dryBuf && p.url) {
       // ── Direct URL path ───────────────────────────────────────────
-      setStatus('Fetching…');
+      setStatus('Fetching…', 'busy');
       try {
         dryBuf = await fetchAndDecode(p.url);
         const fname = p.url.split('/').pop().split('?')[0];
@@ -436,7 +461,8 @@ async function autoProcess() {
     if (jobId !== currentJobId) return;
 
     const alpha            = isNaN(p.alpha) ? 0.10 : p.alpha;
-    const isAll            = p.blocksize === 'all';
+    const isAll            = p.blocksize === 'all' || p.blocksize === 'all-nowin';
+    const noWindow         = p.blocksize === 'all-nowin';
     const bufSize          = isAll ? dryBuf.length : parseInt(p.blocksize);
     const effectiveOverlap = isAll ? 1 : p.overlap;
     const halfSpectrum     = p.halfspec;
@@ -446,7 +472,7 @@ async function autoProcess() {
       samples: dryBuf,
       alpha, bufSize,
       overlapFactor: effectiveOverlap,
-      halfSpectrum,
+      halfSpectrum, noWindow,
       jobId,
     });
   } catch (err) {
@@ -483,7 +509,7 @@ function handleWorkerMessage(e) {
     wetBuf = e.data.output;
 
     const p  = window._p;
-    const isAll            = p.blocksize === 'all';
+    const isAll            = p.blocksize === 'all' || p.blocksize === 'all-nowin';
     const bufSize          = isAll ? dryBuf.length : parseInt(p.blocksize);
     const effectiveOverlap = isAll ? 1 : p.overlap;
     const H                = Math.max(1, Math.floor(bufSize / effectiveOverlap));
@@ -521,7 +547,7 @@ function handleWorkerMessage(e) {
 // ── Render whichever tab is active ───────────────────────────────────────────
 function renderActiveTab() {
   const stft = activeTab === 'dry' ? drySTFT : activeTab === 'wet' ? wetSTFT : mixSTFT;
-  if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin, zoomView);
+  if (stft) renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin, zoomView, specGamma);
 }
 
 function setActiveTabs(tab) {
@@ -555,6 +581,13 @@ tabBoth.addEventListener('click', () => {
   if (playingWhich !== null) { applyMix('both'); playingWhich = 'both'; }
 });
 
+// ── Detail toggle ─────────────────────────────────────────────────────────────
+detailBtn.addEventListener('click', () => {
+  specGamma = specGamma === 1.0 ? 0.3 : 1.0;
+  detailBtn.classList.toggle('active', specGamma !== 1.0);
+  if (drySTFT) renderActiveTab();
+});
+
 // ── Download ZIP ──────────────────────────────────────────────────────────────
 downloadBtn.addEventListener('click', async () => {
   if (!trimmedDryBuf || !wetBuf) return;
@@ -564,9 +597,9 @@ downloadBtn.addEventListener('click', async () => {
   tmp.width  = specCanvas.width;
   tmp.height = specCanvas.height;
 
-  renderSpectrogram(tmp, drySTFT, sampleRate, sharedTopBin, null);
+  renderSpectrogram(tmp, drySTFT, sampleRate, sharedTopBin, null, specGamma);
   const srcPNG  = await canvasToPNG(tmp);
-  renderSpectrogram(tmp, wetSTFT, sampleRate, sharedTopBin, null);
+  renderSpectrogram(tmp, wetSTFT, sampleRate, sharedTopBin, null, specGamma);
   const frftPNG = await canvasToPNG(tmp);
 
   const zip = buildZip([
@@ -582,16 +615,18 @@ downloadBtn.addEventListener('click', async () => {
 });
 
 // ── Status helpers ────────────────────────────────────────────────────────────
+const controlsRow = statusEl.closest('.controls-row');
 function setStatus(text, cls = '') {
   statusEl.textContent = text;
   statusEl.className   = cls;
+  controlsRow.classList.toggle('processing', cls === 'busy');
 }
 
 function setFrftProgress(frac) {
   if (frac <= 0) {
-    setStatus('processing…');
+    setStatus('processing…', 'busy');
   } else if (frac < 1) {
-    setStatus(`processing… ${Math.round(frac * 100)}%`);
+    setStatus(`processing… ${Math.round(frac * 100)}%`, 'busy');
   }
 }
 
@@ -645,7 +680,6 @@ async function fetchAndDecode(url) {
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
-const STFT_HOP = 256;   // must match HOP in computeSTFT (FFT_SIZE/8 = 2048/8)
 
 function clearSpectrum() {
   if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
@@ -671,7 +705,7 @@ function drawPlayhead() {
   ctx2d.clearRect(0, 0, W, H);
 
   const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
-  const frameIdx = elapsed * sampleRate / STFT_HOP;
+  const frameIdx = elapsed * sampleRate / stft.HOP;
 
   const fStart = zoomView ? zoomView.t0 : 0;
   const fEnd   = zoomView ? zoomView.t1 : stft.numFrames - 1;
@@ -695,10 +729,11 @@ function updateSpectrum() {
 
   const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
   const frameIdx = Math.min(stft.numFrames - 1,
-                            Math.floor(elapsed * sampleRate / STFT_HOP));
+                            Math.floor(elapsed * sampleRate / stft.HOP));
 
   const { magDB, NUM_BINS, dBmax, dBmin } = stft;
   const topBin = sharedTopBin;
+  const detail = specGamma !== 1.0;
 
   const ctx2d = spectrumCanvas.getContext('2d');
   const W     = spectrumCanvas.width;
@@ -710,8 +745,9 @@ function updateSpectrum() {
   for (let y = 0; y < H; y++) {
     const ki  = Math.round((1 - (y + 0.5) / H) * topBin);
     const db  = magDB[frameIdx * NUM_BINS + ki];
-    const t   = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
-    const [r, g, b] = spectrogramColor(t);
+    const t0  = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+    const t   = specGamma === 1.0 ? t0 : Math.pow(t0, specGamma);
+    const [r, g, b] = spectrogramColor(t, detail);
     const barW = Math.round(t * W);
 
     for (let x = 0; x < W; x++) {
@@ -795,7 +831,7 @@ function startPlayback(which, offset = 0) {
 
   const stft = which === 'dry' ? drySTFT : which === 'wet' ? wetSTFT : mixSTFT;
   playbackStartTime   = audioCtx.currentTime - offset;
-  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(trimmedDryBuf.length / STFT_HOP);
+  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(trimmedDryBuf.length / (2048 >> 3));
   playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
 
   playingWhich        = which;
@@ -954,15 +990,25 @@ function fftInPlace(re, im, N) {
   }
 }
 
-// ── Plasma colormap ───────────────────────────────────────────────────────────
-function spectrogramColor(t) {
-  const stops = [
-    [  5,   5,  25],
-    [100,   0, 150],
-    [200,  50, 100],
-    [255, 140,  20],
-    [255, 255, 100],
-  ];
+// ── Colormaps ─────────────────────────────────────────────────────────────────
+const CMAP_NORMAL = [
+  [  5,   5,  25],
+  [100,   0, 150],
+  [200,  50, 100],
+  [255, 140,  20],
+  [255, 255, 100],
+];
+// matplotlib 'hot' colormap: black → dark-red → orange → yellow → white
+const CMAP_DETAIL = [
+  [  0,   0,   0],   // t=0.00  black   (noise floor)
+  [191,   0,   0],   // t=0.25  dark red
+  [255, 128,   0],   // t=0.50  orange  ← midpoint / typical signal
+  [255, 255,  64],   // t=0.75  yellow
+  [255, 255, 255],   // t=1.00  white   (peak)
+];
+
+function spectrogramColor(t, detail = false) {
+  const stops = detail ? CMAP_DETAIL : CMAP_NORMAL;
   const s  = t * (stops.length - 1);
   const lo = Math.floor(s);
   const hi = Math.min(lo + 1, stops.length - 1);
@@ -976,8 +1022,8 @@ function spectrogramColor(t) {
 
 // ── STFT computation ──────────────────────────────────────────────────────────
 function computeSTFT(samples) {
-  const FFT_SIZE = 2048;
-  const HOP      = FFT_SIZE >> 3;
+  const FFT_SIZE = 4096;
+  const HOP      = 1024;            // 75% overlap — matches paper settings
   const NUM_BINS = FFT_SIZE >> 1;
 
   const win = new Float32Array(FFT_SIZE);
@@ -991,6 +1037,7 @@ function computeSTFT(samples) {
   const re    = new Float64Array(FFT_SIZE);
   const im    = new Float64Array(FFT_SIZE);
   let   dBmax = -Infinity;
+  let   dBmin_actual = Infinity;
 
   for (let f = 0; f < numFrames; f++) {
     const start = f * HOP;
@@ -1005,10 +1052,21 @@ function computeSTFT(samples) {
       const db  = 20 * Math.log10(mag + 1e-10);
       magDB[f * NUM_BINS + k] = db;
       if (db > dBmax) dBmax = db;
+      if (db < dBmin_actual) dBmin_actual = db;
     }
   }
 
-  const dBmin     = dBmax - 100;
+  // Data-driven floor: use the actual minimum, but cap the range at 120 dB.
+  const dBmin = Math.max(dBmin_actual, dBmax - 120);
+
+  // Percentile-based range for detail mode.
+  const step     = Math.max(1, Math.floor(magDB.length / 80000));
+  const sample   = [];
+  for (let i = 0; i < magDB.length; i += step) sample.push(magDB[i]);
+  sample.sort((a, b) => a - b);
+  const dBpct02  = sample[Math.floor(sample.length * 0.02)];
+  const dBpct98  = sample[Math.floor(sample.length * 0.98)];
+
   const threshold = dBmax - 60;
   let   topBin    = 0;
   for (let k = 0; k < NUM_BINS; k++)
@@ -1016,7 +1074,7 @@ function computeSTFT(samples) {
       if (magDB[f * NUM_BINS + k] >= threshold) { topBin = k; break; }
   topBin = Math.min(topBin + 1, NUM_BINS - 1);
 
-  return { magDB, numFrames, NUM_BINS, HOP, dBmax, dBmin, topBin };
+  return { magDB, numFrames, NUM_BINS, HOP, dBmax, dBmin, dBpct02, dBpct98, topBin };
 }
 
 // Compute STFT of the averaged mix (dry + wet) / 2 for the 'both' spectrogram view.
@@ -1028,7 +1086,8 @@ function computeMixSTFT(dryBufIn, wetBufIn) {
 }
 
 // ── STFT spectrogram rendering ────────────────────────────────────────────────
-function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = null) {
+// gamma < 1 = detail mode: narrows dB window to 65 dB and boosts mid-range
+function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = null, gamma = 1.0) {
   const cW  = canvas.width;
   const cH  = canvas.height;
   const ctx = canvas.getContext('2d');
@@ -1036,31 +1095,51 @@ function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = nul
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, 0, cW, cH);
 
-  const { magDB, numFrames, NUM_BINS, dBmax, dBmin } = stftData;
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = stftData;
   if (numFrames === 0) return;
 
   const topBin = topBinOverride >= 0 ? topBinOverride : stftData.topBin;
+
+  const detail = gamma !== 1.0;
+  // Detail mode: percentile-based range (mirrors matplotlib imshow auto-scaling).
+  const renderMin = detail ? dBpct02 : dBmin;
+  const renderMax = detail ? dBpct98 : dBmax;
 
   const fStart = zoom ? zoom.t0 : 0;
   const fEnd   = zoom ? zoom.t1 : numFrames - 1;
   const bStart = zoom ? zoom.b0 : 0;
   const bEnd   = zoom ? zoom.b1 : topBin;
 
-  const imgData = ctx.createImageData(cW, cH);
-  const d       = imgData.data;
+  // Render at native spectrogram resolution then scale up with bilinear smoothing.
+  const fi0 = Math.round(fStart);
+  const bi0 = Math.round(bStart);
+  const nF  = Math.max(1, Math.round(fEnd) - fi0 + 1);
+  const nB  = Math.max(1, Math.round(bEnd) - bi0 + 1);
 
-  for (let px = 0; px < cW; px++) {
-    const fi = Math.min(numFrames - 1, Math.round(fStart + px / Math.max(1, cW - 1) * (fEnd - fStart)));
-    for (let py = 0; py < cH; py++) {
-      const ki = Math.min(NUM_BINS - 1, Math.round(bStart + (1 - (py + 0.5) / cH) * (bEnd - bStart)));
-      const db = magDB[fi * NUM_BINS + ki];
-      const v  = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
-      const [r, g, b] = spectrogramColor(v);
-      const pi = (py * cW + px) * 4;
-      d[pi] = r; d[pi+1] = g; d[pi+2] = b; d[pi+3] = 255;
+  const offCanvas  = document.createElement('canvas');
+  offCanvas.width  = nF;
+  offCanvas.height = nB;
+  const offCtx = offCanvas.getContext('2d');
+  const offImg = offCtx.createImageData(nF, nB);
+  const od     = offImg.data;
+
+  for (let fi = 0; fi < nF; fi++) {
+    const f = Math.min(numFrames - 1, fi0 + fi);
+    for (let bi = 0; bi < nB; bi++) {
+      const k  = Math.min(NUM_BINS - 1, bi0 + bi);
+      const db = magDB[f * NUM_BINS + k];
+      const v0 = Math.max(0, Math.min(1, (db - renderMin) / (renderMax - renderMin)));
+      const v  = gamma === 1.0 ? v0 : Math.pow(v0, gamma);
+      const [r, g, b] = spectrogramColor(v, detail);
+      const pi = ((nB - 1 - bi) * nF + fi) * 4;
+      od[pi] = r; od[pi+1] = g; od[pi+2] = b; od[pi+3] = 255;
     }
   }
-  ctx.putImageData(imgData, 0, 0);
+  offCtx.putImageData(offImg, 0, 0);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offCanvas, 0, 0, cW, cH);
 
   // Frequency label
   const dpr     = window.devicePixelRatio || 1;
@@ -1197,7 +1276,8 @@ initWorker();
 function buildSettingsPanel(srcLabelOverride) {
   const p     = window._p;
   const alpha = isNaN(p.alpha) ? 0.10 : p.alpha;
-  const isAll = p.blocksize === 'all';
+  const isAll    = p.blocksize === 'all' || p.blocksize === 'all-nowin';
+  const noWindow = p.blocksize === 'all-nowin';
 
   let srcLabel;
   if (srcLabelOverride) {
@@ -1211,7 +1291,7 @@ function buildSettingsPanel(srcLabelOverride) {
   }
 
   const alphaStr   = `${+alpha.toFixed(5)}`;
-  const blockStr   = isAll ? 'all' : p.blocksize;
+  const blockStr   = isAll ? (noWindow ? 'all (no win)' : 'all (windowed)') : p.blocksize;
   const hopStr     = isAll ? '—' : `${Math.round(parseInt(p.blocksize) / p.overlap)}`;
   const overlapStr = isAll ? '—' : `×${p.overlap}`;
   const modeStr    = p.halfspec ? 'half-spectrum' : 'full-spectrum';
