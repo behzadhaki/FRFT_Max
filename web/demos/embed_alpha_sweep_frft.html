@@ -6,12 +6,25 @@
 <title>FRFT Alpha Sweep</title>
 <script>
   window._wasmCacheBust = Date.now();
+  // Apply URL params as defaults
   (function () {
     const sp = new URLSearchParams(location.search);
     const w  = sp.get('w'), h = sp.get('h');
     const s  = document.documentElement.style;
     if (w) s.width  = Math.max(200, +w) + 'px';
     if (h) s.height = Math.max(100, +h) + 'px';
+
+    const win = sp.get('win');
+    if (win === 'rect' || win === 'hann') window._initWin = win;
+
+    const hs = sp.get('halfspec');
+    if (hs !== null) window._initHalfspec = hs === '1';
+
+    const fi = parseInt(sp.get('freqidx'));
+    if (!isNaN(fi) && fi >= 0) window._initFreqIdx = fi;
+
+    const al = parseFloat(sp.get('alpha'));
+    if (!isNaN(al)) window._initAlpha = Math.max(0, Math.min(1, al));
   })();
 </script>
 <style>
@@ -425,6 +438,10 @@ const freqSweepBtn  = document.getElementById('freqSweepBtn');
 const alphaSlider   = document.getElementById('alphaSlider');
 const alphaSweepBtn = document.getElementById('alphaSweepBtn');
 
+// Apply URL param defaults for source settings (before first precompute)
+if (window._initWin)                       winSel.value      = window._initWin;
+if (window._initHalfspec !== undefined)    halfSpecSel.value = window._initHalfspec ? '1' : '0';
+
 // Settings → precompute cache (key = "win_halfspec")
 const computeCache = new Map();
 const progressLabel = document.getElementById('progressLabel');
@@ -474,6 +491,26 @@ function settingsKey() {
   return `${winSel.value}_${halfSpecSel.value}`;
 }
 
+// Apply initial freq/alpha from URL params (once only — cleared after first use)
+function applyInitPosition() {
+  if (window._initFreqIdx !== undefined) {
+    freqIdx = Math.max(0, Math.min(NUM_FREQ - 1, window._initFreqIdx));
+    window._initFreqIdx = undefined;
+  } else {
+    freqIdx = 0;
+  }
+  if (window._initAlpha !== undefined) {
+    alphaIdx = Math.max(0, Math.min(NUM_ALPHA - 1,
+      Math.round(window._initAlpha / ALPHA_STEP)));
+    window._initAlpha = undefined;
+  } else {
+    alphaIdx = 0;
+  }
+  freqDir = 1; alphaDir = 1;
+  freqSlider.value  = String(freqIdx);
+  alphaSlider.value = String(alphaValues[alphaIdx]);
+}
+
 function startPrecompute() {
   if (!workerReady) return;
 
@@ -490,8 +527,7 @@ function startPrecompute() {
     sharedTopBin = cached.sharedTopBin;
     stftCache.clear(); dryStftCache.clear(); mixStftCache.clear();
     precomputeDone = true;
-    freqIdx = 0; alphaIdx = 0; freqDir = 1; alphaDir = 1;
-    freqSlider.value = '0'; alphaSlider.value = '0';
+    applyInitPosition();
     freqSlider.disabled = false; alphaSlider.disabled = false;
     setAllSweepBtnsDisabled(false);
     updateDisplay();
@@ -592,10 +628,7 @@ function onPrecomputeComplete() {
     }
   }
 
-  freqIdx  = 0;  alphaIdx = 0;
-  freqDir  = 1;  alphaDir = 1;
-  freqSlider.value  = '0';
-  alphaSlider.value = '0';
+  applyInitPosition();
   freqSlider.disabled  = false;
   alphaSlider.disabled = false;
   setAllSweepBtnsDisabled(false);

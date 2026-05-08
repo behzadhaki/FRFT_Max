@@ -132,13 +132,64 @@
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <h1>embed_interactive_frft.html — iframe tester</h1>
-<p>Adjust width / height and hit Apply to reload the embed.</p>
+<p>Set default values for controls. All params are optional — omitted ones use the embed's built-in defaults.</p>
 
 <div class="controls">
   <label>Width</label>
   <input type="number" id="wInput" value="600" min="200" step="10">
   <label>Height</label>
   <input type="number" id="hInput" value="220" min="100" step="10">
+
+  <label>Type</label>
+  <select id="typeInput1">
+    <option value="">(default)</option>
+    <option value="sine">Sine</option>
+    <option value="sweep">Sweep</option>
+  </select>
+
+  <label id="freqLabel1">Freq (Hz)</label>
+  <input type="number" id="freqInput1" value="440" min="20" max="20000" step="1">
+
+  <label>Dur (s)</label>
+  <input type="number" id="durInput1" value="3" min="1" max="600" step="1">
+
+  <label>α</label>
+  <input type="number" id="alphaInput1" value="0.10" min="0" max="4" step="0.00001">
+
+  <label>Block</label>
+  <select id="blocksizeInput1">
+    <option value="">(default)</option>
+    <option value="256">256</option>
+    <option value="512">512</option>
+    <option value="1024">1024</option>
+    <option value="2048">2048</option>
+    <option value="4096">4096</option>
+    <option value="8192">8192</option>
+    <option value="16384">16384</option>
+    <option value="32768">32768</option>
+    <option value="65536">65536</option>
+    <option value="131072">131072</option>
+    <option value="all">All (Windowed)</option>
+    <option value="all-nowin">All (No Window)</option>
+  </select>
+
+  <label>Overlap</label>
+  <select id="overlapInput1">
+    <option value="">(default)</option>
+    <option value="1">×1</option>
+    <option value="2">×2</option>
+    <option value="4">×4</option>
+    <option value="8">×8</option>
+    <option value="16">×16</option>
+  </select>
+
+  <label>Half-spec</label>
+  <select id="halfspecInput1">
+    <option value="">(default)</option>
+    <option value="0">No</option>
+    <option value="1">Yes</option>
+  </select>
+
   <button id="applyBtn">Apply</button>
 </div>
 
@@ -234,13 +285,40 @@
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <h1>embed_alpha_sweep_frft.html — iframe tester</h1>
-<p>Width / height only — all controls are inside the embed. Hit Apply to reload.</p>
+<p>Set default values for source settings and initial slider positions.</p>
 
 <div class="controls">
   <label>Width</label>
   <input type="number" id="wInput3" value="700" min="300" step="10">
   <label>Height</label>
   <input type="number" id="hInput3" value="300" min="200" step="10">
+
+  <label>Window</label>
+  <select id="winInput3">
+    <option value="hann" selected>Hann</option>
+    <option value="rect">Rectangular</option>
+  </select>
+
+  <label>Half-spec</label>
+  <select id="halfspecInput3">
+    <option value="0" selected>No</option>
+    <option value="1">Yes</option>
+  </select>
+
+  <label>Init Freq</label>
+  <select id="freqIdxInput3">
+    <option value="0" selected>100 Hz</option>
+    <option value="1">500 Hz</option>
+    <option value="2">1k Hz</option>
+    <option value="3">2k Hz</option>
+    <option value="4">5k Hz</option>
+    <option value="5">7.5k Hz</option>
+    <option value="6">10k Hz</option>
+  </select>
+
+  <label>Init α</label>
+  <input type="number" id="alphaInput3" value="0" min="0" max="1" step="0.05">
+
   <button id="applyBtn3">Apply</button>
 </div>
 
@@ -282,27 +360,57 @@
   }
 
   // ── Interactive embed ───────────────────────────────────────────────────────
-  const wInput     = document.getElementById('wInput');
-  const hInput     = document.getElementById('hInput');
-  const applyBtn   = document.getElementById('applyBtn');
-  const frame      = document.getElementById('embedFrame');
-  const urlDisplay = document.getElementById('urlDisplay');
-  const embedCode1 = document.getElementById('embedCode1');
+  const wInput         = document.getElementById('wInput');
+  const hInput         = document.getElementById('hInput');
+  const typeInput1     = document.getElementById('typeInput1');
+  const freqInput1     = document.getElementById('freqInput1');
+  const freqLabel1     = document.getElementById('freqLabel1');
+  const durInput1      = document.getElementById('durInput1');
+  const alphaInput1    = document.getElementById('alphaInput1');
+  const blocksizeInput1= document.getElementById('blocksizeInput1');
+  const overlapInput1  = document.getElementById('overlapInput1');
+  const halfspecInput1 = document.getElementById('halfspecInput1');
+  const applyBtn       = document.getElementById('applyBtn');
+  const frame          = document.getElementById('embedFrame');
+  const urlDisplay     = document.getElementById('urlDisplay');
+  const embedCode1     = document.getElementById('embedCode1');
+
+  function updateFreqLabel1() {
+    const isSine = typeInput1.value === 'sine';
+    freqInput1.disabled = !isSine;
+    freqLabel1.style.opacity = isSine ? '1' : '0.4';
+  }
+  typeInput1.addEventListener('change', updateFreqLabel1);
+  updateFreqLabel1();
 
   function apply() {
     const w = Math.max(200, parseInt(wInput.value) || 600);
     const h = Math.max(100, parseInt(hInput.value) || 220);
     wInput.value = w; hInput.value = h;
-    const qs  = `w=${w}&h=${h}&v=${Date.now()}`;
-    const url = `embed_interactive_frft.html?${qs}`;
+
+    // Build optional default params
+    const cleanParams = new URLSearchParams({ w, h });
+    if (typeInput1.value)      cleanParams.set('type',      typeInput1.value);
+    if (typeInput1.value === 'sine') cleanParams.set('freq', freqInput1.value);
+    cleanParams.set('dur',     durInput1.value);
+    cleanParams.set('alpha',   alphaInput1.value);
+    if (blocksizeInput1.value) cleanParams.set('blocksize', blocksizeInput1.value);
+    if (overlapInput1.value)   cleanParams.set('overlap',   overlapInput1.value);
+    if (halfspecInput1.value)  cleanParams.set('halfspec',  halfspecInput1.value);
+
+    const liveParams = new URLSearchParams(cleanParams);
+    liveParams.set('v', Date.now());
+
+    const url = `embed_interactive_frft.html?${liveParams}`;
     frame.width = w; frame.height = h; frame.src = url;
     urlDisplay.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
-    // Embed code uses clean URL without cache-bust param
-    embedCode1.textContent = buildEmbedCode('embed_interactive_frft.html', `w=${w}&h=${h}`, w, h);
+    embedCode1.textContent = buildEmbedCode('embed_interactive_frft.html', cleanParams.toString(), w, h);
   }
 
   applyBtn.addEventListener('click', apply);
-  [wInput, hInput].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') apply(); }));
+  [wInput, hInput, durInput1, freqInput1, alphaInput1].forEach(el =>
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') apply(); })
+  );
   attachCopy('copyBtn1', 'embedCode1');
   apply();
 
@@ -372,26 +480,43 @@
   apply2();
 
   // ── Alpha sweep embed ───────────────────────────────────────────────────────
-  const wInput3    = document.getElementById('wInput3');
-  const hInput3    = document.getElementById('hInput3');
-  const applyBtn3  = document.getElementById('applyBtn3');
-  const frame3     = document.getElementById('embedFrame3');
-  const urlDisplay3 = document.getElementById('urlDisplay3');
-  const embedCode3  = document.getElementById('embedCode3');
+  const wInput3        = document.getElementById('wInput3');
+  const hInput3        = document.getElementById('hInput3');
+  const winInput3      = document.getElementById('winInput3');
+  const halfspecInput3 = document.getElementById('halfspecInput3');
+  const freqIdxInput3  = document.getElementById('freqIdxInput3');
+  const alphaInput3    = document.getElementById('alphaInput3');
+  const applyBtn3      = document.getElementById('applyBtn3');
+  const frame3         = document.getElementById('embedFrame3');
+  const urlDisplay3    = document.getElementById('urlDisplay3');
+  const embedCode3     = document.getElementById('embedCode3');
 
   function apply3() {
     const w = Math.max(300, parseInt(wInput3.value) || 700);
     const h = Math.max(200, parseInt(hInput3.value) || 300);
     wInput3.value = w; hInput3.value = h;
-    const qs  = `w=${w}&h=${h}&v=${Date.now()}`;
-    const url = `embed_alpha_sweep_frft.html?${qs}`;
+
+    const cleanParams = new URLSearchParams({
+      w, h,
+      win:      winInput3.value,
+      halfspec: halfspecInput3.value,
+      freqidx:  freqIdxInput3.value,
+      alpha:    alphaInput3.value,
+    });
+
+    const liveParams = new URLSearchParams(cleanParams);
+    liveParams.set('v', Date.now());
+
+    const url = `embed_alpha_sweep_frft.html?${liveParams}`;
     frame3.width = w; frame3.height = h; frame3.src = url;
     urlDisplay3.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
-    embedCode3.textContent = buildEmbedCode('embed_alpha_sweep_frft.html', `w=${w}&h=${h}`, w, h);
+    embedCode3.textContent = buildEmbedCode('embed_alpha_sweep_frft.html', cleanParams.toString(), w, h);
   }
 
   applyBtn3.addEventListener('click', apply3);
-  [wInput3, hInput3].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') apply3(); }));
+  [wInput3, hInput3, alphaInput3].forEach(el =>
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') apply3(); })
+  );
   attachCopy('copyBtn3', 'embedCode3');
   apply3();
 </script>

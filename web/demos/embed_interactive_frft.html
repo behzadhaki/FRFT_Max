@@ -6,7 +6,7 @@
 <title>FRFT Audio</title>
 <script>
   window._wasmCacheBust = Date.now();
-  // Apply ?w=NNN&h=NNN&dur=NNN URL params
+  // Apply URL params as defaults for interactive controls
   (function () {
     const sp = new URLSearchParams(location.search);
     const w  = sp.get('w'), h = sp.get('h');
@@ -16,7 +16,25 @@
     if (h) s.height = Math.max(100, +h) + 'px';
 
     const d = parseFloat(sp.get('dur'));
-    if (d > 0) window._initDur = d;
+    if (d > 0)               window._initDur      = d;
+
+    const type = sp.get('type');
+    if (type)                window._initType     = type;                  // sine | sweep | file
+
+    const freq = parseFloat(sp.get('freq'));
+    if (freq > 0)            window._initFreq     = freq;
+
+    const alpha = parseFloat(sp.get('alpha'));
+    if (!isNaN(alpha))       window._initAlpha    = Math.max(0, Math.min(4, alpha));
+
+    const bs = sp.get('blocksize');
+    if (bs)                  window._initBlocksize = bs;
+
+    const ov = parseInt(sp.get('overlap'));
+    if (ov > 0)              window._initOverlap  = ov;
+
+    const hs = sp.get('halfspec');
+    if (hs !== null)         window._initHalfspec = hs === '1';            // 0 | 1
   })();
 </script>
 <style>
@@ -499,14 +517,19 @@ const freqNum      = document.getElementById('freqNum');
 const fileInput    = document.getElementById('fileInput');
 const fileLabel    = document.getElementById('fileLabel');
 
-// Apply ?dur= URL param if provided
-if (window._initDur) {
-  durNum.value = Math.max(1, Math.min(600, window._initDur));
-}
 const alphaNum    = document.getElementById('alphaNum');
 const modeSel     = document.getElementById('modeSel');
 const bufSizeSel  = document.getElementById('bufSizeSel');
 const overlapSel  = document.getElementById('overlap');
+
+// Apply URL param defaults
+if (window._initDur)                      durNum.value     = Math.max(1, Math.min(600, window._initDur));
+if (window._initFreq)                     freqNum.value    = window._initFreq;
+if (window._initAlpha      !== undefined) alphaNum.value   = window._initAlpha;
+if (window._initBlocksize)                bufSizeSel.value = window._initBlocksize;
+if (window._initOverlap)                  overlapSel.value = String(window._initOverlap);
+if (window._initHalfspec   !== undefined) modeSel.value    = window._initHalfspec ? 'half' : 'full';
+if (window._initType) srcType.value = window._initType;
 const statusEl    = document.getElementById('status');
 const playBtn     = document.getElementById('playBtn');
 const tabDry      = document.getElementById('tabDry');
@@ -682,6 +705,8 @@ srcType.addEventListener('change', () => {
     invalidateSource();
   }
 });
+// Sync UI if type was set from URL param
+if (window._initType) srcType.dispatchEvent(new Event('change'));
 
 // ── Duration controls ─────────────────────────────────────────────────────────
 durNum.addEventListener('change', () => {
