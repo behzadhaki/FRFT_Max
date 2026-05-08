@@ -230,6 +230,31 @@
   <iframe id="embedFrame2" width="600" height="220"></iframe>
 </div>
 
+<hr>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<h1>embed_alpha_sweep_frft.html — iframe tester</h1>
+<p>Width / height only — all controls are inside the embed. Hit Apply to reload.</p>
+
+<div class="controls">
+  <label>Width</label>
+  <input type="number" id="wInput3" value="700" min="300" step="10">
+  <label>Height</label>
+  <input type="number" id="hInput3" value="300" min="200" step="10">
+  <button id="applyBtn3">Apply</button>
+</div>
+
+<div class="url-display" id="urlDisplay3"></div>
+
+<div class="embed-code-wrap" id="embedCodeWrap3">
+  <pre id="embedCode3"></pre>
+  <button class="copy-btn" id="copyBtn3" title="Copy embed code">⧉</button>
+</div>
+
+<div class="frame-wrap" id="frameWrap3">
+  <iframe id="embedFrame3" width="700" height="300"></iframe>
+</div>
+
 <script>
   // ── Shared helpers ──────────────────────────────────────────────────────────
   const EMBED_BASE = '/assets/projects/FrFT/demos/';
@@ -345,6 +370,30 @@
   attachCopy('copyBtn2', 'embedCode2');
   updateDependentControls();
   apply2();
+
+  // ── Alpha sweep embed ───────────────────────────────────────────────────────
+  const wInput3    = document.getElementById('wInput3');
+  const hInput3    = document.getElementById('hInput3');
+  const applyBtn3  = document.getElementById('applyBtn3');
+  const frame3     = document.getElementById('embedFrame3');
+  const urlDisplay3 = document.getElementById('urlDisplay3');
+  const embedCode3  = document.getElementById('embedCode3');
+
+  function apply3() {
+    const w = Math.max(300, parseInt(wInput3.value) || 700);
+    const h = Math.max(200, parseInt(hInput3.value) || 300);
+    wInput3.value = w; hInput3.value = h;
+    const qs  = `w=${w}&h=${h}&v=${Date.now()}`;
+    const url = `embed_alpha_sweep_frft.html?${qs}`;
+    frame3.width = w; frame3.height = h; frame3.src = url;
+    urlDisplay3.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
+    embedCode3.textContent = buildEmbedCode('embed_alpha_sweep_frft.html', `w=${w}&h=${h}`, w, h);
+  }
+
+  applyBtn3.addEventListener('click', apply3);
+  [wInput3, hInput3].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') apply3(); }));
+  attachCopy('copyBtn3', 'embedCode3');
+  apply3();
 </script>
 </body>
 </html>

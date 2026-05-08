@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRFT Alpha Sweep</title>
+<script>
+  window._wasmCacheBust = Date.now();
+  (function () {
+    const sp = new URLSearchParams(location.search);
+    const w  = sp.get('w'), h = sp.get('h');
+    const s  = document.documentElement.style;
+    if (w) s.width  = Math.max(200, +w) + 'px';
+    if (h) s.height = Math.max(100, +h) + 'px';
+  })();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  button, input, select, textarea { font: inherit; }
+
+  :root {
+    --bg:        #1a1a1a;
+    --surface:   #222222;
+    --surface2:  #282828;
+    --border:    #333333;
+    --border2:   #3a3a3a;
+    --accent:    #c8902a;
+    --accent-lo: #7a5418;
+    --text:      #d0d0d0;
+    --muted:     #aaaaaa;
+    --ok:        #c8902a;
+    --red:       #cc4444;
+  }
+
+  html { font-size: 12px; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Two-column grid ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    grid-template-rows: 1fr;
+    align-items: stretch;
+    gap: 0.4em;
+    padding: 0.4em;
+    height: 100%;
+  }
+
+  .left-col {
+    display: flex; flex-direction: column; gap: 0.4em;
+    overflow-y: auto; overflow-x: hidden;
+    min-width: 0; align-self: stretch;
+  }
+  .right-col {
+    display: flex; flex-direction: column; gap: 0.4em;
+    min-width: 0; min-height: 0; align-self: stretch;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.55em 0.75em;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 1px 3px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column; gap: 0.35em;
+    min-height: 0;
+  }
+  .card h1 {
+    font-size: 0.65em; font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.10em;
+    flex-shrink: 0;
+  }
+  .rows-wrap {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; gap: 0.3em;
+  }
+  .row {
+    display: flex; align-items: stretch;
+    gap: 0.45em; min-width: 0; min-height: 0; flex: 1;
+  }
+  label.lbl {
+    width: 5em; flex-shrink: 0;
+    color: var(--muted); font-size: 0.82em; letter-spacing: 0.02em;
+    display: flex; align-items: center;
+  }
+
+  select {
+    flex: 1; min-width: 0; height: 100%;
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: 3px; color: var(--text);
+    padding: 0 0.45em; font-size: 0.85em; outline: none; cursor: pointer;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  }
+  select:focus { border-color: var(--accent); }
+
+  input[type="number"] {
+    flex-shrink: 0; height: 100%;
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: 3px; color: var(--text);
+    font-size: 0.88em; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 0 0.45em; outline: none;
+    -webkit-appearance: none; -moz-appearance: textfield; appearance: textfield;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type="number"]:focus { border-color: var(--accent); }
+  #freqNum  { width: 4.5em; }
+
+  /* Buttons */
+  button {
+    height: 100%; padding: 0 0.75em;
+    border-radius: 3px;
+    font-size: 0.82em; font-weight: 700; letter-spacing: 0.03em;
+    cursor: pointer; transition: filter .12s;
+    white-space: nowrap; border: 1px solid transparent;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.15); }
+  button:active:not(:disabled) { filter: brightness(0.9); }
+  button:disabled { opacity: .3; cursor: default; }
+
+  .btn-ok      { background: #2a2218; color: var(--accent); border-color: var(--accent-lo); }
+  .btn-playing { background: var(--accent-lo); color: #f0c060; border-color: var(--accent); }
+  .btn-neutral { background: var(--surface2); color: var(--muted); border-color: var(--border2); }
+  .btn-sweep   { background: #1a2a1a; color: #6fcf6f; border-color: #3a6a3a; }
+  .btn-sweep.running { background: #2a1a1a; color: #cf6f6f; border-color: #6a3a3a; }
+
+  /* Controls row (right col) */
+  .controls-row { display: flex; align-items: stretch; gap: 0.4em; flex: 1; min-height: 0; }
+  .controls-row.processing > button,
+  .controls-row.processing > .tab-group { display: none; }
+  .controls-row.processing #status { margin-left: 0; }
+  .right-col > .card { flex: none; display: flex; flex-direction: column; justify-content: center; }
+  .controls-row > *, .tab { display: flex; align-items: center; }
+  #playBtn { width: 2.5em; justify-content: center; }
+  .controls-row button { flex-shrink: 0; }
+  #status { font-size: 0.80em; padding: 0; border: none; background: none;
+            color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+  #status.err { color: var(--red); }
+
+  /* Tabs */
+  .tab-group { display: flex; flex-shrink: 0; }
+  .tab {
+    height: 100%; padding: 0 0.7em;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border2); border-radius: 0;
+    font-size: 0.80em; font-weight: 600; cursor: pointer;
+  }
+  .tab:first-child { border-radius: 3px; }
+  .tab:last-child  { border-radius: 3px; }
+  .tab.active { background: var(--accent-lo); color: var(--accent); border-color: var(--accent); }
+
+  /* Detail button */
+  #detailBtn {
+    height: 100%; padding: 0 0.65em;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border2); border-radius: 3px;
+    font-size: 0.78em; font-weight: 600; cursor: pointer; flex-shrink: 0; white-space: nowrap;
+  }
+  #detailBtn.active { background: var(--accent-lo); color: var(--accent); border-color: var(--accent); }
+
+  /* Spec area */
+  .spec-area { flex: 6; min-height: 0; display: flex; gap: 0.4em; }
+  #spectrumCanvas { flex-shrink: 0; width: 2.5em; height: 100%; image-rendering: pixelated; }
+  #specWrap { flex: 1; min-width: 0; position: relative; }
+  #specCanvas, #playheadCanvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; image-rendering: auto;
+  }
+  #playheadCanvas { pointer-events: none; }
+
+  /* Zoom overlay */
+  #zoomOverlay {
+    position: absolute; inset: 0;
+    cursor: crosshair; user-select: none; -webkit-user-select: none;
+  }
+  #zoomBox {
+    position: absolute;
+    border: 1px solid rgba(200,144,42,0.8);
+    background: rgba(200,144,42,0.08);
+    pointer-events: none; display: none;
+  }
+
+  /* ── Alpha sweep left-col styles ── */
+
+  /* Alpha big display */
+  .alpha-display {
+    text-align: center;
+    font-size: 2.2em; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+    padding: 0.1em 0;
+    flex-shrink: 0;
+  }
+  .alpha-display span { font-size: 0.5em; color: var(--muted); font-weight: 400; margin-right: 0.2em; }
+
+  /* Alpha range slider */
+  .slider-wrap { display: flex; flex-direction: column; gap: 0.2em; flex-shrink: 0; }
+  .slider-labels { display: flex; justify-content: space-between; font-size: 0.72em; color: var(--muted); }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px;
+    background: var(--border2); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--accent-lo); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--accent-lo); cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: 0.3; cursor: default; }
+
+  /* Progress bar */
+  .progress-wrap { display: flex; flex-direction: column; gap: 0.25em; flex-shrink: 0; }
+  .progress-label { font-size: 0.72em; color: var(--muted); display: flex; justify-content: space-between; }
+  .progress-track {
+    height: 5px; background: var(--border2); border-radius: 3px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%; border-radius: 3px;
+    background: var(--accent); transition: width 0.1s linear;
+  }
+
+  /* Sweep controls row */
+  .sweep-btns { display: flex; gap: 0.4em; height: 1.9em; flex-shrink: 0; }
+  .sweep-btns button { flex: 1; }
+
+  /* Compute button row */
+  .compute-row { display: flex; gap: 0.4em; height: 1.9em; flex-shrink: 0; }
+  .compute-row button { flex: 1; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── Left column ──────────────────────────────────────────────────── -->
+  <div class="left-col">
+
+    <!-- Source card -->
+    <div class="card">
+      <h1>Sine Source</h1>
+      <div class="rows-wrap">
+        <div class="row">
+          <label class="lbl">Freq</label>
+          <input type="number" id="freqNum" value="440" min="20" max="20000" step="1">
+          <span style="font-size:0.78em;color:var(--muted);display:flex;align-items:center;padding-left:0.2em">Hz</span>
+        </div>
+        <div class="row">
+          <label class="lbl">Window</label>
+          <select id="winSel">
+            <option value="hann" selected>Hann</option>
+            <option value="rect">Rectangular</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="lbl">Half-spec</label>
+          <select id="halfSpecSel">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alpha sweep card -->
+    <div class="card" style="flex:1">
+      <h1>Alpha Sweep</h1>
+
+      <!-- Large alpha readout -->
+      <div class="alpha-display"><span>α =</span><span id="alphaDisplay">0.000</span></div>
+
+      <!-- Scrub slider -->
+      <div class="slider-wrap">
+        <input type="range" id="alphaSlider" min="0" max="1" step="0.05" value="0" disabled>
+        <div class="slider-labels"><span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span></div>
+      </div>
+
+      <!-- Pre-compute -->
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span id="progressLabel">Not computed</span>
+          <span id="progressPct"></span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+      <div class="compute-row">
+        <button class="btn-neutral" id="computeBtn" disabled>Compute</button>
+      </div>
+
+      <!-- Sweep playback -->
+      <div class="sweep-btns">
+        <button class="btn-sweep" id="sweepPlayBtn" disabled>▶ Sweep</button>
+        <button class="btn-neutral" id="sweepResetBtn" disabled style="flex:0 0 2.5em">⟳</button>
+      </div>
+    </div>
+
+  </div><!-- /left-col -->
+
+  <!-- ── Right column (identical to interactive embed) ───────────────── -->
+  <div class="right-col">
+
+    <!-- Playback controls -->
+    <div class="card" style="padding: 0.4em 0.75em;">
+      <div class="controls-row">
+        <button class="btn-ok" id="playBtn" disabled>▶</button>
+        <div class="tab-group">
+          <button class="tab" id="tabDry">Source</button>
+          <button class="tab active" id="tabWet">FRFT</button>
+          <button class="tab" id="tabBoth">Both</button>
+        </div>
+        <span id="status"></span>
+        <button id="detailBtn" style="margin-left:auto" title="Boost low-amplitude detail">Detail</button>
+        <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
+      </div>
+    </div>
+
+    <!-- Spectrum strip + spectrogram -->
+    <div class="spec-area">
+      <canvas id="spectrumCanvas" width="40" height="400"></canvas>
+      <div id="specWrap">
+        <canvas id="specCanvas"></canvas>
+        <canvas id="playheadCanvas"></canvas>
+        <div id="zoomOverlay"></div>
+        <div id="zoomBox"></div>
+      </div>
+    </div>
+
+  </div><!-- /right-col -->
+
+</div><!-- /layout -->
+<script>
+'use strict';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const ALPHA_STEP = 0.05;   // fixed α resolution
+const ALPHA_MAX  = 1.0;    // sweep 0 → 1
+const SWEEP_FPS  = 4;      // fixed sweep frame rate (~5 s per full loop)
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let sampleRate  = 44100;
+const N_SAMPLES = 32768;  // exact power-of-2 length — avoids zero-padding in FFT/FRFT pipeline
+
+let dryBuf        = null;   // Float32Array — sine source
+let trimmedDryBuf = null;   // = dryBuf (no OLA trim here)
+let wetBuf        = null;   // current alpha's output (for audio playback)
+let wetBufs       = [];     // Float32Array[], indexed by alpha step
+
+let drySTFT  = null;
+let wetSTFT  = null;        // current alpha's STFT (live reference)
+let mixSTFT  = null;        // mix of dry + wet at current alpha
+
+const stftCache    = new Map();   // alphaIdx → stft
+const mixStftCache = new Map();   // alphaIdx → mix stft
+
+let alphaValues   = [];     // [0, 0.05, 0.10, …, 1.0]
+let sweepIdx      = 0;      // current position in alphaValues
+let sweepDir      = 1;      // +1 forward, -1 reverse (ping-pong)
+let sweepRunning  = false;
+let sweepTimer    = null;
+let precomputeDone = false;
+
+let sharedTopBin = 0;
+let specGamma    = 1.0;
+let activeTab    = 'wet';
+let zoomView     = null;
+
+// Audio (same as interactive embed)
+let audioCtx          = null;
+let activeSrc         = null, activeSrc2      = null;
+let masterGain        = null, dryGain         = null, wetGain        = null;
+let playingWhich      = null;
+let playheadInterval  = null;
+let playbackStartTime = 0;
+let playbackTotalFrames = 0;
+
+// Worker / precompute queue
+let frftWorker   = null;
+let workerReady  = false;
+let queuePid     = 0;     // incremented per precompute run (cancellation token)
+let queueIdx     = 0;     // next job to send
+let queueTotal   = 0;
+let queueBusy    = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const freqNum       = document.getElementById('freqNum');
+const winSel        = document.getElementById('winSel');
+const halfSpecSel   = document.getElementById('halfSpecSel');
+const alphaDisplay  = document.getElementById('alphaDisplay');
+const alphaSlider   = document.getElementById('alphaSlider');
+const progressLabel = document.getElementById('progressLabel');
+const progressPct   = document.getElementById('progressPct');
+const progressFill  = document.getElementById('progressFill');
+const computeBtn    = document.getElementById('computeBtn');
+const sweepPlayBtn  = document.getElementById('sweepPlayBtn');
+const sweepResetBtn = document.getElementById('sweepResetBtn');
+const playBtn       = document.getElementById('playBtn');
+const tabDry        = document.getElementById('tabDry');
+const tabWet        = document.getElementById('tabWet');
+const tabBoth       = document.getElementById('tabBoth');
+const detailBtn     = document.getElementById('detailBtn');
+const downloadBtn   = document.getElementById('downloadBtn');
+const statusEl      = document.getElementById('status');
+const specCanvas    = document.getElementById('specCanvas');
+const playheadCanvas = document.getElementById('playheadCanvas');
+const spectrumCanvas = document.getElementById('spectrumCanvas');
+const specWrap      = document.getElementById('specWrap');
+const zoomOverlay   = document.getElementById('zoomOverlay');
+const zoomBox       = document.getElementById('zoomBox');
+
+// ── Canvas resize ─────────────────────────────────────────────────────────────
+const specRO = new ResizeObserver(() => {
+  const dpr = window.devicePixelRatio || 1;
+  const r   = specWrap.getBoundingClientRect();
+  const W   = Math.round(r.width  * dpr);
+  const H   = Math.round(r.height * dpr);
+  if (W < 4 || H < 4) return;
+  specCanvas.width     = W; specCanvas.height     = H;
+  playheadCanvas.width = W; playheadCanvas.height = H;
+  renderActiveTab();
+  const rs = spectrumCanvas.getBoundingClientRect();
+  spectrumCanvas.width  = Math.round(rs.width  * dpr);
+  spectrumCanvas.height = Math.round(rs.height * dpr);
+});
+specRO.observe(specWrap);
+specRO.observe(spectrumCanvas);
+
+// ── Sine generation ───────────────────────────────────────────────────────────
+function generateSine(freq, n, sr) {
+  const buf = new Float32Array(n);
+  for (let i = 0; i < n; i++)
+    buf[i] = Math.sin(2 * Math.PI * freq * i / sr);
+  return buf;
+}
+
+// ── Pre-computation ───────────────────────────────────────────────────────────
+function startPrecompute() {
+  if (!workerReady) return;
+
+  // Stop any running sweep / audio
+  pauseSweep();
+  stopPlayback();
+
+  const freq       = parseFloat(freqNum.value) || 440;
+  const noWin      = winSel.value === 'rect';
+  const halfSpec   = halfSpecSel.value === '1';
+
+  // Build alpha list (0 → ALPHA_MAX at fixed ALPHA_STEP resolution)
+  alphaValues = [];
+  for (let a = 0; a <= ALPHA_MAX + 1e-9; a += ALPHA_STEP)
+    alphaValues.push(parseFloat(a.toFixed(5)));
+
+  // Generate dry sine
+  dryBuf        = generateSine(freq, N_SAMPLES, sampleRate);
+  trimmedDryBuf = dryBuf;
+  drySTFT       = computeSTFT(dryBuf);
+
+  // Reset caches
+  wetBufs = new Array(alphaValues.length).fill(null);
+  stftCache.clear();
+  mixStftCache.clear();
+  precomputeDone = false;
+
+  queuePid++;
+  queueIdx   = 0;
+  queueTotal = alphaValues.length;
+  queueBusy  = false;
+
+  // Update UI
+  computeBtn.disabled    = true;
+  sweepPlayBtn.disabled  = true;
+  sweepResetBtn.disabled = true;
+  alphaSlider.disabled   = true;
+  setAudioBtnsEnabled(false);
+  setProgressLabel('Computing…', 0);
+
+  const pid     = queuePid;
+  const samples = dryBuf;
+
+  function sendNext() {
+    if (queueIdx >= queueTotal) return;  // handled by result handler
+    frftWorker.postMessage({
+      type:         'process',
+      samples,
+      alpha:        alphaValues[queueIdx],
+      bufSize:      samples.length,
+      overlapFactor: 1,
+      noWindow:     noWin,
+      halfSpectrum: halfSpec,
+      jobId:        pid * 100000 + queueIdx,
+    });
+    queueIdx++;
+  }
+
+  // Stash sendNext for the result handler to call
+  window._sendNextPrecompute = sendNext;
+  window._currentQueuePid   = pid;
+
+  sendNext();  // kick off first job
+}
+
+function onPrecomputeResult(jobId, output) {
+  const pid = Math.floor(jobId / 100000);
+  if (pid !== window._currentQueuePid) return;   // stale / cancelled
+
+  const idx = jobId % 100000;
+  wetBufs[idx] = output;
+  const done = idx + 1;
+  setProgressLabel('Computing…', done / queueTotal);
+
+  if (done < queueTotal) {
+    window._sendNextPrecompute();
+  } else {
+    onPrecomputeComplete();
+  }
+}
+
+function onPrecomputeComplete() {
+  precomputeDone = true;
+
+  // Compute sharedTopBin by sampling a handful of wet STFTs
+  sharedTopBin = drySTFT ? drySTFT.topBin : 0;
+  const step10 = Math.max(1, Math.floor(alphaValues.length / 8));
+  for (let i = 0; i < alphaValues.length; i += step10) {
+    const s = getWetSTFT(i);
+    if (s && s.topBin > sharedTopBin) sharedTopBin = s.topBin;
+  }
+
+  // Update alpha slider range/step
+  alphaSlider.min   = String(0);
+  alphaSlider.max   = String(ALPHA_MAX);
+  alphaSlider.step  = String(ALPHA_STEP);
+  alphaSlider.value = '0';
+  alphaSlider.disabled = false;
+
+  sweepIdx = 0;
+  updateSweepDisplay();
+
+  computeBtn.disabled    = false;
+  sweepPlayBtn.disabled  = false;
+  sweepResetBtn.disabled = false;
+  setProgressLabel('Ready', 1);
+  setStatus('');
+  setAudioBtnsEnabled(true);
+}
+
+function setProgressLabel(text, frac) {
+  progressLabel.textContent = text;
+  progressPct.textContent   = frac > 0 && frac < 1 ? Math.round(frac * 100) + '%' : '';
+  progressFill.style.width  = Math.round(Math.min(1, frac) * 100) + '%';
+}
+
+// ── STFT cache helpers ────────────────────────────────────────────────────────
+function getWetSTFT(idx) {
+  if (!wetBufs[idx]) return null;
+  if (!stftCache.has(idx)) stftCache.set(idx, computeSTFT(wetBufs[idx]));
+  return stftCache.get(idx);
+}
+function getMixSTFT(idx) {
+  if (!wetBufs[idx] || !dryBuf) return null;
+  if (!mixStftCache.has(idx)) {
+    const len = Math.min(dryBuf.length, wetBufs[idx].length);
+    const mix = new Float32Array(len);
+    for (let i = 0; i < len; i++) mix[i] = (dryBuf[i] + wetBufs[idx][i]) * 0.5;
+    mixStftCache.set(idx, computeSTFT(mix));
+  }
+  return mixStftCache.get(idx);
+}
+
+// ── Alpha sweep ───────────────────────────────────────────────────────────────
+function startSweep() {
+  if (!precomputeDone) return;
+  sweepRunning = true;
+  sweepPlayBtn.textContent = '⏸ Pause';
+  sweepPlayBtn.classList.add('running');
+  setAudioBtnsEnabled(false);
+
+  sweepTimer = setInterval(() => {
+    sweepIdx += sweepDir;
+    if (sweepIdx >= alphaValues.length - 1) { sweepIdx = alphaValues.length - 1; sweepDir = -1; }
+    else if (sweepIdx <= 0)                 { sweepIdx = 0;                       sweepDir =  1; }
+    alphaSlider.value = String(alphaValues[sweepIdx]);
+    updateSweepDisplay();
+  }, 1000 / SWEEP_FPS);
+}
+
+function pauseSweep() {
+  if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
+  sweepRunning = false;
+  sweepPlayBtn.textContent = '▶ Sweep';
+  sweepPlayBtn.classList.remove('running');
+  if (precomputeDone) setAudioBtnsEnabled(true);
+}
+
+function resetSweep() {
+  pauseSweep();
+  sweepIdx = 0;
+  sweepDir = 1;
+  if (alphaValues.length) {
+    alphaSlider.value = '0';
+    updateSweepDisplay();
+  }
+}
+
+function updateSweepDisplay() {
+  const alpha = alphaValues[sweepIdx] ?? 0;
+  alphaDisplay.textContent = alpha.toFixed(3);
+
+  // Update live STFTs
+  wetSTFT = getWetSTFT(sweepIdx);
+  mixSTFT = getMixSTFT(sweepIdx);
+  wetBuf  = wetBufs[sweepIdx] || null;
+
+  renderActiveTab();
+  drawSweepSpectrum();
+}
+
+// Spectrum strip: middle frame of the active STFT (static during sweep)
+function drawSweepSpectrum() {
+  const stft = activeTab === 'dry' ? drySTFT
+             : activeTab === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) return;
+
+  const detail = specGamma !== 1.0;
+  const { magDB, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = stft;
+  const renderMin = detail ? dBpct02 : dBmin;
+  const renderMax = detail ? dBpct98 : dBmax;
+  const topBin = sharedTopBin || stft.topBin;
+  const frameIdx = Math.floor(stft.numFrames / 2);
+
+  const ctx2d = spectrumCanvas.getContext('2d');
+  const W     = spectrumCanvas.width;
+  const H     = spectrumCanvas.height;
+  const img   = ctx2d.createImageData(W, H);
+  const px4   = img.data;
+
+  for (let y = 0; y < H; y++) {
+    const ki = Math.round((1 - (y + 0.5) / H) * topBin);
+    const db = magDB[frameIdx * NUM_BINS + Math.min(NUM_BINS - 1, ki)];
+    const t0 = Math.max(0, Math.min(1, (db - renderMin) / (renderMax - renderMin)));
+    const t  = specGamma === 1.0 ? t0 : Math.pow(t0, specGamma);
+    const [r, g, b] = spectrogramColor(t, detail);
+    const barW = Math.round(t * W);
+    for (let x = 0; x < W; x++) {
+      const i4 = (y * W + x) * 4;
+      if (x >= W - barW) { px4[i4]=r; px4[i4+1]=g; px4[i4+2]=b; px4[i4+3]=255; }
+      else               { px4[i4]=10; px4[i4+1]=10; px4[i4+2]=10; px4[i4+3]=255; }
+    }
+  }
+  ctx2d.putImageData(img, 0, 0);
+}
+
+// ── Audio enable/disable helpers ──────────────────────────────────────────────
+function setAudioBtnsEnabled(on) {
+  const hasBufs = !!(trimmedDryBuf && wetBuf);
+  playBtn.disabled     = !on || !hasBufs;
+  downloadBtn.disabled = !on || !hasBufs;
+  // Tabs always available when data exists
+  tabDry.disabled  = false;
+  tabWet.disabled  = false;
+  tabBoth.disabled = false;
+}
+
+// ── Right-col rendering ───────────────────────────────────────────────────────
+function renderActiveTab() {
+  const stft = activeTab === 'dry' ? drySTFT
+             : activeTab === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) return;
+  const alpha = alphaValues.length ? alphaValues[sweepIdx] : null;
+  const overlay = (alpha !== null && activeTab !== 'dry')
+    ? 'α = ' + alpha.toFixed(2) : '';
+  renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin, zoomView, specGamma, overlay);
+}
+
+function setActiveTabs(tab) {
+  activeTab = tab;
+  tabDry.classList.toggle('active', tab === 'dry');
+  tabWet.classList.toggle('active', tab === 'wet');
+  tabBoth.classList.toggle('active', tab === 'both');
+  renderActiveTab();
+  if (!playingWhich) drawSweepSpectrum();
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────────
+[freqNum, winSel, halfSpecSel].forEach(el =>
+  el.addEventListener('change', () => {
+    precomputeDone = false;
+    sweepPlayBtn.disabled = true;
+    sweepResetBtn.disabled = true;
+    alphaSlider.disabled = true;
+    setProgressLabel('Not computed', 0);
+    setAudioBtnsEnabled(false);
+  })
+);
+
+computeBtn.addEventListener('click', startPrecompute);
+
+sweepPlayBtn.addEventListener('click', () => {
+  if (sweepRunning) pauseSweep(); else startSweep();
+});
+sweepResetBtn.addEventListener('click', resetSweep);
+
+// Alpha scrub (only when sweep paused)
+alphaSlider.addEventListener('input', () => {
+  if (sweepRunning) return;
+  const sliderVal = parseFloat(alphaSlider.value);
+  sweepIdx = Math.round(sliderVal / ALPHA_STEP);
+  sweepIdx = Math.max(0, Math.min(alphaValues.length - 1, sweepIdx));
+  updateSweepDisplay();
+});
+
+detailBtn.addEventListener('click', () => {
+  specGamma = specGamma === 1.0 ? 0.3 : 1.0;
+  detailBtn.classList.toggle('active', specGamma !== 1.0);
+  renderActiveTab();
+  if (!playingWhich) drawSweepSpectrum();
+});
+
+playBtn.addEventListener('click', () => {
+  if (playingWhich !== null) stopPlayback(); else startPlayback(activeTab);
+});
+tabDry.addEventListener('click',  () => { setActiveTabs('dry');  if (playingWhich) { applyMix('dry');  playingWhich='dry';  } });
+tabWet.addEventListener('click',  () => { setActiveTabs('wet');  if (playingWhich) { applyMix('wet');  playingWhich='wet';  } });
+tabBoth.addEventListener('click', () => { setActiveTabs('both'); if (playingWhich) { applyMix('both'); playingWhich='both'; } });
+
+downloadBtn.addEventListener('click', async () => {
+  if (!trimmedDryBuf || !wetBuf) return;
+  const alpha = (alphaValues[sweepIdx] ?? 0).toFixed(5);
+  const tmp = document.createElement('canvas');
+  tmp.width  = specCanvas.width; tmp.height = specCanvas.height;
+  renderSpectrogram(tmp, drySTFT, sampleRate, sharedTopBin, null, specGamma);
+  const srcPNG  = await canvasToPNG(tmp);
+  renderSpectrogram(tmp, wetSTFT, sampleRate, sharedTopBin, null, specGamma);
+  const frftPNG = await canvasToPNG(tmp);
+  const zip = buildZip([
+    { name: 'source.wav',                        data: buildWAV(trimmedDryBuf, sampleRate) },
+    { name: `frft_alpha${alpha}.wav`,             data: buildWAV(wetBuf,        sampleRate) },
+    { name: 'source_spectrogram.png',             data: srcPNG  },
+    { name: `frft_alpha${alpha}_spectrogram.png`, data: frftPNG },
+  ]);
+  const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+  Object.assign(document.createElement('a'), { href: url, download: `frft_alpha${alpha}.zip` }).click();
+  URL.revokeObjectURL(url);
+});
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+const controlsRow = statusEl.closest('.controls-row');
+function setStatus(text, cls = '') {
+  statusEl.textContent = text;
+  statusEl.className   = cls;
+  controlsRow.classList.toggle('processing', cls === 'busy');
+}
+
+// ── Zoom / drag (identical to other embeds) ───────────────────────────────────
+let dragStart = null;
+zoomOverlay.addEventListener('mousedown', e => {
+  const r = zoomOverlay.getBoundingClientRect();
+  dragStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+  zoomBox.style.display = 'block';
+  zoomBox.style.left = dragStart.x + 'px'; zoomBox.style.top  = dragStart.y + 'px';
+  zoomBox.style.width = '0px';             zoomBox.style.height = '0px';
+});
+zoomOverlay.addEventListener('mousemove', e => {
+  if (!dragStart) return;
+  const r  = zoomOverlay.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  zoomBox.style.left   = Math.min(cx, dragStart.x) + 'px';
+  zoomBox.style.top    = Math.min(cy, dragStart.y) + 'px';
+  zoomBox.style.width  = Math.abs(cx - dragStart.x) + 'px';
+  zoomBox.style.height = Math.abs(cy - dragStart.y) + 'px';
+});
+zoomOverlay.addEventListener('mouseup', e => {
+  if (!dragStart) return;
+  const r  = zoomOverlay.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  const dx = Math.abs(cx - dragStart.x), dy = Math.abs(cy - dragStart.y);
+  zoomBox.style.display = 'none';
+  if (dx > 8 && dy > 8) {
+    const stft = activeTab === 'dry' ? drySTFT : activeTab === 'wet' ? wetSTFT : mixSTFT;
+    if (stft) {
+      const W = specCanvas.width, H = specCanvas.height;
+      const x0 = Math.min(cx, dragStart.x), x1 = Math.max(cx, dragStart.x);
+      const y0 = Math.min(cy, dragStart.y), y1 = Math.max(cy, dragStart.y);
+      const prevF = zoomView ? zoomView.t0 : 0;
+      const prevFE= zoomView ? zoomView.t1 : stft.numFrames - 1;
+      const prevB = zoomView ? zoomView.b0 : 0;
+      const prevBE= zoomView ? zoomView.b1 : sharedTopBin;
+      const dpr = window.devicePixelRatio || 1;
+      zoomView = {
+        t0: Math.round(prevF + x0/r.width  * (prevFE - prevF)),
+        t1: Math.round(prevF + x1/r.width  * (prevFE - prevF)),
+        b0: Math.round(prevB + (1 - y1/r.height) * (prevBE - prevB)),
+        b1: Math.round(prevB + (1 - y0/r.height) * (prevBE - prevB)),
+      };
+      renderActiveTab();
+    }
+  }
+  dragStart = null;
+});
+zoomOverlay.addEventListener('dblclick', () => {
+  zoomView = null; renderActiveTab();
+});
+zoomOverlay.addEventListener('mouseleave', () => {
+  if (dragStart) { zoomBox.style.display = 'none'; dragStart = null; }
+});
+
+// Click on spectrogram during playback → seek
+zoomOverlay.addEventListener('click', e => {
+  if (!audioCtx || !playingWhich) return;
+  const r   = zoomOverlay.getBoundingClientRect();
+  const stft = playingWhich === 'dry' ? drySTFT
+             : playingWhich === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) return;
+  const fStart = zoomView ? zoomView.t0 : 0;
+  const fEnd   = zoomView ? zoomView.t1 : stft.numFrames - 1;
+  const frac   = (e.clientX - r.left) / r.width;
+  const frameIdx = Math.round(fStart + frac * (fEnd - fStart));
+  const offset   = frameIdx * stft.HOP / sampleRate;
+  startPlayback(playingWhich, offset);
+});
+
+function clearOverlay() { zoomView = null; renderActiveTab(); }
+
+// ── Playhead ──────────────────────────────────────────────────────────────────
+function clearPlayhead() {
+  const ctx2d = playheadCanvas.getContext('2d');
+  ctx2d.clearRect(0, 0, playheadCanvas.width, playheadCanvas.height);
+}
+function drawPlayhead() {
+  if (!audioCtx) { clearPlayhead(); return; }
+  const stft = playingWhich === 'dry' ? drySTFT
+             : playingWhich === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) { clearPlayhead(); return; }
+  const W = playheadCanvas.width, H = playheadCanvas.height;
+  const ctx2d  = playheadCanvas.getContext('2d');
+  ctx2d.clearRect(0, 0, W, H);
+  const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx = elapsed * sampleRate / stft.HOP;
+  const fStart   = zoomView ? zoomView.t0 : 0;
+  const fEnd     = zoomView ? zoomView.t1 : stft.numFrames - 1;
+  if (fEnd === fStart) return;
+  const x = Math.round((frameIdx - fStart) / (fEnd - fStart) * (W - 1));
+  if (x < 0 || x >= W) return;
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx2d.lineWidth   = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  ctx2d.beginPath(); ctx2d.moveTo(x, 0); ctx2d.lineTo(x, H); ctx2d.stroke();
+}
+
+// ── Spectrum strip (during audio playback) ────────────────────────────────────
+function clearSpectrum() {
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  const ctx2d = spectrumCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+}
+
+function updateSpectrum() {
+  if (!audioCtx) return;
+  const stft = playingWhich === 'dry' ? drySTFT
+             : playingWhich === 'wet' ? wetSTFT : mixSTFT;
+  if (!stft) return;
+  const elapsed  = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx = Math.min(stft.numFrames - 1, Math.floor(elapsed * sampleRate / stft.HOP));
+  const { magDB, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = stft;
+  const detail     = specGamma !== 1.0;
+  const renderMin  = detail ? dBpct02 : dBmin;
+  const renderMax  = detail ? dBpct98 : dBmax;
+  const topBin     = sharedTopBin || stft.topBin;
+  const ctx2d = spectrumCanvas.getContext('2d');
+  const W = spectrumCanvas.width, H = spectrumCanvas.height;
+  const img = ctx2d.createImageData(W, H);
+  const px4 = img.data;
+  for (let y = 0; y < H; y++) {
+    const ki  = Math.round((1 - (y + 0.5) / H) * topBin);
+    const db  = magDB[frameIdx * NUM_BINS + Math.min(NUM_BINS-1, ki)];
+    const t0  = Math.max(0, Math.min(1, (db - renderMin) / (renderMax - renderMin)));
+    const t   = specGamma === 1.0 ? t0 : Math.pow(t0, specGamma);
+    const [r, g, b] = spectrogramColor(t, detail);
+    const barW = Math.round(t * W);
+    for (let x = 0; x < W; x++) {
+      const i4 = (y*W+x)*4;
+      if (x >= W - barW) { px4[i4]=r; px4[i4+1]=g; px4[i4+2]=b; px4[i4+3]=255; }
+      else               { px4[i4]=10; px4[i4+1]=10; px4[i4+2]=10; px4[i4+3]=255; }
+    }
+  }
+  ctx2d.putImageData(img, 0, 0);
+  drawPlayhead();
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+function stopPlayback() {
+  clearSpectrum();
+  clearPlayhead();
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  masterGain = null; dryGain = null; wetGain = null;
+  playingWhich        = null;
+  playBtn.textContent = '▶';
+  playBtn.className   = 'btn-ok';
+  // Restore sweep spectrum
+  if (precomputeDone && !sweepRunning) drawSweepSpectrum();
+}
+
+function applyMix(which) {
+  if (!dryGain || !wetGain || !audioCtx) return;
+  const t = audioCtx.currentTime, tau = 0.015;
+  dryGain.gain.setTargetAtTime((which === 'dry'  || which === 'both') ? 1 : 0, t, tau);
+  wetGain.gain.setTargetAtTime((which === 'wet'  || which === 'both') ? 1 : 0, t, tau);
+}
+
+function startPlayback(which, offset = 0) {
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  masterGain = null; dryGain = null; wetGain = null;
+
+  if (!trimmedDryBuf || !wetBuf) return;
+  offset = Math.max(0, Math.min(offset, trimmedDryBuf.length / sampleRate - 0.01));
+
+  audioCtx   = new AudioContext({ sampleRate });
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 0.5;
+  masterGain.connect(audioCtx.destination);
+
+  dryGain = audioCtx.createGain(); wetGain = audioCtx.createGain();
+  dryGain.gain.value = (which === 'dry'  || which === 'both') ? 1 : 0;
+  wetGain.gain.value = (which === 'wet'  || which === 'both') ? 1 : 0;
+  dryGain.connect(masterGain); wetGain.connect(masterGain);
+
+  const dryAB = audioCtx.createBuffer(1, trimmedDryBuf.length, sampleRate);
+  dryAB.copyToChannel(trimmedDryBuf, 0);
+  activeSrc = audioCtx.createBufferSource(); activeSrc.buffer = dryAB;
+  activeSrc.connect(dryGain); activeSrc.start(0, offset);
+  activeSrc.onended = stopPlayback;
+
+  const wetAB = audioCtx.createBuffer(1, wetBuf.length, sampleRate);
+  wetAB.copyToChannel(wetBuf, 0);
+  activeSrc2 = audioCtx.createBufferSource(); activeSrc2.buffer = wetAB;
+  activeSrc2.connect(wetGain); activeSrc2.start(0, offset);
+
+  const stft = which === 'dry' ? drySTFT : which === 'wet' ? wetSTFT : mixSTFT;
+  playbackStartTime   = audioCtx.currentTime - offset;
+  playbackTotalFrames = stft ? stft.numFrames : Math.ceil(trimmedDryBuf.length / 256);
+  playheadInterval    = setInterval(updateSpectrum, 1000 / 30);
+  playingWhich        = which;
+  playBtn.textContent = '■';
+  playBtn.className   = 'btn-playing';
+}
+
+// ── Worker message handler ────────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
+  if (type === 'ready') {
+    workerReady = true;
+    computeBtn.disabled = false;
+    startPrecompute();   // auto-run with default settings on first load
+    return;
+  }
+  if (type === 'progress') return;   // individual job progress ignored during batch
+  if (type === 'result') {
+    onPrecomputeResult(e.data.jobId, e.data.output);
+    return;
+  }
+  if (type === 'error') {
+    setStatus(e.data.message || 'Worker error', 'err');
+    computeBtn.disabled = false;
+    return;
+  }
+}
+
+// ── Colormaps ─────────────────────────────────────────────────────────────────
+const CMAP_NORMAL = [
+  [  5,   5,  25],
+  [100,   0, 150],
+  [200,  50, 100],
+  [255, 140,  20],
+  [255, 255, 100],
+];
+// matplotlib 'hot': black → dark-red → orange → yellow → white
+const CMAP_DETAIL = [
+  [  0,   0,   0],
+  [191,   0,   0],
+  [255, 128,   0],
+  [255, 255,  64],
+  [255, 255, 255],
+];
+function spectrogramColor(t, detail = false) {
+  const stops = detail ? CMAP_DETAIL : CMAP_NORMAL;
+  const s  = t * (stops.length - 1);
+  const lo = Math.floor(s);
+  const hi = Math.min(lo + 1, stops.length - 1);
+  const f  = s - lo;
+  return [
+    Math.round(stops[lo][0] + f*(stops[hi][0]-stops[lo][0])),
+    Math.round(stops[lo][1] + f*(stops[hi][1]-stops[lo][1])),
+    Math.round(stops[lo][2] + f*(stops[hi][2]-stops[lo][2])),
+  ];
+}
+
+// ── STFT ──────────────────────────────────────────────────────────────────────
+function fftInPlace(re, im, N) {
+  let j = 0;
+  for (let i = 1; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i]=re[j]; re[j]=t;
+          t = im[i]; im[i]=im[j]; im[j]=t;
+    }
+  }
+  for (let len = 2; len <= N; len <<= 1) {
+    const half = len >> 1;
+    const ang  = -2 * Math.PI / len;
+    const wcos = Math.cos(ang), wsin = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let wr = 1, wi = 0;
+      for (let k = 0; k < half; k++) {
+        const tr = wr*re[i+k+half] - wi*im[i+k+half];
+        const ti = wr*im[i+k+half] + wi*re[i+k+half];
+        re[i+k+half] = re[i+k]-tr; im[i+k+half] = im[i+k]-ti;
+        re[i+k] += tr;             im[i+k] += ti;
+        const nwr = wr*wcos - wi*wsin;
+        wi = wr*wsin + wi*wcos; wr = nwr;
+      }
+    }
+  }
+}
+
+function computeSTFT(samples) {
+  // Sweep widget uses a short window + small hop for better
+  // time/freq coverage on a 1-second signal:
+  //   337 frames × 512 bins  (~43 Hz/bin, ~2.9 ms/frame)
+  const FFT_SIZE = 1024;
+  const HOP      = 128;
+  const NUM_BINS = FFT_SIZE >> 1;
+
+  const win = new Float32Array(FFT_SIZE);
+  for (let i = 0; i < FFT_SIZE; i++)
+    win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_SIZE - 1));
+
+  const numFrames = samples && samples.length >= FFT_SIZE
+    ? Math.max(1, Math.floor((samples.length - FFT_SIZE) / HOP) + 1) : 0;
+  if (numFrames === 0) return { magDB: new Float32Array(0), numFrames:0, NUM_BINS, HOP, dBmax:0, dBmin:-100, dBpct02:-100, dBpct98:0, topBin:0 };
+
+  const magDB = new Float32Array(numFrames * NUM_BINS);
+  const re    = new Float64Array(FFT_SIZE);
+  const im    = new Float64Array(FFT_SIZE);
+  let   dBmax = -Infinity;
+  let   dBmin_actual = Infinity;
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * HOP;
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const idx = start + i;
+      re[i] = (idx < samples.length ? samples[idx] : 0.0) * win[i];
+      im[i] = 0.0;
+    }
+    fftInPlace(re, im, FFT_SIZE);
+    for (let k = 0; k < NUM_BINS; k++) {
+      const mag = Math.sqrt(re[k]*re[k] + im[k]*im[k]) / FFT_SIZE;
+      const db  = 20 * Math.log10(mag + 1e-10);
+      magDB[f * NUM_BINS + k] = db;
+      if (db > dBmax) dBmax = db;
+      if (db < dBmin_actual) dBmin_actual = db;
+    }
+  }
+
+  const dBmin = Math.max(dBmin_actual, dBmax - 120);
+
+  const step   = Math.max(1, Math.floor(magDB.length / 80000));
+  const sample = [];
+  for (let i = 0; i < magDB.length; i += step) sample.push(magDB[i]);
+  sample.sort((a, b) => a - b);
+  const dBpct02 = sample[Math.floor(sample.length * 0.02)];
+  const dBpct98 = sample[Math.floor(sample.length * 0.98)];
+
+  const threshold = dBmax - 60;
+  let   topBin    = 0;
+  for (let k = 0; k < NUM_BINS; k++)
+    for (let f = 0; f < numFrames; f++)
+      if (magDB[f * NUM_BINS + k] >= threshold) { topBin = k; break; }
+  topBin = Math.min(topBin + 1, NUM_BINS - 1);
+
+  return { magDB, numFrames, NUM_BINS, HOP, dBmax, dBmin, dBpct02, dBpct98, topBin };
+}
+
+// ── Spectrogram renderer ──────────────────────────────────────────────────────
+function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = null, gamma = 1.0, overlayText = '') {
+  const cW  = canvas.width, cH = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, cW, cH);
+
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = stftData;
+  if (numFrames === 0) return;
+
+  const topBin   = topBinOverride >= 0 ? topBinOverride : stftData.topBin;
+  const detail   = gamma !== 1.0;
+  const renderMin = detail ? dBpct02 : dBmin;
+  const renderMax = detail ? dBpct98 : dBmax;
+
+  const fStart = zoom ? zoom.t0 : 0;
+  const fEnd   = zoom ? zoom.t1 : numFrames - 1;
+  const bStart = zoom ? zoom.b0 : 0;
+  const bEnd   = zoom ? zoom.b1 : topBin;
+
+  const fi0 = Math.round(fStart), bi0 = Math.round(bStart);
+  const nF  = Math.max(1, Math.round(fEnd) - fi0 + 1);
+  const nB  = Math.max(1, Math.round(bEnd) - bi0 + 1);
+
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = nF; offCanvas.height = nB;
+  const offCtx = offCanvas.getContext('2d');
+  const offImg = offCtx.createImageData(nF, nB);
+  const od     = offImg.data;
+
+  for (let fi = 0; fi < nF; fi++) {
+    const f = Math.min(numFrames - 1, fi0 + fi);
+    for (let bi = 0; bi < nB; bi++) {
+      const k  = Math.min(NUM_BINS - 1, bi0 + bi);
+      const db = magDB[f * NUM_BINS + k];
+      const v0 = Math.max(0, Math.min(1, (db - renderMin) / (renderMax - renderMin)));
+      const v  = gamma === 1.0 ? v0 : Math.pow(v0, gamma);
+      const [r, g, b] = spectrogramColor(v, detail);
+      const pi = ((nB - 1 - bi) * nF + fi) * 4;
+      od[pi]=r; od[pi+1]=g; od[pi+2]=b; od[pi+3]=255;
+    }
+  }
+  offCtx.putImageData(offImg, 0, 0);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offCanvas, 0, 0, cW, cH);
+
+  // Freq label
+  const dpr      = window.devicePixelRatio || 1;
+  const nyquist  = sr / 2;
+  const dispTopBin = zoom ? zoom.b1 : topBin;
+  const topFreq  = (dispTopBin / (NUM_BINS - 1)) * nyquist;
+  const topLabel = topFreq >= 1000
+    ? (topFreq/1000 % 1 === 0 ? (topFreq/1000)+'k' : (topFreq/1000).toFixed(1)+'k')
+    : Math.round(topFreq)+'';
+  const fontSize = Math.max(9, Math.round(cH / dpr * 0.07)) * dpr;
+  ctx.font      = `${fontSize}px -apple-system, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  ctx.fillText(topLabel + ' Hz', 5 * dpr, fontSize + 3);
+
+  if (zoom) {
+    const botFreq  = (zoom.b0 / (NUM_BINS - 1)) * nyquist;
+    const botLabel = botFreq >= 1000
+      ? (botFreq/1000 % 1 === 0 ? (botFreq/1000)+'k' : (botFreq/1000).toFixed(1)+'k')
+      : Math.round(botFreq)+'';
+    ctx.fillText(botLabel + ' Hz', 5*dpr, cH - 4);
+    ctx.fillStyle = 'rgba(200,144,42,0.7)';
+    ctx.font = `${Math.max(8, fontSize*0.85)}px -apple-system, sans-serif`;
+    ctx.fillText('zoom ×' + ((bEnd-bStart > 0) ? Math.round((NUM_BINS/((bEnd-bStart)||1))*10)/10 : '?'), 5*dpr, cH/2);
+  }
+
+  // Optional top-right overlay (e.g. α value)
+  if (overlayText) {
+    ctx.font      = `700 ${fontSize}px -apple-system, sans-serif`;
+    ctx.fillStyle = 'rgba(200,144,42,0.90)';
+    ctx.textAlign = 'right';
+    ctx.fillText(overlayText, cW - 6 * dpr, fontSize + 3);
+    ctx.textAlign = 'left';   // restore default
+  }
+}
+
+// ── WAV + ZIP helpers ─────────────────────────────────────────────────────────
+function buildWAV(samples, sr) {
+  const numSamples = samples.length;
+  const dataBytes  = numSamples * 2;
+  const buf = new ArrayBuffer(44 + dataBytes);
+  const v   = new DataView(buf);
+  const str = (off, s) => { for (let i=0;i<s.length;i++) v.setUint8(off+i,s.charCodeAt(i)); };
+  str(0,'RIFF'); v.setUint32(4,36+dataBytes,true);
+  str(8,'WAVE'); str(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true);
+  v.setUint16(32,2,true);  v.setUint16(34,16,true);
+  str(36,'data'); v.setUint32(40,dataBytes,true);
+  let off=44;
+  for (let i=0;i<numSamples;i++) {
+    const s=Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(off,s<0?s*0x8000:s*0x7FFF,true); off+=2;
+  }
+  return new Uint8Array(buf);
+}
+function canvasToPNG(canvas) {
+  return new Promise(resolve => canvas.toBlob(blob => blob.arrayBuffer().then(b => resolve(new Uint8Array(b))), 'image/png'));
+}
+function crc32(data) {
+  if (!crc32._t) {
+    crc32._t = new Uint32Array(256);
+    for (let i=0;i<256;i++) { let c=i; for(let j=0;j<8;j++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); crc32._t[i]=c; }
+  }
+  let c=0xFFFFFFFF;
+  for (let i=0;i<data.length;i++) c=crc32._t[(c^data[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function buildZip(files) {
+  const enc = s => new TextEncoder().encode(s);
+  const u32 = (v,a,o) => { a[o]=v&0xff;a[o+1]=(v>>8)&0xff;a[o+2]=(v>>16)&0xff;a[o+3]=(v>>24)&0xff; };
+  const u16 = (v,a,o) => { a[o]=v&0xff;a[o+1]=(v>>8)&0xff; };
+  const entries=[], cdir=[];
+  let offset=0;
+  for (const {name,data} of files) {
+    const nm=enc(name), crc=crc32(data), hdr=new Uint8Array(30+nm.length);
+    hdr.set([0x50,0x4b,0x03,0x04,0x14,0,0,0,0,0,0,0,0,0]);
+    u32(crc,hdr,14); u32(data.length,hdr,18); u32(data.length,hdr,22);
+    u16(nm.length,hdr,26); hdr.set(nm,30);
+    const cd=new Uint8Array(46+nm.length);
+    cd.set([0x50,0x4b,0x01,0x02,0x14,0,0x14,0,0,0,0,0,0,0,0,0]);
+    u32(crc,cd,16); u32(data.length,cd,20); u32(data.length,cd,24);
+    u16(nm.length,cd,28); cd.set(nm,46); u32(offset,cd,42);
+    entries.push(hdr,data); cdir.push(cd);
+    offset+=hdr.length+data.length;
+  }
+  const cdData=new Uint8Array(cdir.reduce((a,c)=>a+c.length,0));
+  let cdOff=0; for(const c of cdir){cdData.set(c,cdOff);cdOff+=c.length;}
+  const eocd=new Uint8Array(22);
+  eocd.set([0x50,0x4b,0x05,0x06,0,0,0,0]);
+  u16(files.length,eocd,8); u16(files.length,eocd,10);
+  u32(cdData.length,eocd,12); u32(offset,eocd,16);
+  const all=[...entries,cdData,eocd];
+  const out=new Uint8Array(all.reduce((a,c)=>a+c.length,0));
+  let p=0; for(const a of all){out.set(a,p);p+=a.length;}
+  return out;
+}
+
+// ── Worker init ───────────────────────────────────────────────────────────────
+function initWorker() {
+  const cb          = window._wasmCacheBust;
+  const jsUrl       = new URL('../wasm/dist/frft.js',  location.href).href + '?v=' + cb;
+  const wasmBaseUrl = new URL('../wasm/dist/',         location.href).href;
+  frftWorker = new Worker(new URL('../audio/frft-worker.js', location.href).href + '?v=' + cb);
+  frftWorker.onmessage = handleWorkerMessage;
+  frftWorker.onerror   = e => {
+    console.error('Worker error:', e.message);
+    setStatus('Worker error', 'err');
+    computeBtn.disabled = false;
+  };
+  frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl, cacheBust: cb });
+}
+initWorker();
+</script>
+</body>
+</html>
