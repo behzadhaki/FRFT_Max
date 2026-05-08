@@ -114,7 +114,7 @@
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
   input[type="number"]:focus { border-color: var(--accent); }
-  #freqNum  { width: 4.5em; }
+  #freqNum { width: 4.5em; }
 
   /* Buttons */
   button {
@@ -131,8 +131,6 @@
   .btn-ok      { background: #2a2218; color: var(--accent); border-color: var(--accent-lo); }
   .btn-playing { background: var(--accent-lo); color: #f0c060; border-color: var(--accent); }
   .btn-neutral { background: var(--surface2); color: var(--muted); border-color: var(--border2); }
-  .btn-sweep   { background: #1a2a1a; color: #6fcf6f; border-color: #3a6a3a; }
-  .btn-sweep.running { background: #2a1a1a; color: #cf6f6f; border-color: #6a3a3a; }
 
   /* Controls row (right col) */
   .controls-row { display: flex; align-items: stretch; gap: 0.4em; flex: 1; min-height: 0; }
@@ -238,9 +236,7 @@
   .sweep-btns { display: flex; gap: 0.4em; height: 1.9em; flex-shrink: 0; }
   .sweep-btns button { flex: 1; }
 
-  /* Compute button row */
-  .compute-row { display: flex; gap: 0.4em; height: 1.9em; flex-shrink: 0; }
-  .compute-row button { flex: 1; }
+
 </style>
 </head>
 <body>
@@ -249,15 +245,10 @@
   <!-- ── Left column ──────────────────────────────────────────────────── -->
   <div class="left-col">
 
-    <!-- Source card -->
+    <!-- Source settings -->
     <div class="card">
-      <h1>Sine Source</h1>
-      <div class="rows-wrap">
-        <div class="row">
-          <label class="lbl">Freq</label>
-          <input type="number" id="freqNum" value="440" min="20" max="20000" step="1">
-          <span style="font-size:0.78em;color:var(--muted);display:flex;align-items:center;padding-left:0.2em">Hz</span>
-        </div>
+      <h1>Source</h1>
+      <div class="rows-wrap" style="flex:none">
         <div class="row">
           <label class="lbl">Window</label>
           <select id="winSel">
@@ -275,35 +266,42 @@
       </div>
     </div>
 
-    <!-- Alpha sweep card -->
-    <div class="card" style="flex:1">
+    <!-- Freq Sweep panel -->
+    <div class="card">
+      <h1>Freq Sweep</h1>
+      <div class="slider-wrap">
+        <input type="range" id="freqSlider" min="0" max="6" step="1" value="0" disabled>
+        <div class="slider-labels">
+          <span>100</span><span>500</span><span>1k</span><span>2k</span><span>5k</span><span>7.5k</span><span>10k</span>
+        </div>
+      </div>
+      <div class="sweep-btns">
+        <button class="btn-ok" id="freqSweepBtn" disabled>▶ Sweep</button>
+      </div>
+    </div>
+
+    <!-- Alpha Sweep panel -->
+    <div class="card">
       <h1>Alpha Sweep</h1>
-
-      <!-- Large alpha readout -->
-      <div class="alpha-display"><span>α =</span><span id="alphaDisplay">0.000</span></div>
-
-      <!-- Scrub slider -->
       <div class="slider-wrap">
         <input type="range" id="alphaSlider" min="0" max="1" step="0.05" value="0" disabled>
-        <div class="slider-labels"><span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span></div>
+        <div class="slider-labels">
+          <span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1</span>
+        </div>
       </div>
+      <div class="sweep-btns">
+        <button class="btn-ok" id="alphaSweepBtn" disabled>▶ Sweep</button>
+      </div>
+    </div>
 
-      <!-- Pre-compute -->
+    <!-- Progress -->
+    <div class="card" style="flex: 1">
       <div class="progress-wrap">
         <div class="progress-label">
           <span id="progressLabel">Not computed</span>
           <span id="progressPct"></span>
         </div>
         <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-      </div>
-      <div class="compute-row">
-        <button class="btn-neutral" id="computeBtn" disabled>Compute</button>
-      </div>
-
-      <!-- Sweep playback -->
-      <div class="sweep-btns">
-        <button class="btn-sweep" id="sweepPlayBtn" disabled>▶ Sweep</button>
-        <button class="btn-neutral" id="sweepResetBtn" disabled style="flex:0 0 2.5em">⟳</button>
       </div>
     </div>
 
@@ -345,31 +343,56 @@
 'use strict';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const ALPHA_STEP = 0.05;   // fixed α resolution
-const ALPHA_MAX  = 1.0;    // sweep 0 → 1
-const SWEEP_FPS  = 4;      // fixed sweep frame rate (~5 s per full loop)
+const ALPHA_STEP  = 0.05;
+const ALPHA_MAX   = 1.0;
+const FREQ_VALUES = [100, 500, 1000, 2000, 5000, 7500, 10000];
+const ALPHA_SWEEP_FPS = 4;
+const FREQ_SWEEP_FPS  = 1;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let sampleRate  = 44100;
-const N_SAMPLES = 32768;  // exact power-of-2 length — avoids zero-padding in FFT/FRFT pipeline
+const N_SAMPLES = 32768;
 
-let dryBuf        = null;   // Float32Array — sine source
-let trimmedDryBuf = null;   // = dryBuf (no OLA trim here)
-let wetBuf        = null;   // current alpha's output (for audio playback)
-let wetBufs       = [];     // Float32Array[], indexed by alpha step
+// Build alpha list once
+const alphaValues = (() => {
+  const a = [];
+  for (let v = 0; v <= ALPHA_MAX + 1e-9; v += ALPHA_STEP) a.push(parseFloat(v.toFixed(5)));
+  return a;
+})();
+const NUM_ALPHA = alphaValues.length;    // 21
+const NUM_FREQ  = FREQ_VALUES.length;    // 6
 
-let drySTFT  = null;
-let wetSTFT  = null;        // current alpha's STFT (live reference)
-let mixSTFT  = null;        // mix of dry + wet at current alpha
+// 2D grid: wetBufs2D[freqIdx][alphaIdx] = Float32Array | null
+let wetBufs2D  = [];
+let dryBufsAll = [];   // Float32Array[freqIdx]
 
-const stftCache    = new Map();   // alphaIdx → stft
-const mixStftCache = new Map();   // alphaIdx → mix stft
+// Current display state (updated by updateDisplay)
+let dryBuf        = null;
+let trimmedDryBuf = null;
+let wetBuf        = null;
+let drySTFT       = null;
+let wetSTFT       = null;
+let mixSTFT       = null;
 
-let alphaValues   = [];     // [0, 0.05, 0.10, …, 1.0]
-let sweepIdx      = 0;      // current position in alphaValues
-let sweepDir      = 1;      // +1 forward, -1 reverse (ping-pong)
-let sweepRunning  = false;
-let sweepTimer    = null;
+// STFT caches — key = freqIdx * NUM_ALPHA + alphaIdx (or freqIdx for dry)
+const stftCache    = new Map();
+const dryStftCache = new Map();
+const mixStftCache = new Map();
+
+// Current grid position
+let freqIdx  = 0;
+let alphaIdx = 0;
+
+// Freq sweep
+let freqSweepRunning = false;
+let freqSweepTimer   = null;
+let freqDir          = 1;
+
+// Alpha sweep
+let alphaSweepRunning = false;
+let alphaSweepTimer   = null;
+let alphaDir          = 1;
+
 let precomputeDone = false;
 
 let sharedTopBin = 0;
@@ -395,17 +418,18 @@ let queueTotal   = 0;
 let queueBusy    = false;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const freqNum       = document.getElementById('freqNum');
 const winSel        = document.getElementById('winSel');
 const halfSpecSel   = document.getElementById('halfSpecSel');
-const alphaDisplay  = document.getElementById('alphaDisplay');
+const freqSlider    = document.getElementById('freqSlider');
+const freqSweepBtn  = document.getElementById('freqSweepBtn');
 const alphaSlider   = document.getElementById('alphaSlider');
+const alphaSweepBtn = document.getElementById('alphaSweepBtn');
+
+// Settings → precompute cache (key = "win_halfspec")
+const computeCache = new Map();
 const progressLabel = document.getElementById('progressLabel');
 const progressPct   = document.getElementById('progressPct');
 const progressFill  = document.getElementById('progressFill');
-const computeBtn    = document.getElementById('computeBtn');
-const sweepPlayBtn  = document.getElementById('sweepPlayBtn');
-const sweepResetBtn = document.getElementById('sweepResetBtn');
 const playBtn       = document.getElementById('playBtn');
 const tabDry        = document.getElementById('tabDry');
 const tabWet        = document.getElementById('tabWet');
@@ -446,81 +470,105 @@ function generateSine(freq, n, sr) {
 }
 
 // ── Pre-computation ───────────────────────────────────────────────────────────
+function settingsKey() {
+  return `${winSel.value}_${halfSpecSel.value}`;
+}
+
 function startPrecompute() {
   if (!workerReady) return;
 
-  // Stop any running sweep / audio
-  pauseSweep();
+  const key = settingsKey();
+
+  // ── Cache hit: restore without recomputing ────────────────────────────────
+  if (computeCache.has(key)) {
+    pauseFreqSweep();
+    pauseAlphaSweep();
+    stopPlayback();
+    const cached = computeCache.get(key);
+    wetBufs2D  = cached.wetBufs2D;
+    dryBufsAll = cached.dryBufsAll;
+    sharedTopBin = cached.sharedTopBin;
+    stftCache.clear(); dryStftCache.clear(); mixStftCache.clear();
+    precomputeDone = true;
+    freqIdx = 0; alphaIdx = 0; freqDir = 1; alphaDir = 1;
+    freqSlider.value = '0'; alphaSlider.value = '0';
+    freqSlider.disabled = false; alphaSlider.disabled = false;
+    setAllSweepBtnsDisabled(false);
+    updateDisplay();
+    setProgressLabel('Ready', 1);
+    setAudioBtnsEnabled(true);
+    _doRestartSweeps();
+    return;
+  }
+
+  pauseFreqSweep();
+  pauseAlphaSweep();
   stopPlayback();
 
-  const freq       = parseFloat(freqNum.value) || 440;
-  const noWin      = winSel.value === 'rect';
-  const halfSpec   = halfSpecSel.value === '1';
+  const noWin    = winSel.value === 'rect';
+  const halfSpec = halfSpecSel.value === '1';
 
-  // Build alpha list (0 → ALPHA_MAX at fixed ALPHA_STEP resolution)
-  alphaValues = [];
-  for (let a = 0; a <= ALPHA_MAX + 1e-9; a += ALPHA_STEP)
-    alphaValues.push(parseFloat(a.toFixed(5)));
+  // Build all dry sines for each frequency
+  dryBufsAll = FREQ_VALUES.map(f => generateSine(f, N_SAMPLES, sampleRate));
 
-  // Generate dry sine
-  dryBuf        = generateSine(freq, N_SAMPLES, sampleRate);
-  trimmedDryBuf = dryBuf;
-  drySTFT       = computeSTFT(dryBuf);
-
-  // Reset caches
-  wetBufs = new Array(alphaValues.length).fill(null);
+  // Initialise 2D wet buffer grid
+  wetBufs2D = Array.from({ length: NUM_FREQ }, () => new Array(NUM_ALPHA).fill(null));
   stftCache.clear();
+  dryStftCache.clear();
   mixStftCache.clear();
   precomputeDone = false;
 
+  const queueTotal = NUM_FREQ * NUM_ALPHA;   // 126
   queuePid++;
-  queueIdx   = 0;
-  queueTotal = alphaValues.length;
-  queueBusy  = false;
+  queueIdx  = 0;
+  queueBusy = false;
 
-  // Update UI
-  computeBtn.disabled    = true;
-  sweepPlayBtn.disabled  = true;
-  sweepResetBtn.disabled = true;
-  alphaSlider.disabled   = true;
+  setAllSweepBtnsDisabled(true);
+  freqSlider.disabled  = true;
+  alphaSlider.disabled = true;
   setAudioBtnsEnabled(false);
   setProgressLabel('Computing…', 0);
 
-  const pid     = queuePid;
-  const samples = dryBuf;
+  const pid      = queuePid;
+  const noWin_   = noWin;
+  const halfSpec_= halfSpec;
 
   function sendNext() {
-    if (queueIdx >= queueTotal) return;  // handled by result handler
+    if (queueIdx >= queueTotal) return;
+    const fi = Math.floor(queueIdx / NUM_ALPHA);
+    const ai = queueIdx % NUM_ALPHA;
     frftWorker.postMessage({
-      type:         'process',
-      samples,
-      alpha:        alphaValues[queueIdx],
-      bufSize:      samples.length,
+      type:          'process',
+      samples:       dryBufsAll[fi],
+      alpha:         alphaValues[ai],
+      bufSize:       N_SAMPLES,
       overlapFactor: 1,
-      noWindow:     noWin,
-      halfSpectrum: halfSpec,
-      jobId:        pid * 100000 + queueIdx,
+      noWindow:      noWin_,
+      halfSpectrum:  halfSpec_,
+      jobId:         pid * 100000 + queueIdx,
     });
     queueIdx++;
   }
 
-  // Stash sendNext for the result handler to call
   window._sendNextPrecompute = sendNext;
   window._currentQueuePid   = pid;
-
-  sendNext();  // kick off first job
+  window._queueTotal        = queueTotal;
+  sendNext();
 }
 
 function onPrecomputeResult(jobId, output) {
   const pid = Math.floor(jobId / 100000);
-  if (pid !== window._currentQueuePid) return;   // stale / cancelled
+  if (pid !== window._currentQueuePid) return;
 
-  const idx = jobId % 100000;
-  wetBufs[idx] = output;
-  const done = idx + 1;
-  setProgressLabel('Computing…', done / queueTotal);
+  const q  = jobId % 100000;
+  const fi = Math.floor(q / NUM_ALPHA);
+  const ai = q % NUM_ALPHA;
+  wetBufs2D[fi][ai] = output;
 
-  if (done < queueTotal) {
+  const done = q + 1;
+  setProgressLabel('Computing…', done / window._queueTotal);
+
+  if (done < window._queueTotal) {
     window._sendNextPrecompute();
   } else {
     onPrecomputeComplete();
@@ -530,30 +578,49 @@ function onPrecomputeResult(jobId, output) {
 function onPrecomputeComplete() {
   precomputeDone = true;
 
-  // Compute sharedTopBin by sampling a handful of wet STFTs
-  sharedTopBin = drySTFT ? drySTFT.topBin : 0;
-  const step10 = Math.max(1, Math.floor(alphaValues.length / 8));
-  for (let i = 0; i < alphaValues.length; i += step10) {
-    const s = getWetSTFT(i);
-    if (s && s.topBin > sharedTopBin) sharedTopBin = s.topBin;
+  // sharedTopBin: max across all dry + sample of wet STFTs
+  sharedTopBin = 0;
+  for (let fi = 0; fi < NUM_FREQ; fi++) {
+    const d = getDrySTFT(fi);
+    if (d && d.topBin > sharedTopBin) sharedTopBin = d.topBin;
+  }
+  // Sample every 3rd alpha across all freqs
+  for (let fi = 0; fi < NUM_FREQ; fi++) {
+    for (let ai = 0; ai < NUM_ALPHA; ai += 3) {
+      const w = getWetSTFT(fi, ai);
+      if (w && w.topBin > sharedTopBin) sharedTopBin = w.topBin;
+    }
   }
 
-  // Update alpha slider range/step
-  alphaSlider.min   = String(0);
-  alphaSlider.max   = String(ALPHA_MAX);
-  alphaSlider.step  = String(ALPHA_STEP);
+  freqIdx  = 0;  alphaIdx = 0;
+  freqDir  = 1;  alphaDir = 1;
+  freqSlider.value  = '0';
   alphaSlider.value = '0';
+  freqSlider.disabled  = false;
   alphaSlider.disabled = false;
+  setAllSweepBtnsDisabled(false);
 
-  sweepIdx = 0;
-  updateSweepDisplay();
+  updateDisplay();
 
-  computeBtn.disabled    = false;
-  sweepPlayBtn.disabled  = false;
-  sweepResetBtn.disabled = false;
+  // Save to cache
+  computeCache.set(settingsKey(), { wetBufs2D, dryBufsAll, sharedTopBin });
+
   setProgressLabel('Ready', 1);
   setStatus('');
   setAudioBtnsEnabled(true);
+  _doRestartSweeps();
+}
+
+function _doRestartSweeps() {
+  if (window._restartFreqSweep)  { window._restartFreqSweep  = false; startFreqSweep();  }
+  if (window._restartAlphaSweep) { window._restartAlphaSweep = false; startAlphaSweep(); }
+}
+
+function setAllSweepBtnsDisabled(dis) {
+  [freqSweepBtn, alphaSweepBtn].forEach(btn => {
+    btn.disabled  = dis;
+    btn.className = dis ? 'btn-neutral' : 'btn-ok';
+  });
 }
 
 function setProgressLabel(text, frac) {
@@ -563,72 +630,107 @@ function setProgressLabel(text, frac) {
 }
 
 // ── STFT cache helpers ────────────────────────────────────────────────────────
-function getWetSTFT(idx) {
-  if (!wetBufs[idx]) return null;
-  if (!stftCache.has(idx)) stftCache.set(idx, computeSTFT(wetBufs[idx]));
-  return stftCache.get(idx);
+function getDrySTFT(fi) {
+  if (!dryBufsAll[fi]) return null;
+  if (!dryStftCache.has(fi)) dryStftCache.set(fi, computeSTFT(dryBufsAll[fi]));
+  return dryStftCache.get(fi);
 }
-function getMixSTFT(idx) {
-  if (!wetBufs[idx] || !dryBuf) return null;
-  if (!mixStftCache.has(idx)) {
-    const len = Math.min(dryBuf.length, wetBufs[idx].length);
+function getWetSTFT(fi, ai) {
+  const key = fi * NUM_ALPHA + ai;
+  if (!wetBufs2D[fi] || !wetBufs2D[fi][ai]) return null;
+  if (!stftCache.has(key)) stftCache.set(key, computeSTFT(wetBufs2D[fi][ai]));
+  return stftCache.get(key);
+}
+function getMixSTFT(fi, ai) {
+  const key = fi * NUM_ALPHA + ai;
+  const dry = dryBufsAll[fi];
+  const wet = wetBufs2D[fi] && wetBufs2D[fi][ai];
+  if (!dry || !wet) return null;
+  if (!mixStftCache.has(key)) {
+    const len = Math.min(dry.length, wet.length);
     const mix = new Float32Array(len);
-    for (let i = 0; i < len; i++) mix[i] = (dryBuf[i] + wetBufs[idx][i]) * 0.5;
-    mixStftCache.set(idx, computeSTFT(mix));
+    for (let i = 0; i < len; i++) mix[i] = (dry[i] + wet[i]) * 0.5;
+    mixStftCache.set(key, computeSTFT(mix));
   }
-  return mixStftCache.get(idx);
+  return mixStftCache.get(key);
+}
+
+// ── Freq sweep ────────────────────────────────────────────────────────────────
+function startFreqSweep() {
+  if (!precomputeDone) return;
+  pauseAlphaSweep();
+  freqSweepRunning = true;
+  freqSweepBtn.textContent = '⏸';
+  freqSweepBtn.className = 'btn-playing';
+  setAudioBtnsEnabled(false);
+  blankSpectrum();
+  freqSweepTimer = setInterval(() => {
+    freqIdx += freqDir;
+    if (freqIdx >= NUM_FREQ - 1) { freqIdx = NUM_FREQ - 1; freqDir = -1; }
+    else if (freqIdx <= 0)       { freqIdx = 0;             freqDir =  1; }
+    freqSlider.value = String(freqIdx);
+    updateDisplay();
+  }, 1000 / FREQ_SWEEP_FPS);
+}
+function pauseFreqSweep() {
+  if (freqSweepTimer) { clearInterval(freqSweepTimer); freqSweepTimer = null; }
+  freqSweepRunning = false;
+  freqSweepBtn.textContent = '▶ Sweep';
+  freqSweepBtn.className = 'btn-ok';
+  if (precomputeDone && !alphaSweepRunning) setAudioBtnsEnabled(true);
+  if (precomputeDone && !alphaSweepRunning && !playingWhich) drawSweepSpectrum();
 }
 
 // ── Alpha sweep ───────────────────────────────────────────────────────────────
-function startSweep() {
+function startAlphaSweep() {
   if (!precomputeDone) return;
-  sweepRunning = true;
-  sweepPlayBtn.textContent = '⏸ Pause';
-  sweepPlayBtn.classList.add('running');
+  pauseFreqSweep();
+  alphaSweepRunning = true;
+  alphaSweepBtn.textContent = '⏸';
+  alphaSweepBtn.className = 'btn-playing';
   setAudioBtnsEnabled(false);
-
-  sweepTimer = setInterval(() => {
-    sweepIdx += sweepDir;
-    if (sweepIdx >= alphaValues.length - 1) { sweepIdx = alphaValues.length - 1; sweepDir = -1; }
-    else if (sweepIdx <= 0)                 { sweepIdx = 0;                       sweepDir =  1; }
-    alphaSlider.value = String(alphaValues[sweepIdx]);
-    updateSweepDisplay();
-  }, 1000 / SWEEP_FPS);
+  blankSpectrum();
+  alphaSweepTimer = setInterval(() => {
+    alphaIdx += alphaDir;
+    if (alphaIdx >= NUM_ALPHA - 1) { alphaIdx = NUM_ALPHA - 1; alphaDir = -1; }
+    else if (alphaIdx <= 0)        { alphaIdx = 0;              alphaDir =  1; }
+    alphaSlider.value = String(alphaValues[alphaIdx]);
+    updateDisplay();
+  }, 1000 / ALPHA_SWEEP_FPS);
+}
+function pauseAlphaSweep() {
+  if (alphaSweepTimer) { clearInterval(alphaSweepTimer); alphaSweepTimer = null; }
+  alphaSweepRunning = false;
+  alphaSweepBtn.textContent = '▶ Sweep';
+  alphaSweepBtn.className = 'btn-ok';
+  if (precomputeDone && !freqSweepRunning) setAudioBtnsEnabled(true);
+  if (precomputeDone && !freqSweepRunning && !playingWhich) drawSweepSpectrum();
 }
 
-function pauseSweep() {
-  if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
-  sweepRunning = false;
-  sweepPlayBtn.textContent = '▶ Sweep';
-  sweepPlayBtn.classList.remove('running');
-  if (precomputeDone) setAudioBtnsEnabled(true);
-}
-
-function resetSweep() {
-  pauseSweep();
-  sweepIdx = 0;
-  sweepDir = 1;
-  if (alphaValues.length) {
-    alphaSlider.value = '0';
-    updateSweepDisplay();
-  }
-}
-
-function updateSweepDisplay() {
-  const alpha = alphaValues[sweepIdx] ?? 0;
-  alphaDisplay.textContent = alpha.toFixed(3);
-
-  // Update live STFTs
-  wetSTFT = getWetSTFT(sweepIdx);
-  mixSTFT = getMixSTFT(sweepIdx);
-  wetBuf  = wetBufs[sweepIdx] || null;
+// ── Display update ────────────────────────────────────────────────────────────
+function updateDisplay() {
+  const d       = dryBufsAll[freqIdx] || null;
+  dryBuf        = d;
+  trimmedDryBuf = d;
+  drySTFT       = getDrySTFT(freqIdx);
+  wetSTFT       = getWetSTFT(freqIdx, alphaIdx);
+  mixSTFT       = getMixSTFT(freqIdx, alphaIdx);
+  wetBuf        = wetBufs2D[freqIdx] ? (wetBufs2D[freqIdx][alphaIdx] || null) : null;
 
   renderActiveTab();
   drawSweepSpectrum();
 }
 
+// Blank the spectrum strip without touching the playhead interval
+function blankSpectrum() {
+  const ctx2d = spectrumCanvas.getContext('2d');
+  ctx2d.fillStyle = '#0a0a0a';
+  ctx2d.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+}
+
 // Spectrum strip: middle frame of the active STFT (static during sweep)
 function drawSweepSpectrum() {
+  if (freqSweepRunning || alphaSweepRunning) return;   // hidden during animation
   const stft = activeTab === 'dry' ? drySTFT
              : activeTab === 'wet' ? wetSTFT : mixSTFT;
   if (!stft) return;
@@ -664,13 +766,10 @@ function drawSweepSpectrum() {
 
 // ── Audio enable/disable helpers ──────────────────────────────────────────────
 function setAudioBtnsEnabled(on) {
+  const active  = on && !freqSweepRunning && !alphaSweepRunning;
   const hasBufs = !!(trimmedDryBuf && wetBuf);
-  playBtn.disabled     = !on || !hasBufs;
-  downloadBtn.disabled = !on || !hasBufs;
-  // Tabs always available when data exists
-  tabDry.disabled  = false;
-  tabWet.disabled  = false;
-  tabBoth.disabled = false;
+  playBtn.disabled     = !active || !hasBufs;
+  downloadBtn.disabled = !active || !hasBufs;
 }
 
 // ── Right-col rendering ───────────────────────────────────────────────────────
@@ -678,9 +777,12 @@ function renderActiveTab() {
   const stft = activeTab === 'dry' ? drySTFT
              : activeTab === 'wet' ? wetSTFT : mixSTFT;
   if (!stft) return;
-  const alpha = alphaValues.length ? alphaValues[sweepIdx] : null;
-  const overlay = (alpha !== null && activeTab !== 'dry')
-    ? 'α = ' + alpha.toFixed(2) : '';
+  let overlay = '';
+  if (precomputeDone && activeTab !== 'dry') {
+    const f = FREQ_VALUES[freqIdx];
+    const fStr = f >= 1000 ? (f/1000) + 'k' : f;
+    overlay = fStr + ' Hz  α=' + alphaValues[alphaIdx].toFixed(2);
+  }
   renderSpectrogram(specCanvas, stft, sampleRate, sharedTopBin, zoomView, specGamma, overlay);
 }
 
@@ -694,31 +796,35 @@ function setActiveTabs(tab) {
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
-[freqNum, winSel, halfSpecSel].forEach(el =>
+
+// Source settings → auto-recompute (restart any running sweep afterwards)
+[winSel, halfSpecSel].forEach(el =>
   el.addEventListener('change', () => {
-    precomputeDone = false;
-    sweepPlayBtn.disabled = true;
-    sweepResetBtn.disabled = true;
-    alphaSlider.disabled = true;
-    setProgressLabel('Not computed', 0);
-    setAudioBtnsEnabled(false);
+    window._restartFreqSweep  = freqSweepRunning;
+    window._restartAlphaSweep = alphaSweepRunning;
+    startPrecompute();
   })
 );
 
-computeBtn.addEventListener('click', startPrecompute);
 
-sweepPlayBtn.addEventListener('click', () => {
-  if (sweepRunning) pauseSweep(); else startSweep();
+// Freq sweep button
+freqSweepBtn.addEventListener('click',  () => { if (freqSweepRunning)  pauseFreqSweep();  else startFreqSweep();  });
+
+// Alpha sweep button
+alphaSweepBtn.addEventListener('click', () => { if (alphaSweepRunning) pauseAlphaSweep(); else startAlphaSweep(); });
+
+// Freq slider scrub
+freqSlider.addEventListener('input', () => {
+  if (freqSweepRunning) return;
+  freqIdx = Math.max(0, Math.min(NUM_FREQ - 1, Math.round(parseFloat(freqSlider.value))));
+  updateDisplay();
 });
-sweepResetBtn.addEventListener('click', resetSweep);
 
-// Alpha scrub (only when sweep paused)
+// Alpha slider scrub
 alphaSlider.addEventListener('input', () => {
-  if (sweepRunning) return;
-  const sliderVal = parseFloat(alphaSlider.value);
-  sweepIdx = Math.round(sliderVal / ALPHA_STEP);
-  sweepIdx = Math.max(0, Math.min(alphaValues.length - 1, sweepIdx));
-  updateSweepDisplay();
+  if (alphaSweepRunning) return;
+  alphaIdx = Math.max(0, Math.min(NUM_ALPHA - 1, Math.round(parseFloat(alphaSlider.value) / ALPHA_STEP)));
+  updateDisplay();
 });
 
 detailBtn.addEventListener('click', () => {
@@ -737,7 +843,8 @@ tabBoth.addEventListener('click', () => { setActiveTabs('both'); if (playingWhic
 
 downloadBtn.addEventListener('click', async () => {
   if (!trimmedDryBuf || !wetBuf) return;
-  const alpha = (alphaValues[sweepIdx] ?? 0).toFixed(5);
+  const f   = FREQ_VALUES[freqIdx];
+  const tag = (f >= 1000 ? (f/1000)+'k' : f) + 'Hz_alpha' + alphaValues[alphaIdx].toFixed(2);
   const tmp = document.createElement('canvas');
   tmp.width  = specCanvas.width; tmp.height = specCanvas.height;
   renderSpectrogram(tmp, drySTFT, sampleRate, sharedTopBin, null, specGamma);
@@ -745,13 +852,13 @@ downloadBtn.addEventListener('click', async () => {
   renderSpectrogram(tmp, wetSTFT, sampleRate, sharedTopBin, null, specGamma);
   const frftPNG = await canvasToPNG(tmp);
   const zip = buildZip([
-    { name: 'source.wav',                        data: buildWAV(trimmedDryBuf, sampleRate) },
-    { name: `frft_alpha${alpha}.wav`,             data: buildWAV(wetBuf,        sampleRate) },
-    { name: 'source_spectrogram.png',             data: srcPNG  },
-    { name: `frft_alpha${alpha}_spectrogram.png`, data: frftPNG },
+    { name: 'source.wav',                    data: buildWAV(trimmedDryBuf, sampleRate) },
+    { name: `frft_${tag}.wav`,               data: buildWAV(wetBuf,        sampleRate) },
+    { name: 'source_spectrogram.png',        data: srcPNG  },
+    { name: `frft_${tag}_spectrogram.png`,   data: frftPNG },
   ]);
   const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
-  Object.assign(document.createElement('a'), { href: url, download: `frft_alpha${alpha}.zip` }).click();
+  Object.assign(document.createElement('a'), { href: url, download: `frft_${tag}.zip` }).click();
   URL.revokeObjectURL(url);
 });
 
@@ -911,7 +1018,7 @@ function stopPlayback() {
   playBtn.textContent = '▶';
   playBtn.className   = 'btn-ok';
   // Restore sweep spectrum
-  if (precomputeDone && !sweepRunning) drawSweepSpectrum();
+  if (precomputeDone && !freqSweepRunning && !alphaSweepRunning) drawSweepSpectrum();
 }
 
 function applyMix(which) {
@@ -965,7 +1072,6 @@ function handleWorkerMessage(e) {
   const { type } = e.data;
   if (type === 'ready') {
     workerReady = true;
-    computeBtn.disabled = false;
     startPrecompute();   // auto-run with default settings on first load
     return;
   }
@@ -976,7 +1082,6 @@ function handleWorkerMessage(e) {
   }
   if (type === 'error') {
     setStatus(e.data.message || 'Worker error', 'err');
-    computeBtn.disabled = false;
     return;
   }
 }
@@ -1252,7 +1357,6 @@ function initWorker() {
   frftWorker.onerror   = e => {
     console.error('Worker error:', e.message);
     setStatus('Worker error', 'err');
-    computeBtn.disabled = false;
   };
   frftWorker.postMessage({ type: 'init', jsUrl, wasmBaseUrl, cacheBust: cb });
 }
