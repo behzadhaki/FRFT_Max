@@ -126,9 +126,89 @@
   }
 
   hr { border: none; border-top: 1px solid #ccc; }
+
+  /* ── Global hosting bar ────────────────────────────────────────────────── */
+  .hosting-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: #eef3ff;
+    border: 1px solid #4a9eff;
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .hosting-bar .bar-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: #2a6acc; white-space: nowrap;
+  }
+  .hosting-bar label { font-size: 12px; color: #444; white-space: nowrap; }
+  .hosting-bar select {
+    border: 1px solid #4a9eff; border-radius: 5px;
+    padding: 4px 7px; font-size: 13px; outline: none;
+    background: #fff; cursor: pointer;
+  }
+  .hosting-bar select:focus { border-color: #2a6acc; }
+  .hosting-bar .selfhost-info {
+    font-size: 12px; color: #2a6acc;
+    display: none;
+  }
+  .hosting-bar .selfhost-info code {
+    background: #d8e8ff; border-radius: 3px; padding: 1px 5px;
+    font-family: monospace; font-size: 11.5px;
+  }
+  .hosting-bar button {
+    padding: 5px 13px;
+    background: #2a6acc; color: #fff;
+    border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+  }
+  .hosting-bar button:hover:not(:disabled) { background: #1a55b0; }
+  .hosting-bar button:disabled { opacity: 0.5; cursor: default; }
+
+  /* ── Self-host instruction note ────────────────────────────────────────── */
+  .selfhost-note {
+    display: none;
+    background: #fff8e1;
+    border: 1px solid #f0c040;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #555;
+  }
+  .selfhost-note strong { color: #333; }
+  .selfhost-note code {
+    background: #fdeea0; border-radius: 3px;
+    padding: 1px 5px; font-family: monospace; font-size: 12px;
+  }
+  .selfhost-note ol { margin: 6px 0 0 18px; }
 </style>
 </head>
 <body>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- Global hosting settings (affects all embed code snippets below)        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div class="hosting-bar">
+  <span class="bar-title">Hosting</span>
+  <label>Mode</label>
+  <select id="hostMode">
+    <option value="direct" selected>Direct — behzadhaki.com</option>
+    <option value="selfhost">Self-host</option>
+  </select>
+  <button id="downloadZipBtn">⬇ Download Files</button>
+</div>
+
+<div class="selfhost-note" id="selfhostNote">
+  <strong>Self-hosting setup</strong>
+  <ol>
+    <li>Click <strong>⬇ Download Files</strong> above to get <code>frft-embeds.zip</code>.</li>
+    <li>Extract the ZIP — you will see a <code>projects/</code> folder. Move it into your site's <code>assets/</code> folder so the path becomes <code>assets/projects/frft/…</code>.</li>
+    <li>Copy the embed code snippet for each widget below and paste it into your page.</li>
+  </ol>
+</div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <h1>embed_interactive_frft.html — iframe tester</h1>
@@ -334,11 +414,110 @@
 </div>
 
 <script>
-  // ── Shared helpers ──────────────────────────────────────────────────────────
-  const EMBED_BASE = '/assets/projects/FrFT/demos/';
+  // ── Hosting mode ────────────────────────────────────────────────────────────
+  const DIRECT_BASE   = 'https://behzadhaki.com/assets/projects/FrFT/demos/';
+  const SELFHOST_BASE = '/assets/projects/frft/demos/';
 
+  const hostMode       = document.getElementById('hostMode');
+  const selfhostNote   = document.getElementById('selfhostNote');
+  const downloadZipBtn = document.getElementById('downloadZipBtn');
+
+  function getEmbedBase() {
+    return hostMode.value === 'selfhost' ? SELFHOST_BASE : DIRECT_BASE;
+  }
+
+  function syncHostUI() {
+    const isSelf = hostMode.value === 'selfhost';
+    selfhostNote.style.display   = isSelf ? 'block' : 'none';
+    downloadZipBtn.style.display = isSelf ? 'inline-block' : 'none';
+  }
+
+  hostMode.addEventListener('change', () => { syncHostUI(); applyAll(); });
+  syncHostUI(); // set correct initial state
+
+  function applyAll() { apply(); apply2(); apply3(); }
+
+  // ── Self-host ZIP ────────────────────────────────────────────────────────────
+  // Files to bundle, keyed by fetch path (relative to test-embed.html)
+  // → destination path inside the ZIP (relative to site root)
+  const ZIP_FILES = [
+    { src: 'embed_interactive_frft.html',     dst: 'projects/frft/demos/embed_interactive_frft.html'     },
+    { src: 'embed_non_interactive_frft.html', dst: 'projects/frft/demos/embed_non_interactive_frft.html' },
+    { src: 'embed_alpha_sweep_frft.html',     dst: 'projects/frft/demos/embed_alpha_sweep_frft.html'     },
+    { src: '../audio/frft-worker.js',         dst: 'projects/frft/audio/frft-worker.js'                  },
+    { src: '../wasm/dist/frft.js',            dst: 'projects/frft/wasm/dist/frft.js'                     },
+    { src: '../wasm/dist/frft.wasm',          dst: 'projects/frft/wasm/dist/frft.wasm'                   },
+  ];
+
+  downloadZipBtn.addEventListener('click', async () => {
+    downloadZipBtn.disabled    = true;
+    downloadZipBtn.textContent = 'Fetching…';
+    try {
+      const entries = await Promise.all(ZIP_FILES.map(async ({ src, dst }) => {
+        const res = await fetch(src);
+        if (!res.ok) throw new Error(`${src} → HTTP ${res.status}`);
+        return { name: dst, data: new Uint8Array(await res.arrayBuffer()) };
+      }));
+      const zip = buildZip(entries);
+      const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+      Object.assign(document.createElement('a'), { href: url, download: 'frft-embeds.zip' }).click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Download failed: ' + err.message);
+    } finally {
+      downloadZipBtn.disabled    = false;
+      downloadZipBtn.textContent = '⬇ Download Files';
+    }
+  });
+
+  // ── ZIP builder (minimal store-only, no compression) ─────────────────────────
+  function crc32(data) {
+    if (!crc32._t) {
+      crc32._t = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        crc32._t[i] = c;
+      }
+    }
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) c = crc32._t[(c ^ data[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function buildZip(files) {
+    const enc = s => new TextEncoder().encode(s);
+    const u32 = (v, a, o) => { a[o]=v&0xff; a[o+1]=(v>>8)&0xff; a[o+2]=(v>>16)&0xff; a[o+3]=(v>>24)&0xff; };
+    const u16 = (v, a, o) => { a[o]=v&0xff; a[o+1]=(v>>8)&0xff; };
+    const entries = [], cdir = [];
+    let offset = 0;
+    for (const { name, data } of files) {
+      const nm = enc(name), crc = crc32(data), hdr = new Uint8Array(30 + nm.length);
+      hdr.set([0x50,0x4b,0x03,0x04, 0x14,0, 0,0, 0,0, 0,0,0,0]);
+      u32(crc, hdr, 14); u32(data.length, hdr, 18); u32(data.length, hdr, 22);
+      u16(nm.length, hdr, 26); hdr.set(nm, 30);
+      const cd = new Uint8Array(46 + nm.length);
+      cd.set([0x50,0x4b,0x01,0x02, 0x14,0, 0x14,0, 0,0, 0,0, 0,0,0,0]);
+      u32(crc, cd, 16); u32(data.length, cd, 20); u32(data.length, cd, 24);
+      u16(nm.length, cd, 28); cd.set(nm, 46); u32(offset, cd, 42);
+      entries.push(hdr, data); cdir.push(cd);
+      offset += hdr.length + data.length;
+    }
+    const cdData = new Uint8Array(cdir.reduce((a, c) => a + c.length, 0));
+    let cdOff = 0; for (const c of cdir) { cdData.set(c, cdOff); cdOff += c.length; }
+    const eocd = new Uint8Array(22);
+    eocd.set([0x50,0x4b,0x05,0x06, 0,0, 0,0]);
+    u16(files.length, eocd, 8); u16(files.length, eocd, 10);
+    u32(cdData.length, eocd, 12); u32(offset, eocd, 16);
+    const all = [...entries, cdData, eocd];
+    const out = new Uint8Array(all.reduce((a, c) => a + c.length, 0));
+    let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+    return out;
+  }
+
+  // ── Shared helpers ──────────────────────────────────────────────────────────
   function buildEmbedCode(file, queryString, w, h) {
-    const src = `${EMBED_BASE}${file}?${queryString}`;
+    const src = `${getEmbedBase()}${file}?${queryString}`;
     return `<div style="width:100%; max-width:${w}px;">\n` +
            `  <iframe src="${src}"\n` +
            `          style="width:100%; height:${h}px; border:none; display:block"\n` +
