@@ -413,6 +413,64 @@
   <iframe id="embedFrame3" width="700" height="300"></iframe>
 </div>
 
+<hr>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<h1>embed_ola_frft.html — iframe tester</h1>
+<p>Visualises how overlap-add windowing affects FRFT block processing artefacts.</p>
+
+<div class="controls">
+  <label>Width</label>
+  <input type="number" id="wInput4" value="700" min="300" step="10">
+  <label>Height</label>
+  <input type="number" id="hInput4" value="250" min="200" step="10">
+
+  <label>Freq (Hz)</label>
+  <input type="number" id="freqInput4" value="440" min="20" max="20000" step="1">
+
+  <label>α (order)</label>
+  <input type="number" id="alphaInput4" value="0.50" min="0" max="4" step="0.01">
+
+  <label>Block</label>
+  <select id="blocksizeInput4">
+    <option value="1024">1024</option>
+    <option value="2048">2048</option>
+    <option value="4096">4096</option>
+    <option value="8192">8192</option>
+    <option value="16384">16384</option>
+    <option value="32768">32768</option>
+    <option value="65536">65536</option>
+    <option value="131072" selected>131072</option>
+  </select>
+
+  <label>Overlap</label>
+  <select id="overlapInput4">
+    <option value="1">×1 (no OLA)</option>
+    <option value="2">×2</option>
+    <option value="4" selected>×4</option>
+    <option value="8">×8</option>
+  </select>
+
+  <label>Half-spec</label>
+  <select id="halfspecInput4">
+    <option value="0" selected>No</option>
+    <option value="1">Yes</option>
+  </select>
+
+  <button id="applyBtn4">Apply</button>
+</div>
+
+<div class="url-display" id="urlDisplay4"></div>
+
+<div class="embed-code-wrap" id="embedCodeWrap4">
+  <pre id="embedCode4"></pre>
+  <button class="copy-btn" id="copyBtn4" title="Copy embed code">⧉</button>
+</div>
+
+<div class="frame-wrap" id="frameWrap4">
+  <iframe id="embedFrame4" width="700" height="250"></iframe>
+</div>
+
 <script>
   // ── Hosting mode ────────────────────────────────────────────────────────────
   const DIRECT_BASE   = 'https://behzadhaki.com/assets/projects/FrFT/demos/';
@@ -435,7 +493,7 @@
   hostMode.addEventListener('change', () => { syncHostUI(); applyAll(); });
   syncHostUI(); // set correct initial state
 
-  function applyAll() { apply(); apply2(); apply3(); }
+  function applyAll() { apply(); apply2(); apply3(); apply4(); }
 
   // ── Self-host ZIP ────────────────────────────────────────────────────────────
   // Files to bundle, keyed by fetch path (relative to test-embed.html)
@@ -444,6 +502,7 @@
     { src: 'embed_interactive_frft.html',     dst: 'projects/frft/demos/embed_interactive_frft.html'     },
     { src: 'embed_non_interactive_frft.html', dst: 'projects/frft/demos/embed_non_interactive_frft.html' },
     { src: 'embed_alpha_sweep_frft.html',     dst: 'projects/frft/demos/embed_alpha_sweep_frft.html'     },
+    { src: 'embed_ola_frft.html',             dst: 'projects/frft/demos/embed_ola_frft.html'             },
     { src: '../audio/frft-worker.js',         dst: 'projects/frft/audio/frft-worker.js'                  },
     { src: '../wasm/dist/frft.js',            dst: 'projects/frft/wasm/dist/frft.js'                     },
     { src: '../wasm/dist/frft.wasm',          dst: 'projects/frft/wasm/dist/frft.wasm'                   },
@@ -698,6 +757,52 @@
   );
   attachCopy('copyBtn3', 'embedCode3');
   apply3();
+
+  // ── OLA embed ───────────────────────────────────────────────────────────────
+  const wInput4         = document.getElementById('wInput4');
+  const hInput4         = document.getElementById('hInput4');
+  const freqInput4      = document.getElementById('freqInput4');
+  const alphaInput4     = document.getElementById('alphaInput4');
+  const blocksizeInput4 = document.getElementById('blocksizeInput4');
+  const overlapInput4   = document.getElementById('overlapInput4');
+  const halfspecInput4  = document.getElementById('halfspecInput4');
+  const applyBtn4      = document.getElementById('applyBtn4');
+  const frame4         = document.getElementById('embedFrame4');
+  const urlDisplay4    = document.getElementById('urlDisplay4');
+  const embedCode4     = document.getElementById('embedCode4');
+
+  function apply4() {
+    const w = Math.max(300, parseInt(wInput4.value) || 700);
+    const h = Math.max(200, parseInt(hInput4.value) || 360);
+    wInput4.value = w; hInput4.value = h;
+
+    const cleanParams = new URLSearchParams({
+      w, h,
+      freq:      freqInput4.value,
+      alpha:     alphaInput4.value,
+      blocksize: blocksizeInput4.value,
+      overlap:   overlapInput4.value,
+      halfspec:  halfspecInput4.value,
+    });
+
+    const liveParams = new URLSearchParams(cleanParams);
+    liveParams.set('v', Date.now());
+
+    const url = `embed_ola_frft.html?${liveParams}`;
+    frame4.width = w; frame4.height = h; frame4.src = url;
+    urlDisplay4.textContent = location.origin + location.pathname.replace('test-embed.html', '') + url;
+    embedCode4.textContent = buildEmbedCode('embed_ola_frft.html', cleanParams.toString(), w, h);
+  }
+
+  applyBtn4.addEventListener('click', apply4);
+  [wInput4, hInput4, freqInput4, alphaInput4].forEach(el =>
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') apply4(); })
+  );
+  [blocksizeInput4, overlapInput4, halfspecInput4].forEach(el =>
+    el.addEventListener('change', apply4)
+  );
+  attachCopy('copyBtn4', 'embedCode4');
+  apply4();
 </script>
 </body>
 </html>

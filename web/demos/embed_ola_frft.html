@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRFT OLA</title>
+<script>
+  window._wasmCacheBust = Date.now();
+  (function () {
+    const sp = new URLSearchParams(location.search);
+    const w = sp.get('w'), h = sp.get('h');
+    const s = document.documentElement.style;
+    if (w) s.width  = Math.max(200, +w) + 'px';
+    if (h) s.height = Math.max(100, +h) + 'px';
+    const freq = parseFloat(sp.get('freq'));
+    if (freq > 0)       window._initFreq    = freq;
+    const alpha = parseFloat(sp.get('alpha'));
+    if (!isNaN(alpha))  window._initAlpha   = Math.max(0, Math.min(4, alpha));
+    const ov = parseInt(sp.get('overlap'));
+    if (ov > 0)         window._initOverlap = ov;
+    const bs = parseInt(sp.get('blocksize'));
+    if (bs > 0)         window._initBlocksize = bs;
+    const hs = sp.get('halfspec');
+    if (hs !== null)    window._initHalfspec = hs === '1';
+  })();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  button, input, select, textarea { font: inherit; }
+
+  :root {
+    --bg:        #1a1a1a;
+    --surface:   #222222;
+    --surface2:  #282828;
+    --border:    #333333;
+    --border2:   #3a3a3a;
+    --accent:    #c8902a;
+    --accent-lo: #7a5418;
+    --text:      #d0d0d0;
+    --muted:     #aaaaaa;
+    --red:       #cc4444;
+  }
+
+  html { font-size: 12px; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+    overflow: hidden;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    gap: 0.4em; padding: 0.4em; height: 100%;
+  }
+
+  .left-col {
+    display: flex; flex-direction: column; gap: 0.4em;
+    overflow-y: auto; overflow-x: hidden; min-width: 0;
+  }
+  .right-col {
+    display: flex; flex-direction: column; gap: 0.4em;
+    min-width: 0; min-height: 0;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 5px; padding: 0.55em 0.75em;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 1px 3px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column; gap: 0.35em; min-height: 0;
+  }
+  .card h1 {
+    font-size: 0.65em; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.10em; flex-shrink: 0;
+  }
+  .rows-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.3em; }
+  .row { display: flex; align-items: stretch; gap: 0.45em; min-width: 0; flex: 1; }
+  label.lbl {
+    width: 5em; flex-shrink: 0;
+    color: var(--muted); font-size: 0.82em; letter-spacing: 0.02em;
+    display: flex; align-items: center;
+  }
+
+  select {
+    flex: 1; min-width: 0; height: 100%;
+    background: var(--bg); border: 1px solid var(--border2); border-radius: 3px;
+    color: var(--text); padding: 0 0.45em; font-size: 0.85em; outline: none;
+    cursor: pointer; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  }
+  select:focus { border-color: var(--accent); }
+
+  input[type="number"] {
+    flex: 1; height: 100%;
+    background: var(--bg); border: 1px solid var(--border2); border-radius: 3px;
+    color: var(--text); font-size: 0.88em; font-weight: 700;
+    font-variant-numeric: tabular-nums; padding: 0 0.45em; outline: none;
+    -webkit-appearance: none; -moz-appearance: textfield; appearance: textfield;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type="number"]:focus { border-color: var(--accent); }
+
+  button {
+    height: 100%; padding: 0 0.75em; border-radius: 3px;
+    font-size: 0.82em; font-weight: 700; letter-spacing: 0.03em;
+    cursor: pointer; transition: filter .12s; white-space: nowrap; border: 1px solid transparent;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.15); }
+  button:active:not(:disabled) { filter: brightness(0.9); }
+  button:disabled { opacity: .3; cursor: default; }
+  .btn-ok      { background: #2a2218; color: var(--accent); border-color: var(--accent-lo); }
+  .btn-playing { background: var(--accent-lo); color: #f0c060; border-color: var(--accent); }
+  .btn-neutral { background: var(--surface2); color: var(--muted); border-color: var(--border2); }
+
+  #status {
+    font-size: 0.80em; padding: 0; border: none; background: none;
+    color: var(--muted); white-space: nowrap;
+    height: 100%; display: flex; align-items: center;
+  }
+  #status.err { color: var(--red); }
+
+  .tab-group { display: flex; flex-shrink: 0; }
+  .tab {
+    height: 100%; padding: 0 0.7em;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border2); border-radius: 0;
+    font-size: 0.80em; font-weight: 600; cursor: pointer;
+  }
+  .tab:first-child { border-radius: 3px 0 0 3px; }
+  .tab:last-child  { border-radius: 0 3px 3px 0; }
+  .tab.active { background: var(--accent-lo); color: var(--accent); border-color: var(--accent); }
+
+  .controls-row {
+    display: flex; align-items: stretch; gap: 0.4em; flex: 1; min-height: 0;
+  }
+  .controls-row.processing > button,
+  .controls-row.processing > .tab-group { display: none; }
+  .right-col > .card { flex: none; display: flex; flex-direction: column; justify-content: center; }
+  .controls-row > *, .tab { display: flex; align-items: center; }
+
+  #detailBtn {
+    height: 100%; padding: 0 0.65em;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border2); border-radius: 3px;
+    font-size: 0.78em; font-weight: 600; cursor: pointer; flex-shrink: 0; white-space: nowrap;
+  }
+  #detailBtn.active { background: var(--accent-lo); color: var(--accent); border-color: var(--accent); }
+
+  /* ── Panel 1: single FRFT window — lives in left column ── */
+  .panel1-area {
+    flex: 1; min-height: 0; position: relative;
+  }
+  #panel1Canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: block; border-radius: 3px; background: var(--bg);
+    border: 1px solid var(--border); box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    image-rendering: auto;
+  }
+
+  /* ── Panel 2: OLA spectrogram ── */
+  .spec-area {
+    flex: 1; min-height: 0; display: flex; gap: 0.4em;
+  }
+
+  /* ── Range panel: Gantt-style window extents below OLA output ── */
+  .range-area {
+    flex: none; height: 5em; display: flex; gap: 0.4em;
+  }
+  .range-spacer {
+    flex-shrink: 0; width: 2.5em;
+  }
+  #rangeCanvas {
+    flex: 1; min-width: 0; height: 100%; display: block;
+    border-radius: 3px; border: 1px solid var(--border);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    background: var(--bg); cursor: pointer;
+  }
+  #spectrumCanvas {
+    flex-shrink: 0; width: 2.5em; height: 100%; display: block;
+    border-radius: 3px; background: var(--bg);
+    border: 1px solid var(--border); box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+  }
+  #specWrap {
+    flex: 1; min-height: 0; min-width: 0; position: relative;
+    border-radius: 3px; border: 1px solid var(--border);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); overflow: hidden;
+  }
+  #specCanvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: block; background: var(--bg);
+  }
+  #playheadCanvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+  }
+  #zoomOverlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Left column ── -->
+  <div class="left-col">
+    <div class="card">
+      <h1>Source</h1>
+      <div class="rows-wrap">
+        <div class="row">
+          <label class="lbl">Freq</label>
+          <input type="number" id="freqNum" min="20" max="20000" step="1" value="440">
+        </div>
+
+      </div>
+    </div>
+    <div class="card">
+      <h1>FRFT Parameters</h1>
+      <div class="rows-wrap">
+        <div class="row">
+          <label class="lbl">α (order)</label>
+          <input type="number" id="alphaNum" min="0" max="4" step="0.01" value="0.50">
+        </div>
+        <div class="row">
+          <label class="lbl">Overlap</label>
+          <select id="overlapSel">
+            <option value="1">×1 (no OLA)</option>
+            <option value="2">×2</option>
+            <option value="4" selected>×4</option>
+            <option value="8">×8</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="lbl">Mode</label>
+          <select id="modeSel">
+            <option value="full" selected>Full spectrum</option>
+            <option value="half">Half spectrum</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="lbl">Block</label>
+          <select id="blocksizeSel">
+            <option value="1024">1024</option>
+            <option value="2048">2048</option>
+            <option value="4096">4096</option>
+            <option value="8192">8192</option>
+            <option value="16384">16384</option>
+            <option value="32768">32768</option>
+            <option value="65536">65536</option>
+            <option value="131072" selected>131072</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 1: single FRFT window -->
+    <div class="panel1-area">
+      <canvas id="panel1Canvas" width="800" height="150"></canvas>
+    </div>
+  </div>
+
+  <!-- ── Right column ── -->
+  <div class="right-col">
+
+    <!-- Playback controls -->
+    <div class="card" style="padding: 0.4em 0.75em;">
+      <div class="controls-row">
+        <button class="btn-ok" id="playBtn" disabled>▶</button>
+        <div class="tab-group">
+          <button class="tab" id="tabDry">Source</button>
+          <button class="tab active" id="tabWet">OLA</button>
+        </div>
+        <span id="status">loading…</span>
+        <button id="detailBtn" style="margin-left:auto" title="Boost low-amplitude detail">Detail</button>
+        <button class="btn-neutral" id="downloadBtn" disabled>⬇</button>
+      </div>
+    </div>
+
+    <!-- Panel 2: OLA result spectrogram -->
+    <div class="spec-area">
+      <canvas id="spectrumCanvas" width="40" height="400"></canvas>
+      <div id="specWrap">
+        <canvas id="specCanvas" width="1200" height="400"></canvas>
+        <canvas id="playheadCanvas"></canvas>
+        <canvas id="zoomOverlay"></canvas>
+      </div>
+    </div>
+
+    <!-- Range panel: shows each block's window extent on the same time axis -->
+    <div class="range-area">
+      <div class="range-spacer"></div>
+      <canvas id="rangeCanvas"></canvas>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+
+let STFT_FFT    = 2048;
+let STFT_HOP    = 256;
+const NUM_FRAMES  = 11;   // fixed: blocks 0–10
+const LABEL_PX    = 9;    // logical px for all panel labels (multiplied by dpr at draw time)
+
+// Per-block hue palette — vivid, dark-background-friendly
+const BLOCK_COLORS = [
+  [231,  76,  60],  // 0 red
+  [ 46, 204, 113],  // 1 green
+  [ 52, 152, 219],  // 2 blue
+  [241, 196,  15],  // 3 yellow
+  [155,  89, 182],  // 4 purple
+  [ 26, 188, 156],  // 5 teal
+  [230, 126,  34],  // 6 orange
+  [236,  64, 122],  // 7 pink
+  [100, 221, 231],  // 8 cyan
+  [161, 196,  90],  // 9 lime
+  [251, 140, 152],  // 10 salmon
+  [ 77, 118, 200],  // 11 indigo
+];
+
+// ── Worker ───────────────────────────────────────────────────────────────────
+let frftWorker      = null;
+let workerReady     = false;
+let workerRestarting = false;
+let pendingJobs     = new Map();  // jobId → resolve
+let currentJobId    = 0;
+
+// Fired when the *batch* of work should be cancelled (new params arrived)
+let currentBatchId  = 0;
+
+// ── Audio / result state ─────────────────────────────────────────────────────
+let sampleRate    = 44100;
+let dryBuf        = null;   // trimmed dry (for playback comparison)
+let olaOutput     = null;   // OLA-accumulated Float32Array
+let blockOutputs  = [];     // per-block FRFT outputs (Float32Array[])
+
+let blockSTFTs    = [];     // per-block STFT
+let olaSTFT       = null;
+
+// Shared rendering state (panel 1 tiles share one scale)
+let p1dBmax       = -Infinity;
+let p1dBmin       = Infinity;
+let p1TopBin      = 0;
+
+// Panel 2 (OLA output) state
+let olaTopBin     = 0;
+let olaTrimAmt    = 0;   // how many leading samples were trimmed from olaRaw
+let olaHop        = 0;   // hop = blockSize / overlap, stored for panel-2 coloring
+let olaNumBlocks  = 0;   // number of displayed blocks (for panel-2 coloring)
+let enabledBlocks = [];   // per-block enabled flag (toggled by clicking range panel)
+let p2Accum       = null;  // direct block-overlay accumulators for panel-2 color
+let specGamma     = 1.0;
+let blockSize     = 131072;
+let halfSpectrum  = false;
+let zoomView      = null;
+
+// Playback state
+let audioCtx            = null;
+let activeSrc           = null;
+let activeSrc2          = null;
+let masterGain          = null;
+let dryGain             = null;
+let wetGain             = null;
+let playingWhich        = null;
+let playheadInterval    = null;
+let playbackStartTime   = 0;
+let activeTab           = 'wet';
+
+// ── DOM ───────────────────────────────────────────────────────────────────────
+const freqNum        = document.getElementById('freqNum');
+
+const alphaNum       = document.getElementById('alphaNum');
+const overlapSel     = document.getElementById('overlapSel');
+const blocksizeSel   = document.getElementById('blocksizeSel');
+const modeSel        = document.getElementById('modeSel');
+
+// Apply URL param defaults
+if (window._initFreq      !== undefined) freqNum.value      = window._initFreq;
+if (window._initAlpha     !== undefined) alphaNum.value     = window._initAlpha;
+if (window._initOverlap   !== undefined) overlapSel.value   = String(window._initOverlap);
+if (window._initBlocksize !== undefined) blocksizeSel.value = String(window._initBlocksize);
+if (window._initHalfspec  !== undefined) modeSel.value      = window._initHalfspec ? 'half' : 'full';
+
+blockSize    = parseInt(blocksizeSel.value);
+halfSpectrum = modeSel.value === 'half';
+
+
+const statusEl       = document.getElementById('status');
+const playBtn        = document.getElementById('playBtn');
+const tabDry         = document.getElementById('tabDry');
+const tabWet         = document.getElementById('tabWet');
+const downloadBtn    = document.getElementById('downloadBtn');
+const detailBtn      = document.getElementById('detailBtn');
+const panel1Canvas   = document.getElementById('panel1Canvas');
+const specCanvas     = document.getElementById('specCanvas');
+const playheadCanvas = document.getElementById('playheadCanvas');
+const spectrumCanvas = document.getElementById('spectrumCanvas');
+const specWrap       = document.getElementById('specWrap');
+const rangeCanvas    = document.getElementById('rangeCanvas');
+
+// ── ResizeObservers ───────────────────────────────────────────────────────────
+new ResizeObserver(() => {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = panel1Canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width  * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (panel1Canvas.width !== w || panel1Canvas.height !== h) {
+    panel1Canvas.width  = w; panel1Canvas.height = h;
+  }
+  if (blockSTFTs.length > 0) renderPanel1();
+  else clearPanel1();
+}).observe(panel1Canvas);
+
+const specRO = new ResizeObserver(() => {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = specWrap.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width  * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (specCanvas.width !== w || specCanvas.height !== h) {
+    specCanvas.width  = w; specCanvas.height = h;
+    if (olaSTFT) renderPanel2(); else clearSpectrogram();
+  }
+  if (playheadCanvas.width !== w || playheadCanvas.height !== h) {
+    playheadCanvas.width  = w; playheadCanvas.height = h; drawPlayhead();
+  }
+  const sw = Math.max(1, Math.floor(spectrumCanvas.getBoundingClientRect().width * dpr));
+  if (spectrumCanvas.width !== sw || spectrumCanvas.height !== h) {
+    spectrumCanvas.width  = sw; spectrumCanvas.height = h;
+  }
+});
+specRO.observe(specWrap);
+
+new ResizeObserver(() => {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = rangeCanvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width  * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (rangeCanvas.width !== w || rangeCanvas.height !== h) {
+    rangeCanvas.width  = w; rangeCanvas.height = h;
+  }
+  if (olaSTFT && blockSTFTs.length > 0) renderRangePanel();
+  else clearRangePanel();
+}).observe(rangeCanvas);
+
+// ── Promise-based worker job ──────────────────────────────────────────────────
+function sendWorkerJob(block, alpha) {
+  return new Promise((resolve) => {
+    const jobId = ++currentJobId;
+    pendingJobs.set(jobId, resolve);
+    frftWorker.postMessage({
+      type: 'process', samples: block, alpha,
+      bufSize: blockSize, overlapFactor: 1,
+      halfSpectrum, noWindow: false, jobId,
+    });
+  });
+}
+
+// ── Auto-processing ───────────────────────────────────────────────────────────
+const DEBOUNCE_MS = 600;
+let debounceTimer = null;
+
+function scheduleProcess() {
+  currentBatchId++;   // invalidate any running batch
+  // cancel any in-flight worker job (best effort)
+  if (workerReady && frftWorker) frftWorker.postMessage({ type: 'cancel' });
+  clearTimeout(debounceTimer);
+  stopPlayback();
+  clearPanel1(); clearSpectrogram(); clearRangePanel(); clearSpectrum();
+  blockOutputs = []; blockSTFTs = []; olaOutput = null; olaSTFT = null;
+  p2Accum = null; enabledBlocks = [];
+  dryBuf = null;
+  playBtn.disabled = true; downloadBtn.disabled = true;
+  setStatus('pending…', 'busy');
+  debounceTimer = setTimeout(autoProcess, DEBOUNCE_MS);
+}
+
+async function autoProcess() {
+  if (!workerReady) { setStatus('Loading WASM…', 'busy'); return; }
+  // Scale STFT params so each tile always has ~25 frames regardless of blockSize
+  STFT_FFT = Math.min(2048, blockSize >> 2);
+  STFT_HOP = STFT_FFT >> 3;
+  const batchId  = currentBatchId;
+  const overlap  = parseInt(overlapSel.value);
+  const alpha    = parseFloat(alphaNum.value);
+  const freq     = parseFloat(freqNum.value) || 440;
+  const H        = Math.floor(blockSize / overlap);
+
+  const numDisplay   = NUM_FRAMES;
+  const needSamples  = (numDisplay - 1) * H + blockSize;
+  const signal       = generateSine(needSamples / sampleRate, sampleRate, freq);
+
+  blockOutputs = [];
+  blockSTFTs   = [];
+  p1dBmax = -Infinity; p1dBmin = Infinity; p1TopBin = 0;
+
+  // ── Phase 1: process each block individually ──────────────────────────────
+  for (let k = 0; k < numDisplay; k++) {
+    if (batchId !== currentBatchId) return;
+    setStatus(`Block ${k + 1} / ${numDisplay}…`, 'busy');
+
+    const block = new Float32Array(blockSize);
+    const off   = k * H;
+    for (let i = 0; i < blockSize; i++) {
+      const idx = off + i;
+      block[i] = idx < signal.length ? signal[idx] : 0.0;
+    }
+
+    const output = await sendWorkerJob(block, alpha);
+    if (batchId !== currentBatchId) return;
+
+    blockOutputs.push(output);
+    const stft = computeSTFT(output);
+    blockSTFTs.push(stft);
+
+    // Update shared range
+    if (stft.dBmax > p1dBmax) p1dBmax = stft.dBmax;
+    if (stft.dBmin < p1dBmin) p1dBmin = stft.dBmin;
+    if (stft.topBin > p1TopBin) p1TopBin = stft.topBin;
+
+    // Render panel 1 incrementally
+    renderPanel1();
+  }
+
+  if (batchId !== currentBatchId) return;
+  enabledBlocks = new Array(numDisplay).fill(true);
+
+  // ── Phase 2: OLA-accumulate the block outputs ─────────────────────────────
+  setStatus('Accumulating…', 'busy');
+  const olaLen = (numDisplay - 1) * H + blockSize;
+  const olaRaw = new Float32Array(olaLen);
+  for (let k = 0; k < blockOutputs.length; k++) {
+    const off = k * H;
+    const blk = blockOutputs[k];
+    for (let i = 0; i < blockSize; i++) olaRaw[off + i] += blk[i];
+  }
+
+  // No trimming — show the full OLA accumulation including leading/trailing
+  // partial-overlap regions; those edge ramps are part of the visualization.
+  olaOutput = olaRaw;
+  dryBuf    = signal.slice(0, olaOutput.length);
+
+  olaSTFT      = computeSTFT(olaOutput);
+  olaTopBin    = olaSTFT.topBin;
+  olaTrimAmt   = 0;   // sample offset between olaOutput[0] and rawOLA[0] — now zero
+  olaHop       = H;
+  olaNumBlocks = numDisplay;
+
+  buildP2Accumulators();
+  renderPanel2();
+  setStatus('');
+  playBtn.disabled    = false; playBtn.className   = 'btn-ok'; playBtn.textContent = '▶';
+  downloadBtn.disabled = false;
+}
+
+// ── Rebuild OLA from enabled blocks (no re-FRFT needed) ──────────────────────
+function rebuildOLA() {
+  if (blockOutputs.length === 0 || olaHop === 0) return;
+  const H      = olaHop;
+  const n      = olaNumBlocks;
+  const olaLen = (n - 1) * H + blockSize;
+  const olaRaw = new Float32Array(olaLen);
+  for (let k = 0; k < n; k++) {
+    if (!enabledBlocks[k]) continue;
+    const off = k * H;
+    const blk = blockOutputs[k];
+    for (let i = 0; i < blockSize; i++) olaRaw[off + i] += blk[i];
+  }
+  olaOutput = olaRaw;
+  olaSTFT   = computeSTFT(olaOutput);
+  olaTopBin = olaSTFT.topBin;
+  buildP2Accumulators();
+  renderPanel2();
+  // Restart playback with updated audio if it was playing
+  if (playingWhich !== null) { stopPlayback(); startPlayback(activeTab); }
+}
+
+// ── Worker message handler ────────────────────────────────────────────────────
+function handleWorkerMessage(e) {
+  const { type } = e.data;
+
+  if (type === 'ready') {
+    workerReady = true;
+    if (workerRestarting) { workerRestarting = false; setStatus('ready — change params to reprocess', ''); }
+    else scheduleProcess();
+    return;
+  }
+
+  if (type === 'result') {
+    const resolve = pendingJobs.get(e.data.jobId);
+    if (resolve) { pendingJobs.delete(e.data.jobId); resolve(e.data.output); }
+    return;
+  }
+
+  if (type === 'error') {
+    console.error('Worker error:', e.data.message);
+    const msg = (e.data.message || '');
+    if (msg.includes('Aborted')) {
+      setStatus('WASM out of memory', 'err'); restartWorker();
+    } else {
+      setStatus(msg || 'Worker error', 'err');
+    }
+  }
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+freqNum.addEventListener('change', () => {
+  freqNum.value = Math.max(20, Math.min(20000, parseFloat(freqNum.value) || 440));
+  scheduleProcess();
+});
+alphaNum.addEventListener('change', () => {
+  alphaNum.value = Math.max(0, Math.min(4, parseFloat(alphaNum.value) || 0)).toFixed(2);
+  scheduleProcess();
+});
+overlapSel.addEventListener('change', scheduleProcess);
+blocksizeSel.addEventListener('change', () => {
+  blockSize = parseInt(blocksizeSel.value);
+  scheduleProcess();
+});
+modeSel.addEventListener('change', () => {
+  halfSpectrum = modeSel.value === 'half';
+  scheduleProcess();
+});
+
+// ── Panel 1: tiled per-block FRFT spectrograms ────────────────────────────────
+function clearPanel1() {
+  const ctx = panel1Canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, panel1Canvas.width, panel1Canvas.height);
+}
+
+function renderPanel1() {
+  const W   = panel1Canvas.width;
+  const H   = panel1Canvas.height;
+  const ctx = panel1Canvas.getContext('2d');
+  const n   = blockSTFTs.length;
+  const dpr = window.devicePixelRatio || 1;
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+  if (n === 0 || p1dBmax === -Infinity) return;
+
+  // All blocks are identical windows on the same signal — show block 0 full-width
+  const stft  = blockSTFTs[0];
+  const { magDB, numFrames, NUM_BINS } = stft;
+  const topBin = p1TopBin;
+  const [cR, cG, cB] = [255, 255, 255];  // white spectrum
+
+  const rMax = p1dBmax;
+  const rMin = Math.max(p1dBmin, p1dBmax - 80);
+
+  // Off-screen at native STFT resolution
+  const offC  = document.createElement('canvas');
+  offC.width  = numFrames;
+  offC.height = topBin + 1;
+  const octx  = offC.getContext('2d');
+  const img   = octx.createImageData(numFrames, topBin + 1);
+  const od    = img.data;
+
+  for (let fi = 0; fi < numFrames; fi++) {
+    for (let bi = 0; bi <= topBin; bi++) {
+      const db = magDB[fi * NUM_BINS + bi];
+      const v0 = Math.max(0, Math.min(1, (db - rMin) / (rMax - rMin)));
+      const bright = specGamma === 1.0 ? v0 : Math.pow(v0, specGamma);
+      const pi = ((topBin - bi) * numFrames + fi) * 4;
+      od[pi]   = Math.round(cR * bright);
+      od[pi+1] = Math.round(cG * bright);
+      od[pi+2] = Math.round(cB * bright);
+      od[pi+3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offC, 0, 0, W, H);
+
+  // Panel label
+  const tagPx = LABEL_PX * dpr;
+  ctx.font      = `bold ${tagPx}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.50)';
+  ctx.fillText('FRFT window', Math.round(4 * dpr), H - Math.round(4 * dpr));
+}
+
+// ── Panel 2: OLA result spectrogram ──────────────────────────────────────────
+function clearSpectrogram() {
+  const ctx = specCanvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, specCanvas.width, specCanvas.height);
+}
+
+function renderPanel2() {
+  if (!p2Accum || !olaSTFT) { clearSpectrogram(); clearRangePanel(); return; }
+  renderP2Canvas(specCanvas, zoomView, specGamma);
+  renderRangePanel();
+}
+
+// ── Range panel: window-extent indicator ─────────────────────────────────────
+function clearRangePanel() {
+  const ctx = rangeCanvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, rangeCanvas.width, rangeCanvas.height);
+}
+
+function renderRangePanel() {
+  const cW  = rangeCanvas.width, cH = rangeCanvas.height;
+  const ctx = rangeCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, cW, cH);
+  if (!olaSTFT || blockSTFTs.length === 0 || olaHop === 0) return;
+
+  const n           = olaNumBlocks;
+  const totalFrames = olaSTFT.numFrames;
+  const hopFrames   = Math.round(olaHop / STFT_HOP);
+  const blockFrames = blockSTFTs[0].numFrames;
+
+  // Time axis bounds — matches OLA spectrogram zoom
+  const fStart = zoomView ? zoomView.t0 : 0;
+  const fEnd   = zoomView ? zoomView.t1 : totalFrames - 1;
+  const fSpan  = Math.max(1, fEnd - fStart + 1);
+
+  const rowH   = cH / n;
+  const barH   = Math.max(1.5 * dpr, rowH * 0.28);   // horizontal bar thickness
+  const tickW  = Math.max(1.5 * dpr, 2 * dpr);        // tick width
+  const tickH  = Math.max(4 * dpr, rowH * 0.75);      // tick height
+
+  for (let k = 0; k < n; k++) {
+    const gf0    = k * hopFrames;
+    const gf1    = gf0 + blockFrames - 1;
+    const enabled = enabledBlocks.length > k ? enabledBlocks[k] : true;
+
+    const x0 = (gf0        - fStart) / fSpan * cW;
+    const x1 = (gf1 + 1    - fStart) / fSpan * cW;
+    if (x1 <= 0 || x0 >= cW) continue;
+
+    const cy  = (k + 0.5) * rowH;   // vertical centre of this row
+    const [r, g, b] = BLOCK_COLORS[k % BLOCK_COLORS.length];
+    const alpha = enabled ? 0.85 : 0.18;
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+
+    // Horizontal bar (clamped to visible area)
+    const bx0 = Math.max(0, x0);
+    const bx1 = Math.min(cW, x1);
+    ctx.fillRect(bx0, cy - barH / 2, bx1 - bx0, barH);
+
+    // Left tick mark
+    if (x0 >= 0 && x0 <= cW) {
+      ctx.fillRect(x0 - tickW / 2, cy - tickH / 2, tickW, tickH);
+    }
+    // Right tick mark
+    if (x1 >= 0 && x1 <= cW) {
+      ctx.fillRect(x1 - tickW / 2, cy - tickH / 2, tickW, tickH);
+    }
+  }
+
+  // Panel label — bottom left
+  const tagPx = LABEL_PX * dpr;
+  ctx.font      = `bold ${tagPx}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.40)';
+  ctx.fillText('Block windows', Math.round(4 * dpr), cH - Math.round(4 * dpr));
+}
+
+// Build per-(frame,bin) color accumulators by placing each block's STFT at the
+// correct time offset in the OLA output.  powerSum / colorR/G/B are linear-mag
+// weighted sums; brightness at render time comes from the actual olaSTFT dB.
+function buildP2Accumulators() {
+  if (!olaSTFT || blockSTFTs.length === 0 || olaHop === 0) return;
+
+  const hopFrames = Math.round(olaHop / STFT_HOP);   // always integer
+  const nF    = olaSTFT.numFrames;
+  const nBins = olaSTFT.NUM_BINS;
+  const powerSum = new Float32Array(nF * nBins);
+  const colorR   = new Float32Array(nF * nBins);
+  const colorG   = new Float32Array(nF * nBins);
+  const colorB   = new Float32Array(nF * nBins);
+
+  for (let k = 0; k < blockSTFTs.length; k++) {
+    if (!enabledBlocks[k]) continue;
+    const stft = blockSTFTs[k];
+    const { magDB, numFrames, NUM_BINS } = stft;
+    const [cR, cG, cB] = BLOCK_COLORS[k % BLOCK_COLORS.length];
+    const fBase = k * hopFrames;
+
+    for (let bf = 0; bf < numFrames; bf++) {
+      const gf = fBase + bf;
+      if (gf < 0 || gf >= nF) continue;
+      const bOff = bf * NUM_BINS;
+      const gOff = gf * nBins;
+      for (let b = 0; b < nBins; b++) {
+        const mag = Math.pow(10, magDB[bOff + b] * 0.05);   // 10^(dB/20)
+        powerSum[gOff + b] += mag;
+        colorR[gOff + b]   += mag * cR;
+        colorG[gOff + b]   += mag * cG;
+        colorB[gOff + b]   += mag * cB;
+      }
+    }
+  }
+
+  p2Accum = { powerSum, colorR, colorG, colorB, nF, nBins };
+}
+
+// Render panel 2 to any canvas using p2Accum color + olaSTFT brightness.
+function renderP2Canvas(canvas, zoom, gamma) {
+  const cW = canvas.width, cH = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, cW, cH);
+  if (!p2Accum || !olaSTFT) return;
+
+  const { powerSum, colorR, colorG, colorB, nF, nBins } = p2Accum;
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = olaSTFT;
+  const topBin = olaTopBin;
+  if (nF === 0) return;
+
+  const detail    = gamma !== 1.0;
+  const renderMax = detail ? dBpct98 : dBmax;
+  const renderMin = detail ? dBpct02 : dBmin;
+
+  const fStart = zoom ? zoom.t0 : 0;
+  const fEnd   = zoom ? zoom.t1 : numFrames - 1;
+  const bStart = zoom ? zoom.b0 : 0;
+  const bEnd   = zoom ? zoom.b1 : topBin;
+
+  const fi0  = Math.round(fStart), bi0 = Math.round(bStart);
+  const visF = Math.max(1, Math.round(fEnd) - fi0 + 1);
+  const visB = Math.max(1, Math.round(bEnd) - bi0 + 1);
+
+  const offC = document.createElement('canvas');
+  offC.width  = visF; offC.height = visB;
+  const octx  = offC.getContext('2d');
+  const img   = octx.createImageData(visF, visB);
+  const od    = img.data;
+
+  for (let fi = 0; fi < visF; fi++) {
+    const gf = Math.min(numFrames - 1, fi0 + fi);
+    const pf = Math.min(nF - 1, fi0 + fi);
+    for (let bi = 0; bi < visB; bi++) {
+      const b    = Math.min(NUM_BINS - 1, bi0 + bi);
+      // brightness from actual OLA STFT
+      const db     = magDB[gf * NUM_BINS + b];
+      const v0     = Math.max(0, Math.min(1, (db - renderMin) / (renderMax - renderMin)));
+      const bright = gamma === 1.0 ? v0 : Math.pow(v0, gamma);
+      // color from block STFT power-weighted accumulator
+      const pidx = pf * nBins + b;
+      const ps   = powerSum[pidx];
+      const r    = ps > 0 ? colorR[pidx] / ps : 60;
+      const g    = ps > 0 ? colorG[pidx] / ps : 60;
+      const bl   = ps > 0 ? colorB[pidx] / ps : 60;
+      const pi   = ((visB - 1 - bi) * visF + fi) * 4;
+      od[pi]   = Math.round(r  * bright);
+      od[pi+1] = Math.round(g  * bright);
+      od[pi+2] = Math.round(bl * bright);
+      od[pi+3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offC, 0, 0, cW, cH);
+
+  // Frequency label (top-right)
+  const dpr     = window.devicePixelRatio || 1;
+  const nyquist = sampleRate / 2;
+  const dispTop = zoom ? zoom.b1 : topBin;
+  const topFreq = (dispTop / (NUM_BINS - 1)) * nyquist;
+  const topLbl  = topFreq >= 1000
+    ? (topFreq/1000 % 1 === 0 ? (topFreq/1000)+'k' : (topFreq/1000).toFixed(1)+'k')
+    : Math.round(topFreq)+'';
+  const fSize = LABEL_PX * dpr;
+  ctx.font = `${fSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  ctx.textAlign = 'right';
+  ctx.fillText(topLbl + ' Hz', cW - 5 * dpr, fSize + 3);
+  ctx.textAlign = 'left';
+  if (zoom) {
+    const botFreq = (zoom.b0 / (NUM_BINS - 1)) * nyquist;
+    const botLbl  = botFreq >= 1000
+      ? (botFreq/1000 % 1 === 0 ? (botFreq/1000)+'k' : (botFreq/1000).toFixed(1)+'k')
+      : Math.round(botFreq)+'';
+    ctx.fillText(botLbl + ' Hz', 5 * dpr, cH - 4);
+  }
+
+  // Panel label (bottom-left)
+  const tagPx = LABEL_PX * dpr;
+  ctx.font      = `bold ${tagPx}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.50)';
+  ctx.fillText('OLA output', Math.round(4 * dpr), cH - Math.round(4 * dpr));
+}
+
+function renderActiveTab() {
+  // Panel 2 always shows OLA output; the tab only affects playback
+  renderPanel2();
+}
+
+// ── Detail toggle ─────────────────────────────────────────────────────────────
+detailBtn.addEventListener('click', () => {
+  specGamma = specGamma === 1.0 ? 0.3 : 1.0;
+  detailBtn.classList.toggle('active', specGamma !== 1.0);
+  if (blockSTFTs.length > 0) renderPanel1();
+  if (olaSTFT) renderPanel2();
+});
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+playBtn.addEventListener('click', () => {
+  if (playingWhich !== null) stopPlayback();
+  else if (dryBuf && olaOutput) startPlayback(activeTab);
+});
+tabDry.addEventListener('click', () => {
+  activeTab = 'dry';
+  tabDry.classList.add('active'); tabWet.classList.remove('active');
+  if (playingWhich !== null) { applyMix('dry'); playingWhich = 'dry'; }
+});
+tabWet.addEventListener('click', () => {
+  activeTab = 'wet';
+  tabWet.classList.add('active'); tabDry.classList.remove('active');
+  if (playingWhich !== null) { applyMix('wet'); playingWhich = 'wet'; }
+});
+
+function clearSpectrum() {
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  const ctx = spectrumCanvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+}
+function clearPlayhead() {
+  const ctx = playheadCanvas.getContext('2d');
+  ctx.clearRect(0, 0, playheadCanvas.width, playheadCanvas.height);
+}
+function drawPlayhead() {
+  if (!audioCtx || !olaSTFT) { clearPlayhead(); return; }
+  const W = playheadCanvas.width, H = playheadCanvas.height;
+  const ctx = playheadCanvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  const elapsed   = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const stft      = olaSTFT;
+  const frameIdx  = elapsed * sampleRate / stft.HOP;
+  const fStart   = zoomView ? zoomView.t0 : 0;
+  const fEnd     = zoomView ? zoomView.t1 : stft.numFrames - 1;
+  if (fEnd === fStart) return;
+  const x = Math.round((frameIdx - fStart) / (fEnd - fStart) * (W - 1));
+  if (x < 0 || x >= W) return;
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth   = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); ctx.stroke();
+}
+function updateSpectrum() {
+  if (!audioCtx || !olaSTFT || !p2Accum) return;
+  const stft = olaSTFT;
+  const elapsed   = Math.max(0, audioCtx.currentTime - playbackStartTime);
+  const frameIdx  = Math.min(stft.numFrames - 1, Math.floor(elapsed * sampleRate / stft.HOP));
+  const { magDB, NUM_BINS, dBmax, dBmin } = stft;
+  const { powerSum, colorR, colorG, colorB, nF, nBins } = p2Accum;
+  const pf = Math.min(nF - 1, frameIdx);
+
+  const ctx = spectrumCanvas.getContext('2d');
+  const W = spectrumCanvas.width, H = spectrumCanvas.height;
+  const imgData = ctx.createImageData(W, H);
+  const px4 = imgData.data;
+  for (let y = 0; y < H; y++) {
+    const ki   = Math.round((1 - (y + 0.5) / H) * olaTopBin);
+    // Per-bin color from the accumulator at the current playhead frame
+    const pidx = pf * nBins + ki;
+    const ps   = powerSum[pidx];
+    const fR   = ps > 0 ? colorR[pidx] / ps : 160;
+    const fG   = ps > 0 ? colorG[pidx] / ps : 160;
+    const fB   = ps > 0 ? colorB[pidx] / ps : 160;
+    const db     = magDB[frameIdx * NUM_BINS + ki];
+    const t0     = Math.max(0, Math.min(1, (db - dBmin) / (dBmax - dBmin)));
+    const bright = specGamma === 1.0 ? t0 : Math.pow(t0, specGamma);
+    const barW   = Math.round(bright * W);
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      if (x >= W - barW) {
+        px4[idx]=Math.round(fR*bright); px4[idx+1]=Math.round(fG*bright);
+        px4[idx+2]=Math.round(fB*bright); px4[idx+3]=255;
+      } else { px4[idx]=10; px4[idx+1]=10; px4[idx+2]=10; px4[idx+3]=255; }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  drawPlayhead();
+}
+function stopPlayback() {
+  clearSpectrum(); clearPlayhead();
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  masterGain = null; dryGain = null; wetGain = null; playingWhich = null;
+  playBtn.textContent = '▶'; playBtn.className = 'btn-ok';
+}
+function applyMix(which) {
+  if (!dryGain || !wetGain || !audioCtx) return;
+  const t = audioCtx.currentTime, tau = 0.015;
+  dryGain.gain.setTargetAtTime(which === 'dry' ? 1 : 0, t, tau);
+  wetGain.gain.setTargetAtTime(which === 'wet' ? 1 : 0, t, tau);
+}
+function startPlayback(which) {
+  if (activeSrc)  { try { activeSrc.stop();  } catch {} activeSrc  = null; }
+  if (activeSrc2) { try { activeSrc2.stop(); } catch {} activeSrc2 = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  if (playheadInterval) { clearInterval(playheadInterval); playheadInterval = null; }
+  if (!dryBuf || !olaOutput) return;
+  audioCtx   = new AudioContext({ sampleRate });
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 0.5;
+  masterGain.connect(audioCtx.destination);
+  dryGain = audioCtx.createGain(); wetGain = audioCtx.createGain();
+  dryGain.gain.value = which === 'dry' ? 1 : 0;
+  wetGain.gain.value = which === 'wet' ? 1 : 0;
+  dryGain.connect(masterGain); wetGain.connect(masterGain);
+  const dryAudioBuf = audioCtx.createBuffer(1, dryBuf.length, sampleRate);
+  dryAudioBuf.copyToChannel(dryBuf, 0);
+  activeSrc = audioCtx.createBufferSource();
+  activeSrc.buffer = dryAudioBuf; activeSrc.connect(dryGain);
+  activeSrc.start(0); activeSrc.onended = stopPlayback;
+  const wetAudioBuf = audioCtx.createBuffer(1, olaOutput.length, sampleRate);
+  wetAudioBuf.copyToChannel(olaOutput, 0);
+  activeSrc2 = audioCtx.createBufferSource();
+  activeSrc2.buffer = wetAudioBuf; activeSrc2.connect(wetGain);
+  activeSrc2.start(0);
+  playbackStartTime = audioCtx.currentTime;
+  playheadInterval  = setInterval(updateSpectrum, 1000 / 30);
+  playingWhich      = which;
+  playBtn.textContent = '■'; playBtn.className = 'btn-playing';
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+// ── Range panel click — toggle individual blocks ──────────────────────────────
+rangeCanvas.addEventListener('click', e => {
+  if (enabledBlocks.length === 0) return;
+  const rect  = rangeCanvas.getBoundingClientRect();
+  const yFrac = (e.clientY - rect.top) / rect.height;
+  const k     = Math.floor(yFrac * olaNumBlocks);
+  if (k < 0 || k >= olaNumBlocks) return;
+  enabledBlocks[k] = !enabledBlocks[k];
+  renderRangePanel();
+  rebuildOLA();
+});
+
+downloadBtn.addEventListener('click', async () => {
+  if (!dryBuf || !olaOutput || !p2Accum) return;
+  const alpha = parseFloat(alphaNum.value).toFixed(2);
+  const tmp   = document.createElement('canvas');
+  tmp.width   = specCanvas.width; tmp.height = specCanvas.height;
+  renderP2Canvas(tmp, null, specGamma);
+  const olaPNG = await canvasToPNG(tmp);
+  const zip = buildZip([
+    { name: 'source.wav',                        data: buildWAV(dryBuf, sampleRate) },
+    { name: `ola_alpha${alpha}.wav`,              data: buildWAV(olaOutput, sampleRate) },
+    { name: `ola_alpha${alpha}_spectrogram.png`,  data: olaPNG },
+  ]);
+  const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+  Object.assign(document.createElement('a'), { href: url, download: `frft_ola_a${alpha}.zip` }).click();
+  URL.revokeObjectURL(url);
+});
+
+// ── Status ────────────────────────────────────────────────────────────────────
+const controlsRow = statusEl.closest('.controls-row');
+function setStatus(text, cls = '') {
+  statusEl.textContent = text; statusEl.className = cls;
+  controlsRow.classList.toggle('processing', cls === 'busy');
+}
+
+// ── Signal ────────────────────────────────────────────────────────────────────
+function generateSine(seconds, sr, freq) {
+  const n = Math.floor(seconds * sr);
+  const buf = new Float32Array(n);
+  for (let i = 0; i < n; i++) buf[i] = Math.sin(2 * Math.PI * freq * i / sr);
+  return buf;
+}
+
+// ── WAV builder ───────────────────────────────────────────────────────────────
+function buildWAV(samples, sr) {
+  const nb = samples.length, db = nb * 2, buf = new ArrayBuffer(44 + db);
+  const v  = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  str(0,'RIFF'); v.setUint32(4,36+db,true); str(8,'WAVE'); str(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  str(36,'data'); v.setUint32(40,db,true);
+  let off = 44;
+  for (let i = 0; i < nb; i++) {
+    const s = Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(off, s<0?s*0x8000:s*0x7FFF, true); off+=2;
+  }
+  return new Uint8Array(buf);
+}
+function canvasToPNG(canvas) {
+  return new Promise(r => canvas.toBlob(b => b.arrayBuffer().then(a => r(new Uint8Array(a))), 'image/png'));
+}
+
+// ── ZIP ───────────────────────────────────────────────────────────────────────
+function crc32(data) {
+  if (!crc32._t) {
+    crc32._t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      crc32._t[i] = c;
+    }
+  }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) c = crc32._t[(c^data[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function buildZip(files) {
+  const enc=new TextEncoder(); const locals=[]; const offsets=[]; let pos=0;
+  for (const f of files) {
+    const name=enc.encode(f.name); const crc=crc32(f.data);
+    const lh=new Uint8Array(30+name.length); const lv=new DataView(lh.buffer);
+    lv.setUint32(0,0x04034b50,true); lv.setUint16(4,20,true); lv.setUint16(6,0,true);
+    lv.setUint16(8,0,true); lv.setUint16(10,0,true); lv.setUint16(12,0,true);
+    lv.setUint32(14,crc,true); lv.setUint32(18,f.data.length,true);
+    lv.setUint32(22,f.data.length,true); lv.setUint16(26,name.length,true);
+    lv.setUint16(28,0,true); lh.set(name,30);
+    offsets.push(pos); locals.push({lh,data:f.data,name,crc}); pos+=lh.length+f.data.length;
+  }
+  const cdStart=pos;
+  const cdParts=locals.map(({lh,data,name,crc},i)=>{
+    const cd=new Uint8Array(46+name.length); const cv=new DataView(cd.buffer);
+    cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true);
+    cv.setUint16(8,0,true); cv.setUint16(10,0,true); cv.setUint16(12,0,true);
+    cv.setUint16(14,0,true); cv.setUint32(16,crc,true); cv.setUint32(20,data.length,true);
+    cv.setUint32(24,data.length,true); cv.setUint16(28,name.length,true);
+    cv.setUint16(30,0,true); cv.setUint16(32,0,true); cv.setUint16(34,0,true);
+    cv.setUint16(36,0,true); cv.setUint32(38,0,true); cv.setUint32(42,offsets[i],true);
+    cd.set(name,46); return cd;
+  });
+  const cdSize=cdParts.reduce((s,p)=>s+p.length,0);
+  const eocd=new Uint8Array(22); const ev=new DataView(eocd.buffer);
+  ev.setUint32(0,0x06054b50,true); ev.setUint16(4,0,true); ev.setUint16(6,0,true);
+  ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
+  ev.setUint32(12,cdSize,true); ev.setUint32(16,cdStart,true); ev.setUint16(20,0,true);
+  const out=new Uint8Array(cdStart+cdSize+22); let p=0;
+  for (const {lh,data} of locals){out.set(lh,p);p+=lh.length;out.set(data,p);p+=data.length;}
+  for (const cd of cdParts){out.set(cd,p);p+=cd.length;}
+  out.set(eocd,p); return out;
+}
+
+// ── FFT ───────────────────────────────────────────────────────────────────────
+function fftInPlace(re, im, N) {
+  let j = 0;
+  for (let i = 1; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t;
+    }
+  }
+  for (let len = 2; len <= N; len <<= 1) {
+    const half = len >> 1, ang = -2*Math.PI/len;
+    const wcos = Math.cos(ang), wsin = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let wr=1, wi=0;
+      for (let k = 0; k < half; k++) {
+        const tr=wr*re[i+k+half]-wi*im[i+k+half]; const ti=wr*im[i+k+half]+wi*re[i+k+half];
+        re[i+k+half]=re[i+k]-tr; im[i+k+half]=im[i+k]-ti; re[i+k]+=tr; im[i+k]+=ti;
+        const nwr=wr*wcos-wi*wsin; wi=wr*wsin+wi*wcos; wr=nwr;
+      }
+    }
+  }
+}
+
+// ── Colormaps ─────────────────────────────────────────────────────────────────
+const CMAP_NORMAL = [[5,5,25],[100,0,150],[200,50,100],[255,140,20],[255,255,100]];
+const CMAP_DETAIL = [[0,0,0],[191,0,0],[255,128,0],[255,255,64],[255,255,255]];
+function spectrogramColor(t, detail = false) {
+  const stops = detail ? CMAP_DETAIL : CMAP_NORMAL;
+  const s=t*(stops.length-1); const lo=Math.floor(s); const hi=Math.min(lo+1,stops.length-1); const f=s-lo;
+  return [Math.round(stops[lo][0]+f*(stops[hi][0]-stops[lo][0])),
+          Math.round(stops[lo][1]+f*(stops[hi][1]-stops[lo][1])),
+          Math.round(stops[lo][2]+f*(stops[hi][2]-stops[lo][2]))];
+}
+
+// ── STFT ──────────────────────────────────────────────────────────────────────
+function computeSTFT(samples) {
+  const FFT_SIZE = STFT_FFT, HOP = STFT_HOP, NUM_BINS = FFT_SIZE >> 1;
+  const win = new Float32Array(FFT_SIZE);
+  for (let i = 0; i < FFT_SIZE; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (FFT_SIZE - 1));
+  const numFrames = samples && samples.length >= FFT_SIZE
+    ? Math.max(1, Math.floor((samples.length - FFT_SIZE) / HOP) + 1) : 0;
+  const magDB = new Float32Array(numFrames * NUM_BINS);
+  const re = new Float64Array(FFT_SIZE), im = new Float64Array(FFT_SIZE);
+  let dBmax = -Infinity, dBmin_actual = Infinity;
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * HOP;
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const idx = start + i;
+      re[i] = (idx < samples.length ? samples[idx] : 0.0) * win[i]; im[i] = 0.0;
+    }
+    fftInPlace(re, im, FFT_SIZE);
+    for (let k = 0; k < NUM_BINS; k++) {
+      const mag = Math.sqrt(re[k]*re[k]+im[k]*im[k])/FFT_SIZE;
+      const db  = 20*Math.log10(mag+1e-10);
+      magDB[f*NUM_BINS+k] = db;
+      if (db > dBmax) dBmax = db;
+      if (db < dBmin_actual) dBmin_actual = db;
+    }
+  }
+  const dBmin = Math.max(dBmin_actual, dBmax - 120);
+  const step = Math.max(1, Math.floor(magDB.length / 80000));
+  const samp = [];
+  for (let i = 0; i < magDB.length; i += step) samp.push(magDB[i]);
+  samp.sort((a,b)=>a-b);
+  const dBpct02 = samp[Math.floor(samp.length*0.02)];
+  const dBpct98 = samp[Math.floor(samp.length*0.98)];
+  const thr = dBmax - 60; let topBin = 0;
+  for (let k = 0; k < NUM_BINS; k++)
+    for (let f = 0; f < numFrames; f++)
+      if (magDB[f*NUM_BINS+k] >= thr) { topBin = k; break; }
+  topBin = Math.min(topBin + 1, NUM_BINS - 1);
+  return { magDB, numFrames, NUM_BINS, HOP, dBmax, dBmin, dBpct02, dBpct98, topBin };
+}
+
+// ── Spectrogram rendering ─────────────────────────────────────────────────────
+function renderSpectrogram(canvas, stftData, sr, topBinOverride = -1, zoom = null, gamma = 1.0) {
+  const cW = canvas.width, cH = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, cW, cH);
+  const { magDB, numFrames, NUM_BINS, dBmax, dBmin, dBpct02, dBpct98 } = stftData;
+  if (numFrames === 0) return;
+  const topBin    = topBinOverride >= 0 ? topBinOverride : stftData.topBin;
+  const detail    = gamma !== 1.0;
+  const renderMin = detail ? dBpct02 : dBmin;
+  const renderMax = detail ? dBpct98 : dBmax;
+  const fStart = zoom ? zoom.t0 : 0, fEnd = zoom ? zoom.t1 : numFrames - 1;
+  const bStart = zoom ? zoom.b0 : 0, bEnd = zoom ? zoom.b1 : topBin;
+  const fi0 = Math.round(fStart), bi0 = Math.round(bStart);
+  const nF  = Math.max(1, Math.round(fEnd)-fi0+1), nB = Math.max(1, Math.round(bEnd)-bi0+1);
+  const offC = document.createElement('canvas'); offC.width = nF; offC.height = nB;
+  const octx = offC.getContext('2d'); const offImg = octx.createImageData(nF, nB); const od = offImg.data;
+  for (let fi = 0; fi < nF; fi++) {
+    const f = Math.min(numFrames-1, fi0+fi);
+    for (let bi = 0; bi < nB; bi++) {
+      const k  = Math.min(NUM_BINS-1, bi0+bi);
+      const db = magDB[f*NUM_BINS+k];
+      const v0 = Math.max(0,Math.min(1,(db-renderMin)/(renderMax-renderMin)));
+      const v  = gamma===1.0?v0:Math.pow(v0,gamma);
+      const [r,g,b] = spectrogramColor(v, detail);
+      const pi = ((nB-1-bi)*nF+fi)*4;
+      od[pi]=r; od[pi+1]=g; od[pi+2]=b; od[pi+3]=255;
+    }
+  }
+  octx.putImageData(offImg, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(offC, 0, 0, cW, cH);
+  const dpr = window.devicePixelRatio || 1;
+  const nyquist = sr / 2;
+  const dispTopBin = zoom ? zoom.b1 : topBin;
+  const topFreq = (dispTopBin/(NUM_BINS-1))*nyquist;
+  const topLabel = topFreq >= 1000
+    ? (topFreq/1000%1===0?(topFreq/1000)+'k':(topFreq/1000).toFixed(1)+'k')
+    : Math.round(topFreq)+'';
+  const fontSize = Math.max(9, Math.round(cH/dpr*0.07))*dpr;
+  ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  ctx.fillText(topLabel+' Hz', 5*dpr, fontSize+3);
+  if (zoom) {
+    const botFreq = (zoom.b0/(NUM_BINS-1))*nyquist;
+    const botLabel = botFreq>=1000?(botFreq/1000%1===0?(botFreq/1000)+'k':(botFreq/1000).toFixed(1)+'k'):Math.round(botFreq)+'';
+    ctx.fillText(botLabel+' Hz', 5*dpr, cH-4);
+  }
+}
+
+// ── Zoom (panel 2 only) ───────────────────────────────────────────────────────
+const zoomOverlay = document.getElementById('zoomOverlay');
+let dragStart = null, isDragging = false;
+function clearOverlay() { const c=zoomOverlay.getContext('2d'); c.clearRect(0,0,zoomOverlay.width,zoomOverlay.height); }
+function syncOverlaySize() { const r=zoomOverlay.getBoundingClientRect(); zoomOverlay.width=Math.floor(r.width); zoomOverlay.height=Math.floor(r.height); }
+function drawSelectionBox(x0,y0,x1,y1) {
+  syncOverlaySize(); const ctx=zoomOverlay.getContext('2d'); ctx.clearRect(0,0,zoomOverlay.width,zoomOverlay.height);
+  const rx=Math.min(x0,x1),ry=Math.min(y0,y1),rw=Math.abs(x1-x0),rh=Math.abs(y1-y0);
+  ctx.fillStyle='rgba(200,144,42,0.12)'; ctx.strokeStyle='rgba(200,144,42,0.80)'; ctx.lineWidth=1;
+  ctx.fillRect(rx,ry,rw,rh); ctx.strokeRect(rx+0.5,ry+0.5,rw,rh);
+}
+zoomOverlay.addEventListener('mousedown', e => {
+  if (e.button!==0||!olaSTFT) return;
+  const r=zoomOverlay.getBoundingClientRect(); dragStart={x:e.clientX-r.left,y:e.clientY-r.top}; isDragging=true;
+});
+zoomOverlay.addEventListener('mousemove', e => {
+  if (!isDragging||!dragStart) return;
+  const r=zoomOverlay.getBoundingClientRect(); drawSelectionBox(dragStart.x,dragStart.y,e.clientX-r.left,e.clientY-r.top);
+});
+zoomOverlay.addEventListener('mouseup', e => {
+  if (!isDragging||!dragStart) return; isDragging=false;
+  const r=zoomOverlay.getBoundingClientRect(); const ex=e.clientX-r.left,ey=e.clientY-r.top;
+  clearOverlay();
+  const dx=Math.abs(ex-dragStart.x), dy=Math.abs(ey-dragStart.y);
+  if (dx>4||dy>4) {
+    if (!olaSTFT) { dragStart=null; return; }
+    const toStft=(cx,cy)=>{
+      const cr=specCanvas.getBoundingClientRect();
+      const fStart=zoomView?zoomView.t0:0, fEnd=zoomView?zoomView.t1:olaSTFT.numFrames-1;
+      const bEnd=zoomView?zoomView.b1:olaTopBin, bStart=zoomView?zoomView.b0:0;
+      return {frame:Math.round(fStart+(cx/cr.width)*(fEnd-fStart)),
+              bin:Math.round(bEnd-((cy-r.top+zoomOverlay.getBoundingClientRect().top)/cr.height)*(bEnd-bStart))};
+    };
+    const bcrO=zoomOverlay.getBoundingClientRect(), bcrS=specCanvas.getBoundingClientRect();
+    const toF=(cx)=>Math.round((zoomView?zoomView.t0:0)+(cx/zoomOverlay.width)*((zoomView?zoomView.t1:olaSTFT.numFrames-1)-(zoomView?zoomView.t0:0)));
+    const toB=(cy)=>Math.round((zoomView?zoomView.b1:olaTopBin)-(cy/zoomOverlay.height)*((zoomView?zoomView.b1:olaTopBin)-(zoomView?zoomView.b0:0)));
+    const t0=Math.max(0,Math.min(toF(dragStart.x),toF(ex)));
+    const t1=Math.min(olaSTFT.numFrames-1,Math.max(toF(dragStart.x),toF(ex)));
+    const b0=Math.max(0,Math.min(toB(dragStart.y),toB(ey)));
+    const b1=Math.min(olaTopBin,Math.max(toB(dragStart.y),toB(ey)));
+    if (t1>t0&&b1>b0) { zoomView={t0,t1,b0,b1}; renderPanel2(); }
+  } else {
+    zoomView=null; renderPanel2();
+  }
+  dragStart=null;
+});
+zoomOverlay.addEventListener('mouseleave', ()=>{ if (!isDragging) dragStart=null; });
+
+// ── Worker lifecycle ──────────────────────────────────────────────────────────
+function restartWorker() {
+  workerReady=false; workerRestarting=true; currentBatchId++;
+  pendingJobs.forEach(r => r(new Float32Array(blockSize))); pendingJobs.clear();
+  if (frftWorker) { try { frftWorker.terminate(); } catch {} frftWorker=null; }
+  setTimeout(initWorker, 300);
+}
+function initWorker() {
+  const cb=window._wasmCacheBust;
+  const jsUrl=new URL('../wasm/dist/frft.js',location.href).href+'?v='+cb;
+  const wasmBaseUrl=new URL('../wasm/dist/',location.href).href;
+  frftWorker=new Worker(new URL('../audio/frft-worker.js',location.href).href+'?v='+cb);
+  frftWorker.onmessage=handleWorkerMessage;
+  frftWorker.onerror=(e)=>{ console.error('Worker error:',e.message); setStatus('WASM error','err'); restartWorker(); };
+  frftWorker.postMessage({type:'init',jsUrl,wasmBaseUrl,cacheBust:cb});
+}
+initWorker();
+</script>
+</body>
+</html>
