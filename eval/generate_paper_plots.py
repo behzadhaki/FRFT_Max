@@ -1979,10 +1979,10 @@ def plot_passthrough_reversal_combined(data, output_dir):
                     fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_ylabel('MSS Loss (α=0)', fontweight='bold')
+    ax.set_ylabel('MSS (α=0)', fontweight='bold', fontsize=28)
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mss)
-    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center', fontsize=30)
     # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
     ax.grid(False)
     ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
@@ -2000,11 +2000,11 @@ def plot_passthrough_reversal_combined(data, output_dir):
                 fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_ylabel('MSE Loss (α=0)', fontweight='bold')
+    ax.set_ylabel('MSE (α=0)', fontweight='bold', fontsize=28)
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mse)
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
-                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
+                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center', fontsize=30)
     # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
     ax.grid(False)
     ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
@@ -2036,11 +2036,11 @@ def plot_passthrough_reversal_combined(data, output_dir):
                     fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSS Loss (α=±2)', fontweight='bold')
+    ax.set_xlabel('Window Size (samples)', fontweight='bold', fontsize=28)
+    ax.set_ylabel('MSS (α=±2)', fontweight='bold', fontsize=28)
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mss)
-    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center', fontsize=30)
     ax.grid(False)
     ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
     ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
@@ -2059,12 +2059,12 @@ def plot_passthrough_reversal_combined(data, output_dir):
                 fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('MSE Loss (α=±2)', fontweight='bold')
+    ax.set_xlabel('Window Size (samples)', fontweight='bold', fontsize=28)
+    ax.set_ylabel('MSE (α=±2)', fontweight='bold', fontsize=28)
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mse)
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
-                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
+                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center', fontsize=30)
     ax.grid(False)
     ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
     ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
@@ -2084,10 +2084,19 @@ def plot_passthrough_reversal_combined(data, output_dir):
         fmt.set_scientific(True)
         a.yaxis.set_major_formatter(fmt)
 
+    # Match y tick-label size to the x tick labels (30 pt)
+    for a in axes.flat:
+        a.tick_params(axis='y', labelsize=30)
+    for a in mse_axes:
+        a.yaxis.get_offset_text().set_fontsize(30)  # the ×10⁻³ factor
+
     plt.tight_layout()
     filename = output_dir / 'passthrough_reversal_combined.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
+    jpeg_filename = filename.with_suffix('.jpeg')
+    plt.savefig(jpeg_filename, dpi=300, bbox_inches='tight')
+    print(f"    → {jpeg_filename}")
     plt.close()
 
     # ========================================================================
