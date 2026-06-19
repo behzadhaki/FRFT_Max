@@ -1984,8 +1984,9 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_xticks(window_sizes_mss)
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
     # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
-    ax.grid(True, alpha=0.3, which='both', linestyle='--')
-    ax.legend(loc='best', framealpha=0.9)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
+    ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
 
     # TOP RIGHT: Passthrough MSE
     ax = axes[0, 1]
@@ -2005,8 +2006,9 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
                         for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
     # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
-    ax.grid(True, alpha=0.3, which='both', linestyle='--')
-    ax.legend(loc='best', framealpha=0.9)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
+    ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
 
     # ========================================================================
     # BOTTOM ROW: REVERSAL (α=±2)
@@ -2039,8 +2041,9 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mss)
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
-    ax.grid(True, alpha=0.3, which='both', linestyle='--')
-    ax.legend(loc='best', framealpha=0.9)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
+    ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
 
     # BOTTOM RIGHT: Reversal MSE
     ax = axes[1, 1]
@@ -2062,8 +2065,9 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_xticks(window_sizes_mse)
     ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
                         for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
-    ax.grid(True, alpha=0.3, which='both', linestyle='--')
-    ax.legend(loc='best', framealpha=0.9)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())  # tick marks only at 2^k positions
+    ax.legend(loc='best', framealpha=0.9, fontsize=28)  # 2x the default 14pt legend
 
     # Right column (MSE): compact y tick labels with a single shared ×10⁻³ factor,
     # and a common y-scale across both MSE panels so they are directly comparable.
@@ -2075,6 +2079,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
     yhi = max(a.get_ylim()[1] for a in mse_axes)
     for a in mse_axes:
         a.set_ylim(ylo, yhi)
+        a.set_yticks([0.0, 0.005, 0.010])  # show only 0, 5, 10 (×10⁻³)
         fmt = _Sci3(useMathText=True)
         fmt.set_scientific(True)
         a.yaxis.set_major_formatter(fmt)
