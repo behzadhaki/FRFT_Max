@@ -6,6 +6,7 @@ Analyzes FRFT Homomorphism and Commutativity Properties
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
 from pathlib import Path
 import seaborn as sns
@@ -1978,11 +1979,11 @@ def plot_passthrough_reversal_combined(data, output_dir):
                     fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                     color=COLORS['mss'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
     ax.set_ylabel('MSS Loss (α=0)', fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mss)
-    ax.set_xticklabels([str(int(w)) for w in window_sizes_mss], rotation=45, ha='right')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
+    # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
 
@@ -1998,11 +1999,12 @@ def plot_passthrough_reversal_combined(data, output_dir):
                 fmt='o-', label='Mean ± Std', linewidth=2.5, markersize=7,
                 color=COLORS['mse'], capsize=4, capthick=1.5, alpha=0.8)
 
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
     ax.set_ylabel('MSE Loss (α=0)', fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mse)
-    ax.set_xticklabels([str(int(w)) for w in window_sizes_mse], rotation=45, ha='right')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
+                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
+    # x-axis label omitted here; shown only on the α=±2 row below (same window sizes)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
 
@@ -2036,7 +2038,7 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_ylabel('MSS Loss (α=±2)', fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mss)
-    ax.set_xticklabels([str(int(w)) for w in window_sizes_mss], rotation=45, ha='right')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' for w in window_sizes_mss], rotation=0, ha='center')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
 
@@ -2058,9 +2060,24 @@ def plot_passthrough_reversal_combined(data, output_dir):
     ax.set_ylabel('MSE Loss (α=±2)', fontweight='bold')
     ax.set_xscale('log')
     ax.set_xticks(window_sizes_mse)
-    ax.set_xticklabels([str(int(w)) for w in window_sizes_mse], rotation=45, ha='right')
+    ax.set_xticklabels([f'$2^{{{int(np.log2(w))}}}$' if i % 2 == 0 else ''
+                        for i, w in enumerate(window_sizes_mse)], rotation=0, ha='center')
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
     ax.legend(loc='best', framealpha=0.9)
+
+    # Right column (MSE): compact y tick labels with a single shared ×10⁻³ factor,
+    # and a common y-scale across both MSE panels so they are directly comparable.
+    class _Sci3(mticker.ScalarFormatter):
+        def _set_order_of_magnitude(self):
+            self.orderOfMagnitude = -3  # force the shared factor to ×10⁻³
+    mse_axes = [axes[0, 1], axes[1, 1]]
+    ylo = min(a.get_ylim()[0] for a in mse_axes)
+    yhi = max(a.get_ylim()[1] for a in mse_axes)
+    for a in mse_axes:
+        a.set_ylim(ylo, yhi)
+        fmt = _Sci3(useMathText=True)
+        fmt.set_scientific(True)
+        a.yaxis.set_major_formatter(fmt)
 
     plt.tight_layout()
     filename = output_dir / 'passthrough_reversal_combined.png'
