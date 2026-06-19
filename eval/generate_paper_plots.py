@@ -1729,15 +1729,16 @@ def plot_performance_all_alphas_aggregated(data, output_dir):
     # Formatting for primary axis
     ax.set_xscale('log', base=2)
     ax.set_yscale('log')
-    ax.set_xlabel('Window Size (samples)', fontweight='bold')
-    ax.set_ylabel('Mean Inference Time (ms)', fontweight='bold')
+    ax.set_xlabel('Window Size (samples)', fontweight='bold', fontsize=21)
+    ax.set_ylabel('Mean Inference Time (ms)', fontweight='bold', fontsize=21)
     # ax.set_title('FRFT Performance (All α Aggregated)', fontweight='bold', pad=15)
     # Don't add grid here - we'll add it after setting up the second axis
-    ax.legend(loc='upper left', fontsize=12, framealpha=0.9)
+    ax.legend(loc='upper left', fontsize=19, framealpha=0.9)
 
     # Set x-axis ticks to show all window sizes (starting from 64)
     ax.set_xticks(window_sizes)
-    ax.set_xticklabels([str(w) for w in window_sizes], rotation=45, ha='right')
+    ax.set_xticklabels([str(w) for w in window_sizes], rotation=45, ha='right', fontsize=22)
+    ax.tick_params(axis='y', labelsize=22)  # match secondary axis
 
     # Create second y-axis on the right for audio buffer durations
     ax2 = ax.twinx()
@@ -1755,14 +1756,14 @@ def plot_performance_all_alphas_aggregated(data, output_dir):
 
     # Set tick positions for I/O vector sizes (32 to 2048)
     ax2.set_yticks(io_durations_ms)
-    ax2.set_yticklabels([str(w) for w in all_io_sizes], fontsize=11)
+    ax2.set_yticklabels([str(w) if w in (32, 128, 512, 2048) else '' for w in all_io_sizes], fontsize=22)
 
     # Turn off minor ticks on the right axis
     ax2.minorticks_off()
 
     # Set the label for the right axis
     ax2.set_ylabel('Max/MSP Audio Buffer Size\n(Samples at 44.1kHz)',
-                   fontweight='bold', fontsize=14)
+                   fontweight='bold', fontsize=21)
 
     # Add horizontal gridlines ONLY at I/O vector size positions (32-2048)
     for duration_ms in io_durations_ms:
@@ -1773,6 +1774,9 @@ def plot_performance_all_alphas_aggregated(data, output_dir):
     filename = output_dir / 'performance_all_alphas_aggregated.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
+    jpeg_filename = filename.with_suffix('.jpeg')
+    plt.savefig(jpeg_filename, dpi=300, bbox_inches='tight')
+    print(f"    → {jpeg_filename}")
     plt.close()
 
     # ---- sample analysis report ----
@@ -2533,25 +2537,32 @@ def plot_fft_comparison_complex_mse_by_window_size(data, output_dir):
         ).reset_index().sort_values('Frequency')
 
         ax.plot(grouped['Frequency'].values, grouped['MSE_Complex'].values, '-',
-                label=str(ws), linewidth=1.5, color=colors[idx], alpha=0.85)
+                label=f'$2^{{{int(np.log2(ws))}}}$', linewidth=1.5, color=colors[idx], alpha=0.85)
 
-    ax.set_xlabel('Frequency (Hz)', fontweight='bold')
-    ax.set_ylabel('MSE Complex', fontweight='bold')
+    # Font sizes scaled to ~0.74x of the passthrough_reversal figure (16 in wide)
+    # so that, at the same final width, text renders at the same physical size.
+    ax.set_xlabel('Frequency (Hz)', fontweight='bold', fontsize=21)
+    ax.set_ylabel('MSE Complex', fontweight='bold', fontsize=21)
     ax.set_yscale('log')
     ax.set_xlim([100, 10000])
     ax.set_xticks(tick_freqs)
-    ax.set_xticklabels(tick_labels)
+    ax.set_xticklabels(tick_labels, fontsize=22)
+    ax.tick_params(axis='y', labelsize=22)
     ax.grid(True, alpha=0.3, which='both', linestyle='--')
 
     # Legend outside to the right
     ax.legend(title='Window Size', loc='upper left',
               bbox_to_anchor=(1.03, 1), borderaxespad=0,
-              framealpha=0.9, ncol=1)
+              framealpha=0.9, ncol=2, fontsize=21, title_fontsize=21,
+              columnspacing=1.0, handlelength=1.2)
 
     plt.tight_layout()
     filename = output_dir / 'fft_comparison_complex_mse_by_window_size.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"    → {filename}")
+    jpeg_filename = filename.with_suffix('.jpeg')
+    plt.savefig(jpeg_filename, dpi=300, bbox_inches='tight')
+    print(f"    → {jpeg_filename}")
     plt.close()
 
     # ---- sample analysis report ----
